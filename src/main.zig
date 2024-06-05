@@ -55,6 +55,77 @@ fn set_HL(self: *Registers, value: u16) void {
     self.L = @truncate(value & 0xFF);
 }
 
+const FlagRegister = struct {
+    zero: u1,
+    subtract: u1,
+    half_carry: u1,
+    carry: u1,
+};
+
+fn flag_to_u8(flag: FlagRegister) u8 {
+    return @as(u8, flag.zero) << 7 | @as(u8, flag.subtract) << 6 | @as(u8, flag.half_carry) << 5 | @as(u8, flag.carry) << 4;
+}
+
+fn u8_to_flag(value: u8) FlagRegister {
+    return FlagRegister{
+        .zero = (value & 0b1000_0000) != 0,
+        .subtract = (value & 0b0100_0000) != 0,
+        .half_carry = (value & 0b0010_0000) != 0,
+        .carry = (value & 0b0001_0000) != 0,
+    };
+}
+
+const ArithmeticTarget = enum {
+    A,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+};
+
+const Instruction = union(enum) {
+    ADD: ArithmeticTarget,
+};
+
+const CPU = struct {
+    registers: Registers,
+    execute: *const fn (self: *const CPU, instruction: Instruction) void,
+    add: *const fn (self: *const CPU, value: u8) u8,
+};
+
+fn execute(self: *const CPU, instruction: Instruction) void {
+    switch (instruction) {
+        Instruction.ADD => |target| {
+            switch (target) {
+                ArithmeticTarget.A => std.debug.print("ADD A\n", .{}),
+                ArithmeticTarget.B => std.debug.print("ADD B\n", .{}),
+                ArithmeticTarget.C => {
+                    const value = self.registers.C;
+                    const new_value = self.add(self, value);
+                    self.registers.A = new_value;
+                },
+                ArithmeticTarget.D => std.debug.print("ADD D\n", .{}),
+                ArithmeticTarget.E => std.debug.print("ADD E\n", .{}),
+                ArithmeticTarget.H => std.debug.print("ADD H\n", .{}),
+                ArithmeticTarget.L => std.debug.print("ADD L\n", .{}),
+            }
+        },
+    }
+}
+
+fn add(self: *const CPU, value: u8) u8 {
+    const result: u8 = @addWithOverflow(self.registers.A, value);
+    self.registers.F.zero = result == 0;
+    self.registers.F.subtract = 0;
+    if (result.overflow) {
+        self.registers.F.carry = 1;
+    }
+    self.registers.F.half_carry = ((self.registers.A & 0xF) + (value & 0xF)) > 0xF;
+    return result;
+}
+
 pub fn main() !void {
     var regs = Registers{
         .A = 0x12,
@@ -76,6 +147,12 @@ pub fn main() !void {
     };
     regs.set_AF(&regs, 0x1234);
     std.debug.print("{x}\n", .{regs.get_AF(&regs)});
+
+    const insta = Instruction{ .ADD = ArithmeticTarget.A };
+    const instd = Instruction{ .ADD = ArithmeticTarget.D };
+    const cpu = CPU{ .execute = execute };
+    cpu.execute(&cpu, insta);
+    cpu.execute(&cpu, instd);
 }
 
 test "simple test" {
