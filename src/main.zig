@@ -142,7 +142,29 @@ const CPU = struct {
         self.registers.F.half_carry = ((self.registers.A & 0xF) + (value & 0xF)) > 0xF;
         return result;
     }
-    pub fn new() CPU {}
+    pub fn new() CPU {
+        var cpu: CPU = CPU{
+            .registers = Registers{
+                .A = 0x12,
+                .B = 0x34,
+                .C = 0x56,
+                .D = 0x78,
+                .E = 0x9A,
+                .F = 0xBC,
+                .H = 0xDE,
+                .L = 0xF0,
+                .get_AF = get_AF,
+                .set_AF = set_AF,
+                .get_BC = get_BC,
+                .set_BC = set_BC,
+                .get_DE = get_DE,
+                .set_DE = set_DE,
+                .get_HL = get_HL,
+                .set_HL = set_HL,
+            },
+            .fp = 0x00,
+        };
+    }
 };
 
 const MemoryBus = struct {
