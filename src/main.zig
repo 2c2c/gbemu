@@ -87,44 +87,75 @@ const ArithmeticTarget = enum {
 
 const Instruction = union(enum) {
     ADD: ArithmeticTarget,
+    fn from_byte(byte: u8) Instruction {
+        const inst = switch (byte) {
+            0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
+            0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
+            _ => unreachable,
+        };
+        return inst;
+    }
 };
 
 const CPU = struct {
     registers: Registers,
-    execute: *const fn (self: *const CPU, instruction: Instruction) void,
-    add: *const fn (self: *const CPU, value: u8) u8,
+    pc: u16,
+    bus: MemoryBus,
+    fn execute(self: *const CPU, instruction: Instruction) void {
+        switch (instruction) {
+            Instruction.ADD => |target| {
+                switch (target) {
+                    ArithmeticTarget.A => std.debug.print("ADD A\n", .{}),
+                    ArithmeticTarget.B => std.debug.print("ADD B\n", .{}),
+                    ArithmeticTarget.C => {
+                        const value = self.registers.C;
+                        const new_value = self.add(self, value);
+                        self.registers.A = new_value;
+                        self.pc +% 1;
+                    },
+                    ArithmeticTarget.D => std.debug.print("ADD D\n", .{}),
+                    ArithmeticTarget.E => std.debug.print("ADD E\n", .{}),
+                    ArithmeticTarget.H => std.debug.print("ADD H\n", .{}),
+                    ArithmeticTarget.L => std.debug.print("ADD L\n", .{}),
+                    _ => unreachable,
+                }
+            },
+            _ => unreachable,
+        }
+    }
+    fn step(self: *const CPU) void {
+        const instruction_byte = self.bus.read_bytes(self.pc);
+        const next_pc = if (Instruction.from_byte(instruction_byte)) |instruction| {
+            self.execute(self, instruction);
+        } else {
+            std.debug.panic("Unknown instruction for 0x{x}\n", .{instruction_byte});
+        };
+        self.pc = next_pc;
+    }
+    fn add(self: *const CPU, value: u8) u8 {
+        const result: u8 = @addWithOverflow(self.registers.A, value);
+        self.registers.F.zero = result == 0;
+        self.registers.F.subtract = 0;
+        if (result.overflow) {
+            self.registers.F.carry = 1;
+        }
+        self.registers.F.half_carry = ((self.registers.A & 0xF) + (value & 0xF)) > 0xF;
+        return result;
+    }
+    pub fn new() CPU {}
 };
 
-fn execute(self: *const CPU, instruction: Instruction) void {
-    switch (instruction) {
-        Instruction.ADD => |target| {
-            switch (target) {
-                ArithmeticTarget.A => std.debug.print("ADD A\n", .{}),
-                ArithmeticTarget.B => std.debug.print("ADD B\n", .{}),
-                ArithmeticTarget.C => {
-                    const value = self.registers.C;
-                    const new_value = self.add(self, value);
-                    self.registers.A = new_value;
-                },
-                ArithmeticTarget.D => std.debug.print("ADD D\n", .{}),
-                ArithmeticTarget.E => std.debug.print("ADD E\n", .{}),
-                ArithmeticTarget.H => std.debug.print("ADD H\n", .{}),
-                ArithmeticTarget.L => std.debug.print("ADD L\n", .{}),
-            }
-        },
+const MemoryBus = struct {
+    memory: [0x10000]u8,
+    pub fn new() MemoryBus {
+        return MemoryBus{
+            .memory = [_]u8{0} ** 0x10000,
+        };
     }
-}
-
-fn add(self: *const CPU, value: u8) u8 {
-    const result: u8 = @addWithOverflow(self.registers.A, value);
-    self.registers.F.zero = result == 0;
-    self.registers.F.subtract = 0;
-    if (result.overflow) {
-        self.registers.F.carry = 1;
+    fn read_bytes(self: *const MemoryBus, address: u16) u8 {
+        return self.memory[address];
     }
-    self.registers.F.half_carry = ((self.registers.A & 0xF) + (value & 0xF)) > 0xF;
-    return result;
-}
+};
 
 pub fn main() !void {
     var regs = Registers{
@@ -150,7 +181,7 @@ pub fn main() !void {
 
     const insta = Instruction{ .ADD = ArithmeticTarget.A };
     const instd = Instruction{ .ADD = ArithmeticTarget.D };
-    const cpu = CPU{ .execute = execute };
+    const cpu = CPU{};
     cpu.execute(&cpu, insta);
     cpu.execute(&cpu, instd);
 }
