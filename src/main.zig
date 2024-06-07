@@ -101,7 +101,7 @@ const CPU = struct {
     registers: Registers,
     pc: u16,
     bus: MemoryBus,
-    fn execute(self: *const CPU, instruction: Instruction) void {
+    fn execute(self: *CPU, instruction: Instruction) void {
         switch (instruction) {
             Instruction.ADD => |target| {
                 switch (target) {
@@ -109,41 +109,42 @@ const CPU = struct {
                     ArithmeticTarget.B => std.debug.print("ADD B\n", .{}),
                     ArithmeticTarget.C => {
                         const value = self.registers.C;
-                        const new_value = self.add(self, value);
+                        const new_value = self.add(value);
                         self.registers.A = new_value;
-                        self.pc +% 1;
+                        self.pc = self.pc +% 1;
                     },
                     ArithmeticTarget.D => std.debug.print("ADD D\n", .{}),
                     ArithmeticTarget.E => std.debug.print("ADD E\n", .{}),
                     ArithmeticTarget.H => std.debug.print("ADD H\n", .{}),
                     ArithmeticTarget.L => std.debug.print("ADD L\n", .{}),
-                    _ => unreachable,
                 }
             },
-            _ => unreachable,
         }
     }
     fn step(self: *const CPU) void {
         const instruction_byte = self.bus.read_bytes(self.pc);
         const next_pc = if (Instruction.from_byte(instruction_byte)) |instruction| {
-            self.execute(self, instruction);
+            self.execute(instruction);
         } else {
             std.debug.panic("Unknown instruction for 0x{x}\n", .{instruction_byte});
         };
         self.pc = next_pc;
     }
-    fn add(self: *const CPU, value: u8) u8 {
-        const result: u8 = @addWithOverflow(self.registers.A, value);
-        self.registers.F.zero = result == 0;
-        self.registers.F.subtract = 0;
-        if (result.overflow) {
-            self.registers.F.carry = 1;
-        }
-        self.registers.F.half_carry = ((self.registers.A & 0xF) + (value & 0xF)) > 0xF;
-        return result;
+    fn add(self: *CPU, value: u8) u8 {
+        const result = @addWithOverflow(self.registers.A, value);
+        const sum = result[0];
+        const carry = result[1];
+        const flags = flag_to_u8(.{
+            .zero = if (sum == 0) 1 else 0,
+            .subtract = 0,
+            .carry = carry,
+            .half_carry = if (((self.registers.A & 0xF) + (value & 0xF)) > 0xF) 1 else 0,
+        });
+        self.registers.F = flags;
+        return sum;
     }
     pub fn new() CPU {
-        var cpu: CPU = CPU{
+        const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x12,
                 .B = 0x34,
@@ -162,8 +163,10 @@ const CPU = struct {
                 .get_HL = get_HL,
                 .set_HL = set_HL,
             },
-            .fp = 0x00,
+            .pc = 0x00,
+            .bus = MemoryBus.new(),
         };
+        return cpu;
     }
 };
 
@@ -203,9 +206,9 @@ pub fn main() !void {
 
     const insta = Instruction{ .ADD = ArithmeticTarget.A };
     const instd = Instruction{ .ADD = ArithmeticTarget.D };
-    const cpu = CPU{};
-    cpu.execute(&cpu, insta);
-    cpu.execute(&cpu, instd);
+    var cpu = CPU.new();
+    cpu.execute(insta);
+    cpu.execute(instd);
 }
 
 test "simple test" {
