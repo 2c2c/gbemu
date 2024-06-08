@@ -53,17 +53,25 @@ const FlagRegister = struct {
     carry: u1,
 };
 
+// zig fmt: off
 fn flag_to_u8(flag: FlagRegister) u8 {
-    return @as(u8, flag.zero) << 7 | @as(u8, flag.subtract) << 6 | @as(u8, flag.half_carry) << 5 | @as(u8, flag.carry) << 4;
+    return @as(u8, flag.zero) << 7 |
+    @as(u8, flag.subtract) << 6 | 
+    @as(u8, flag.half_carry) << 5 | 
+    @as(u8, flag.carry) << 4;
 }
 fn u8_to_flag(value: u8) FlagRegister {
     return FlagRegister{
-        .zero = (value & 0b1000_0000) != 0,
-        .subtract = (value & 0b0100_0000) != 0,
-        .half_carry = (value & 0b0010_0000) != 0,
-        .carry = (value & 0b0001_0000) != 0,
+        .zero = @truncate(value >> 7),
+        .subtract = @truncate(value >> 6),
+        .half_carry = @truncate(value >> 5),
+        .carry = @truncate(value >> 4),
+        // .subtract = value >> 6,
+        // .half_carry = value >> 5,
+        // .carry = value >> 4
     };
 }
+// zig fmt: on
 
 const ArithmeticTarget = enum {
     A,
@@ -109,16 +117,16 @@ const Instruction = union(enum) {
 
     fn from_byte_not_prefixed(byte: u8) ?Instruction {
         const inst = switch (byte) {
-            // 0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
-            // 0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
+            0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
+            0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
             _ => unreachable,
         };
         return inst;
     }
     fn from_byte_prefixed(byte: u8) ?Instruction {
         const inst = switch (byte) {
-            0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
-            0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
+            // 0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
+            // 0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
             _ => unreachable,
         };
         return inst;
@@ -139,19 +147,19 @@ const CPU = struct {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("CALL NZ\n", .{});
-                                break :jmpBlk !flags.zero;
+                                break :jmpBlk flags.zero == 0b0;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("CALL NC\n", .{});
-                                break :jmpBlk !flags.carry;
+                                break :jmpBlk flags.carry == 0b0;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("CALL Z\n", .{});
-                                break :jmpBlk flags.zero;
+                                break :jmpBlk flags.zero == 0b1;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("CALL C\n", .{});
-                                break :jmpBlk flags.carry;
+                                break :jmpBlk flags.carry == 0b1;
                             },
                             JumpTest.Always => {
                                 std.debug.print("CALL\n", .{});
@@ -159,7 +167,8 @@ const CPU = struct {
                             },
                         }
                     };
-                    self.call(jump_condition);
+                    const next_pc = self.call(jump_condition);
+                    break :blk next_pc;
                 },
                 Instruction.RET => |jt| {
                     const flags = u8_to_flag(self.registers.F);
@@ -167,19 +176,19 @@ const CPU = struct {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("RET NZ\n", .{});
-                                break :jmpBlk !flags.zero;
+                                break :jmpBlk flags.zero == 0b0;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("RET NC\n", .{});
-                                break :jmpBlk !flags.carry;
+                                break :jmpBlk flags.carry == 0b0;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("RET Z\n", .{});
-                                break :jmpBlk flags.zero;
+                                break :jmpBlk flags.zero == 0b1;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("RET C\n", .{});
-                                break :jmpBlk flags.carry;
+                                break :jmpBlk flags.carry == 0b1;
                             },
                             JumpTest.Always => {
                                 std.debug.print("RET\n", .{});
@@ -187,7 +196,8 @@ const CPU = struct {
                             },
                         }
                     };
-                    self.ret(jump_condition);
+                    const next_pc = self.ret(jump_condition);
+                    break :blk next_pc;
                 },
                 Instruction.POP => |target| {
                     const result = self.pop();
@@ -196,8 +206,8 @@ const CPU = struct {
                             std.debug.print("POP BC\n", .{});
                             self.registers.set_BC(result);
                         },
-                        _ => {
-                            std.debug.panic!("Unknown POP target");
+                        else => {
+                            std.debug.print("Unknown POP target\n", .{});
                         },
                     }
                     const next_pc = self.pc +% 1;
@@ -210,8 +220,9 @@ const CPU = struct {
                                 std.debug.print("PUSH BC\n", .{});
                                 break :pushBlk self.registers.get_BC();
                             },
-                            _ => {
-                                std.debug.panic!("Unknown PUSH target");
+                            else => {
+                                std.debug.print("Unknown POP target\n", .{});
+                                break :pushBlk 0xFFFF;
                             },
                         }
                     };
@@ -255,11 +266,13 @@ const CPU = struct {
                                     },
                                     LoadByteSource.D8 => {
                                         std.debug.print("LD D8\n", .{});
-                                        self.read_next_byte();
+                                        const next_byte = self.read_next_byte();
+                                        break :sourceBlk next_byte;
                                     },
                                     LoadByteSource.HLI => {
                                         std.debug.print("LD HLI\n", .{});
-                                        self.bus.read_bytes(self.registers.get_HL());
+                                        const hl_byte = self.bus.read_byte(self.registers.get_HL());
+                                        break :sourceBlk hl_byte;
                                     },
                                 }
                             };
@@ -302,12 +315,12 @@ const CPU = struct {
                                     LoadByteSource.D8 => {
                                         break :pcBlk self.pc +% 2;
                                     },
-                                    _ => {
+                                    else => {
                                         break :pcBlk self.pc +% 1;
                                     },
                                 }
                             };
-                            return next_pc;
+                            break :blk next_pc;
                         },
                     }
                 },
@@ -317,19 +330,19 @@ const CPU = struct {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("JP NZ\n", .{});
-                                break :jpblk !flags.zero;
+                                break :jpblk flags.zero == 0b0;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("JP NC\n", .{});
-                                break :jpblk !flags.carry;
+                                break :jpblk flags.carry == 0b0;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("JP Z\n", .{});
-                                break :jpblk flags.zero;
+                                break :jpblk flags.zero == 0b1;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("JP C\n", .{});
-                                break :jpblk flags.carry;
+                                break :jpblk flags.carry == 0b1;
                             },
                             JumpTest.Always => {
                                 std.debug.print("JP\n", .{});
@@ -352,6 +365,7 @@ const CPU = struct {
                             break :blk 0;
                         },
                         ArithmeticTarget.C => {
+                            std.debug.print("ADD C\n", .{});
                             const value = self.registers.C;
                             const new_value = self.add(value);
                             self.registers.A = new_value;
@@ -381,10 +395,10 @@ const CPU = struct {
         return res;
     }
     fn step(self: *const CPU) void {
-        var instruction_byte = self.bus.read_bytes(self.pc);
+        var instruction_byte = self.bus.read_byte(self.pc);
         const prefixed = instruction_byte == 0xCB;
         if (prefixed) {
-            instruction_byte = self.bus.read_bytes(self.pc +% 1);
+            instruction_byte = self.bus.read_byte(self.pc +% 1);
         }
         const next_pc = if (Instruction.from_byte(instruction_byte)) |instruction| {
             self.execute(instruction);
@@ -396,8 +410,8 @@ const CPU = struct {
     }
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {
-            const low = self.bus.read_bytes(self.pc +% 1);
-            const high = self.bus.read_bytes(self.pc +% 2);
+            const low = self.bus.read_byte(self.pc +% 1);
+            const high = self.bus.read_byte(self.pc +% 2);
             const address = @as(u16, high) << 8 | @as(u16, low);
             return address;
         } else {
@@ -429,14 +443,14 @@ const CPU = struct {
     }
 
     fn pop(self: *CPU) u16 {
-        const low = self.bus.read_bytes(self.sp);
+        const low = self.bus.read_byte(self.sp);
         self.sp = self.sp +% 1;
-        const high = self.bus.read_bytes(self.sp);
+        const high = self.bus.read_byte(self.sp);
         self.sp = self.sp +% 1;
         return @as(u16, high) << 8 | @as(u16, low);
     }
 
-    fn call(self: *CPU, should_call: bool) void {
+    fn call(self: *CPU, should_call: bool) u16 {
         const next_pc = self.pc +% 3;
         if (should_call) {
             self.push(next_pc);
@@ -447,7 +461,7 @@ const CPU = struct {
         }
     }
 
-    fn ret(self: *CPU, should_return: bool) void {
+    fn ret(self: *CPU, should_return: bool) u16 {
         if (should_return) {
             const address = self.pop();
             return address;
@@ -459,14 +473,14 @@ const CPU = struct {
     pub fn new() CPU {
         const cpu: CPU = CPU{
             .registers = Registers{
-                .A = 0x12,
-                .B = 0x34,
-                .C = 0x56,
-                .D = 0x78,
-                .E = 0x9A,
-                .F = 0xBC,
-                .H = 0xDE,
-                .L = 0xF0,
+                .A = 0x00,
+                .B = 0x00,
+                .C = 0x00,
+                .D = 0x00,
+                .E = 0x00,
+                .F = 0x00,
+                .H = 0x00,
+                .L = 0x00,
             },
             .pc = 0x00,
             .sp = 0x00,
@@ -476,7 +490,7 @@ const CPU = struct {
     }
 
     fn read_next_byte(self: *CPU) u8 {
-        const byte = self.bus.read_bytes(self.pc +% 1);
+        const byte = self.bus.read_byte(self.pc +% 1);
         return byte;
     }
 
@@ -485,8 +499,8 @@ const CPU = struct {
     }
 
     fn read_next_word(self: *CPU) u16 {
-        const low = self.bus.read_bytes(self.pc +% 1);
-        const high = self.bus.read_bytes(self.pc +% 2);
+        const low = self.bus.read_byte(self.pc +% 1);
+        const high = self.bus.read_byte(self.pc +% 2);
         return @as(u16, high) << 8 | @as(u16, low);
     }
 };
@@ -498,7 +512,7 @@ const MemoryBus = struct {
             .memory = [_]u8{0} ** 0x10000,
         };
     }
-    fn read_bytes(self: *const MemoryBus, address: u16) u8 {
+    fn read_byte(self: *const MemoryBus, address: u16) u8 {
         return self.memory[address];
     }
     fn write_byte(self: *MemoryBus, addr: u16, byte: u8) void {
@@ -508,14 +522,15 @@ const MemoryBus = struct {
 
 pub fn main() !void {}
 
-test "simple test" {
-    std.debug.print("Hello, world!\n", .{});
+test "Add A + C" {
     const insta = Instruction{ .ADD = ArithmeticTarget.A };
     const instc = Instruction{ .ADD = ArithmeticTarget.C };
     var cpu = CPU.new();
-    std.debug.print("A: {x}\n", .{cpu.registers.A});
+    cpu.registers.A = 0x01;
+    cpu.registers.C = 0x05;
+    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
     _ = cpu.execute(insta);
     _ = cpu.execute(instc);
 
-    std.debug.print("A: {x}\n", .{cpu.registers.A});
+    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
 }
