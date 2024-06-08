@@ -551,8 +551,10 @@ test "Add A + C" {
     cpu.registers.A = 0x01;
     cpu.registers.C = 0x05;
     std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
-    _ = cpu.execute(insta);
-    _ = cpu.execute(instc);
 
+    _ = cpu.execute(insta);
+    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
+
+    _ = cpu.execute(instc);
     std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
 }
