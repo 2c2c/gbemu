@@ -117,8 +117,15 @@ const Instruction = union(enum) {
 
     fn from_byte_not_prefixed(byte: u8) ?Instruction {
         const inst = switch (byte) {
-            0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
-            0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
+            0x80 => return Instruction{ .ADD = ArithmeticTarget.B },
+            0x81 => return Instruction{ .ADD = ArithmeticTarget.C },
+            0x82 => return Instruction{ .ADD = ArithmeticTarget.D },
+            0x83 => return Instruction{ .ADD = ArithmeticTarget.E },
+            0x84 => return Instruction{ .ADD = ArithmeticTarget.H },
+            0x85 => return Instruction{ .ADD = ArithmeticTarget.L },
+            // HL
+            // 0x86 => return Instruction{ .ADD = ArithmeticTarget.C },
+            0x87 => return Instruction{ .ADD = ArithmeticTarget.A },
             _ => unreachable,
         };
         return inst;
@@ -355,40 +362,55 @@ const CPU = struct {
                 },
 
                 Instruction.ADD => |target| {
-                    switch (target) {
-                        ArithmeticTarget.A => {
-                            std.debug.print("ADD A\n", .{});
-                            break :blk 0;
-                        },
-                        ArithmeticTarget.B => {
-                            std.debug.print("ADD B\n", .{});
-                            break :blk 0;
-                        },
-                        ArithmeticTarget.C => {
-                            std.debug.print("ADD C\n", .{});
-                            const value = self.registers.C;
-                            const new_value = self.add(value);
-                            self.registers.A = new_value;
-                            const new_pc: u16 = self.pc +% 1;
-                            break :blk new_pc;
-                        },
-                        ArithmeticTarget.D => {
-                            std.debug.print("ADD D\n", .{});
-                            break :blk 0;
-                        },
-                        ArithmeticTarget.E => {
-                            std.debug.print("ADD E\n", .{});
-                            break :blk 0;
-                        },
-                        ArithmeticTarget.H => {
-                            std.debug.print("ADD H\n", .{});
-                            break :blk 0;
-                        },
-                        ArithmeticTarget.L => {
-                            std.debug.print("ADD L\n", .{});
-                            break :blk 0;
-                        },
-                    }
+                    const value = addBlk: {
+                        switch (target) {
+                            ArithmeticTarget.A => {
+                                std.debug.print("ADD A\n", .{});
+                                const value = self.registers.A;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.B => {
+                                std.debug.print("ADD B\n", .{});
+                                const value = self.registers.B;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.C => {
+                                std.debug.print("ADD C\n", .{});
+                                const value = self.registers.C;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.D => {
+                                std.debug.print("ADD D\n", .{});
+                                const value = self.registers.D;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.E => {
+                                std.debug.print("ADD E\n", .{});
+                                const value = self.registers.E;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.H => {
+                                std.debug.print("ADD H\n", .{});
+                                const value = self.registers.H;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                            ArithmeticTarget.L => {
+                                std.debug.print("ADD L\n", .{});
+                                const value = self.registers.L;
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
+                        }
+                    };
+                    self.registers.A = value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
                 },
             }
         };
