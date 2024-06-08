@@ -107,6 +107,8 @@ const Instruction = union(enum) {
     POP: StackTarget,
     CALL: JumpTest,
     RET: JumpTest,
+    NOP: void,
+    HALT: void,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -145,9 +147,22 @@ const CPU = struct {
     pc: u16,
     sp: u16,
     bus: MemoryBus,
+    is_halted: bool,
     fn execute(self: *CPU, instruction: Instruction) u16 {
+        if (self.is_halted) {
+            return self.pc;
+        }
         const res = blk: {
             switch (instruction) {
+                Instruction.NOP => {
+                    const next_pc = self.pc +% 1;
+                    break :blk next_pc;
+                },
+                Instruction.HALT => {
+                    self.is_halted = true;
+                    const next_pc = self.pc +% 1;
+                    break :blk next_pc;
+                },
                 Instruction.CALL => |jt| {
                     const flags = u8_to_flag(self.registers.F);
                     const jump_condition = jmpBlk: {
@@ -507,6 +522,7 @@ const CPU = struct {
             .pc = 0x00,
             .sp = 0x00,
             .bus = MemoryBus.new(),
+            .is_halted = false,
         };
         return cpu;
     }
