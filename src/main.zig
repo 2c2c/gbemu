@@ -558,6 +558,29 @@ const MemoryBus = struct {
     }
 };
 
+const VRAM_BEGIN: usize = 0x8000;
+const VRAM_END: usize = 0x9FFF;
+const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
+
+const TilePixelValue = enum {
+    Zero,
+    One,
+    Two,
+    Three,
+};
+
+const Tile = [8][8]TilePixelValue;
+
+fn empty_tile() Tile {
+    var tile: Tile = undefined;
+    for (tile, 0..) |row, i| {
+        for (row, 0..) |_, j| {
+            tile[i][j] = TilePixelValue.Zero;
+        }
+    }
+    return tile;
+}
+
 pub fn main() !void {}
 
 test "Add A + C" {
@@ -573,4 +596,18 @@ test "Add A + C" {
 
     _ = cpu.execute(instc);
     std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
+}
+
+test "Jump" {
+    const jp_inst = Instruction{ .JP = JumpTest.Always };
+    var cpu = CPU.new();
+    const old_pos = 0x0000;
+    const new_pos = 0x1234;
+    cpu.bus.memory[old_pos + 1] = 0x34;
+    cpu.bus.memory[old_pos + 2] = 0x12;
+    cpu.pc = old_pos;
+    std.debug.print("PC: {x}\n", .{cpu.pc});
+
+    const jp_result = cpu.execute(jp_inst);
+    std.debug.assert(jp_result == new_pos);
 }
