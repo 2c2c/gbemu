@@ -545,15 +545,36 @@ const CPU = struct {
 
 const MemoryBus = struct {
     memory: [0x10000]u8,
+    gpu: GPU,
     pub fn new() MemoryBus {
         return MemoryBus{
             .memory = [_]u8{0} ** 0x10000,
+            .gpu = GPU.new(),
         };
     }
     fn read_byte(self: *const MemoryBus, address: u16) u8 {
+        const addr = @as(usize, address);
+        switch (addr) {
+            VRAM_BEGIN...VRAM_END => {
+                return self.gpu.read_vram(addr - VRAM_BEGIN);
+            },
+            else => {
+                std.debug.print("Implement other reads\n");
+            },
+        }
         return self.memory[address];
     }
-    fn write_byte(self: *MemoryBus, addr: u16, byte: u8) void {
+    fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
+        const addr = @as(usize, address);
+        switch (addr) {
+            VRAM_BEGIN...VRAM_END => {
+                self.gpu.write_vram(addr - VRAM_BEGIN, byte);
+                return;
+            },
+            else => {
+                std.debug.print("Implement other writes\n");
+            },
+        }
         self.memory[addr] = byte;
     }
 };
@@ -572,14 +593,56 @@ const TilePixelValue = enum {
 const Tile = [8][8]TilePixelValue;
 
 fn empty_tile() Tile {
-    var tile: Tile = undefined;
-    for (tile, 0..) |row, i| {
-        for (row, 0..) |_, j| {
-            tile[i][j] = TilePixelValue.Zero;
+    return Tile{.Zero ** 8 ** 8};
+}
+
+const GPU = struct {
+    vram: [VRAM_SIZE]u8,
+    tile_set: [384]Tile,
+
+    pub fn new() GPU {
+        return GPU{
+            .vram = [_]u8{0} ** VRAM_SIZE,
+            .tile_set = [_]Tile{empty_tile() ** 384},
+        };
+    }
+
+    fn read_vram(self: *const GPU, address: usize) u8 {
+        return self.vram[address];
+    }
+
+    fn write_vram(self: *GPU, index: usize, byte: u8) void {
+        self.vram[index] = byte;
+
+        if (index >= 0x1800) {
+            return;
+        }
+        const normalized_index = index & 0xFFFE;
+        const byte1 = self.vram[normalized_index];
+        const byte2 = self.vram[normalized_index + 1];
+
+        const tile_index = index / 16;
+        const row_index = (index % 16) / 2;
+
+        for (0..8) |pixel_index| {
+            const mask = 1 << (7 - pixel_index);
+            const low = (byte1 & mask);
+            const high = (byte2 & mask);
+
+            const value = if (low and high) {
+                TilePixelValue.Three;
+            } else if (!low and high) {
+                TilePixelValue.Two;
+            } else if (low and !high) {
+                TilePixelValue.One;
+            } else {
+                TilePixelValue.Zero;
+            };
+
+            self.tile_set[tile_index][row_index][pixel_index] = value;
         }
     }
-    return tile;
-}
+};
 
 pub fn main() !void {}
 
