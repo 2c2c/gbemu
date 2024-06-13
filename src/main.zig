@@ -559,7 +559,7 @@ const MemoryBus = struct {
                 return self.gpu.read_vram(addr - VRAM_BEGIN);
             },
             else => {
-                std.debug.print("Implement other reads\n");
+                std.debug.print("Implement other reads\n", .{});
             },
         }
         return self.memory[address];
@@ -572,7 +572,7 @@ const MemoryBus = struct {
                 return;
             },
             else => {
-                std.debug.print("Implement other writes\n");
+                std.debug.print("Implement other writes\n", .{});
             },
         }
         self.memory[addr] = byte;
@@ -593,7 +593,7 @@ const TilePixelValue = enum {
 const Tile = [8][8]TilePixelValue;
 
 fn empty_tile() Tile {
-    return Tile{.Zero ** 8 ** 8};
+    return .{.{.Zero} ** 8} ** 8;
 }
 
 const GPU = struct {
@@ -603,7 +603,7 @@ const GPU = struct {
     pub fn new() GPU {
         return GPU{
             .vram = [_]u8{0} ** VRAM_SIZE,
-            .tile_set = [_]Tile{empty_tile() ** 384},
+            .tile_set = .{empty_tile()} ** 384,
         };
     }
 
@@ -625,18 +625,18 @@ const GPU = struct {
         const row_index = (index % 16) / 2;
 
         for (0..8) |pixel_index| {
-            const mask = 1 << (7 - pixel_index);
-            const low = (byte1 & mask);
-            const high = (byte2 & mask);
+            const mask = @as(u8, 1) << @intCast(7 - pixel_index);
+            const low = @intFromBool((byte1 & mask) > 0);
+            const high = @intFromBool((byte2 & mask) > 0);
+            const v = @as(u2, low) | (@as(u2, high) << 1);
 
-            const value = if (low and high) {
-                TilePixelValue.Three;
-            } else if (!low and high) {
-                TilePixelValue.Two;
-            } else if (low and !high) {
-                TilePixelValue.One;
-            } else {
-                TilePixelValue.Zero;
+            const value = blk: {
+                switch (v) {
+                    0b11 => break :blk TilePixelValue.Three,
+                    0b10 => break :blk TilePixelValue.Two,
+                    0b01 => break :blk TilePixelValue.One,
+                    0b00 => break :blk TilePixelValue.Zero,
+                }
             };
 
             self.tile_set[tile_index][row_index][pixel_index] = value;
