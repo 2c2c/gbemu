@@ -628,18 +628,18 @@ const GPU = struct {
             const mask = @as(u8, 1) << @intCast(7 - pixel_index);
             const low = @intFromBool((byte1 & mask) > 0);
             const high = @intFromBool((byte2 & mask) > 0);
-            const v = @as(u2, low) | (@as(u2, high) << 1);
+            const pixel_value = @as(u2, low) | (@as(u2, high) << 1);
 
-            const value = blk: {
-                switch (v) {
-                    0b11 => break :blk TilePixelValue.Three,
-                    0b10 => break :blk TilePixelValue.Two,
-                    0b01 => break :blk TilePixelValue.One,
-                    0b00 => break :blk TilePixelValue.Zero,
-                }
-            };
+            // const value = blk: {
+            //     switch (v) {
+            //         0b11 => break :blk TilePixelValue.Three,
+            //         0b10 => break :blk TilePixelValue.Two,
+            //         0b01 => break :blk TilePixelValue.One,
+            //         0b00 => break :blk TilePixelValue.Zero,
+            //     }
+            // };
 
-            self.tile_set[tile_index][row_index][pixel_index] = value;
+            self.tile_set[tile_index][row_index][pixel_index] = @enumFromInt(pixel_value);
         }
     }
 };
