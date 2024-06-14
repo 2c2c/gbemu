@@ -46,32 +46,24 @@ const Registers = struct {
     }
 };
 
-const FlagRegister = struct {
-    zero: u1,
-    subtract: u1,
-    half_carry: u1,
-    carry: u1,
+// Least to most significant bit for packed struct
+// F register is 4 most significant bits as flags
+// zshcxxxx
+const FlagRegister = packed struct {
+    _padding: u4 = 0,
+    carry: bool,
+    half_carry: bool,
+    subtract: bool,
+    zero: bool,
 };
 
-// zig fmt: off
 fn flag_to_u8(flag: FlagRegister) u8 {
-    return @as(u8, flag.zero) << 7 |
-    @as(u8, flag.subtract) << 6 | 
-    @as(u8, flag.half_carry) << 5 | 
-    @as(u8, flag.carry) << 4;
+    return @as(u8, @bitCast(flag));
 }
+
 fn u8_to_flag(value: u8) FlagRegister {
-    return FlagRegister{
-        .zero = @truncate(value >> 7),
-        .subtract = @truncate(value >> 6),
-        .half_carry = @truncate(value >> 5),
-        .carry = @truncate(value >> 4),
-        // .subtract = value >> 6,
-        // .half_carry = value >> 5,
-        // .carry = value >> 4
-    };
+    return @bitCast(value);
 }
-// zig fmt: on
 
 const ArithmeticTarget = enum {
     A,
@@ -164,24 +156,25 @@ const CPU = struct {
                     break :blk next_pc;
                 },
                 Instruction.CALL => |jt| {
+                    // const flags = u8_to_flag(self.registers.F);
                     const flags = u8_to_flag(self.registers.F);
                     const jump_condition = jmpBlk: {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("CALL NZ\n", .{});
-                                break :jmpBlk flags.zero == 0b0;
+                                break :jmpBlk !flags.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("CALL NC\n", .{});
-                                break :jmpBlk flags.carry == 0b0;
+                                break :jmpBlk !flags.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("CALL Z\n", .{});
-                                break :jmpBlk flags.zero == 0b1;
+                                break :jmpBlk flags.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("CALL C\n", .{});
-                                break :jmpBlk flags.carry == 0b1;
+                                break :jmpBlk flags.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("CALL\n", .{});
@@ -198,19 +191,19 @@ const CPU = struct {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("RET NZ\n", .{});
-                                break :jmpBlk flags.zero == 0b0;
+                                break :jmpBlk !flags.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("RET NC\n", .{});
-                                break :jmpBlk flags.carry == 0b0;
+                                break :jmpBlk !flags.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("RET Z\n", .{});
-                                break :jmpBlk flags.zero == 0b1;
+                                break :jmpBlk flags.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("RET C\n", .{});
-                                break :jmpBlk flags.carry == 0b1;
+                                break :jmpBlk flags.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("RET\n", .{});
@@ -352,19 +345,19 @@ const CPU = struct {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("JP NZ\n", .{});
-                                break :jpblk flags.zero == 0b0;
+                                break :jpblk !flags.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("JP NC\n", .{});
-                                break :jpblk flags.carry == 0b0;
+                                break :jpblk !flags.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("JP Z\n", .{});
-                                break :jpblk flags.zero == 0b1;
+                                break :jpblk flags.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("JP C\n", .{});
-                                break :jpblk flags.carry == 0b1;
+                                break :jpblk flags.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("JP\n", .{});
@@ -459,13 +452,18 @@ const CPU = struct {
         const result = @addWithOverflow(self.registers.A, value);
         const sum = result[0];
         const carry = result[1];
-        const flags = flag_to_u8(FlagRegister{
-            .zero = if (sum == 0) 1 else 0,
-            .subtract = 0,
-            .carry = carry,
-            .half_carry = if (((self.registers.A & 0xF) + (value & 0xF)) > 0xF) 1 else 0,
-        });
-        self.registers.F = flags;
+        std.debug.print("sum {}\n", .{sum});
+        std.debug.print("carry {}\n", .{carry});
+        // zig fmt: off
+        const flags = FlagRegister{
+            .zero = sum == 0,
+            .subtract = false,
+            .carry = carry == 1,
+            .half_carry = (((self.registers.A & 0xF) + (value & 0xF)) > 0xF),
+        };
+        std.debug.print("flagreg: {b} \n", .{@as(u8,@bitCast(flags))});
+        // zig fmt: on
+        self.registers.F = flag_to_u8(flags);
         return sum;
     }
 
@@ -647,18 +645,17 @@ const GPU = struct {
 pub fn main() !void {}
 
 test "Add A + C" {
-    const insta = Instruction{ .ADD = ArithmeticTarget.A };
     const instc = Instruction{ .ADD = ArithmeticTarget.C };
     var cpu = CPU.new();
-    cpu.registers.A = 0x01;
-    cpu.registers.C = 0x05;
-    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
+    cpu.registers.A = 0xFF;
+    cpu.registers.C = 0x02;
+    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, cpu.registers.F });
 
-    _ = cpu.execute(insta);
-    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
+    // _ = cpu.execute(insta);
+    // std.debug.print("A: {x}, C: {x}, FLAGS: {b} \n", .{ cpu.registers.A, cpu.registers.C, cpu.registers.F });
 
     _ = cpu.execute(instc);
-    std.debug.print("A: {x}, C: {x}\n", .{ cpu.registers.A, cpu.registers.C });
+    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, cpu.registers.F });
 }
 
 test "Jump" {
