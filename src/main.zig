@@ -89,7 +89,28 @@ const LoadByteTarget = enum { A, B, C, D, E, H, L, HLI };
 
 const LoadByteSource = enum { A, B, C, D, E, H, L, D8, HLI };
 
-const LoadType = union(enum) { Byte: struct { target: LoadByteTarget, source: LoadByteSource } };
+const LoadWordTarget = enum { BC, DE, HL, SP };
+
+const Indirect = enum {
+    BCIndirect,
+    DEIndirect,
+    HLIndirectPlus,
+    HLIndirectMinus,
+    WordIndirect,
+    LastByteIndirect,
+};
+
+const LoadType = union(enum) {
+    Byte: struct { target: LoadByteTarget, source: LoadByteSource },
+    Word: LoadWordTarget,
+    AFromIndirect: Indirect,
+    IndirectFromA: Indirect,
+    AFromByteAddress,
+    ByteAddressFromA,
+    SPFromHL,
+    HLFromSPN,
+    IndirectFromSP,
+};
 
 const StackTarget = enum { BC, DE, HL, AF };
 
@@ -112,6 +133,10 @@ const Instruction = union(enum) {
     CPL: void,
     CCF: void,
     SCF: void,
+    RLCA: void,
+    RLA: void,
+    RRCA: void,
+    RRA: void,
     JP: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -351,6 +376,159 @@ const CPU = struct {
                                     },
                                 }
                             };
+                            break :blk next_pc;
+                        },
+                        LoadType.Word => |word| {
+                            std.debug.print("LD Word {} source \n", .{word});
+                            const source_value = self.read_next_word();
+                            switch (word) {
+                                LoadWordTarget.BC => {
+                                    std.debug.print("LD BC\n", .{});
+                                    self.registers.set_BC(source_value);
+                                },
+                                LoadWordTarget.DE => {
+                                    std.debug.print("LD DE\n", .{});
+                                    self.registers.set_DE(source_value);
+                                },
+                                LoadWordTarget.HL => {
+                                    std.debug.print("LD HL\n", .{});
+                                    self.registers.set_HL(source_value);
+                                },
+                                LoadWordTarget.SP => {
+                                    std.debug.print("LD SP\n", .{});
+                                    self.sp = source_value;
+                                },
+                            }
+                            const next_pc = self.pc +% 3;
+                            break :blk next_pc;
+                        },
+                        LoadType.AFromIndirect => |indirect| {
+                            const value = sourceBlk: {
+                                switch (indirect) {
+                                    Indirect.BCIndirect => {
+                                        std.debug.print("LD A (BC)\n", .{});
+                                        break :sourceBlk self.bus.read_byte(self.registers.get_BC());
+                                    },
+                                    Indirect.DEIndirect => {
+                                        std.debug.print("LD A (DE)\n", .{});
+                                        break :sourceBlk self.bus.read_byte(self.registers.get_DE());
+                                    },
+                                    Indirect.HLIndirectPlus => {
+                                        std.debug.print("LD A (HL+)\n", .{});
+                                        const hl = self.registers.get_HL();
+                                        const value = self.bus.read_byte(hl);
+                                        self.registers.set_HL(hl +% 1);
+                                        break :sourceBlk value;
+                                    },
+                                    Indirect.HLIndirectMinus => {
+                                        std.debug.print("LD A (HL-)\n", .{});
+                                        const hl = self.registers.get_HL();
+                                        const value = self.bus.read_byte(hl);
+                                        self.registers.set_HL(hl -% 1);
+                                        break :sourceBlk value;
+                                    },
+                                    Indirect.WordIndirect => {
+                                        std.debug.print("LD A (nn)\n", .{});
+                                        const address = self.read_next_word();
+                                        break :sourceBlk self.bus.read_byte(address);
+                                    },
+                                    Indirect.LastByteIndirect => {
+                                        std.debug.print("LD A (FF00 + C)\n", .{});
+                                        const address = 0xFF00 +% @as(u16, self.registers.C);
+                                        break :sourceBlk self.bus.read_byte(address);
+                                    },
+                                }
+                            };
+                            self.registers.A = value;
+                            switch (indirect) {
+                                Indirect.WordIndirect => {
+                                    const next_pc = self.pc +% 3;
+                                    break :blk next_pc;
+                                },
+                                else => {
+                                    const next_pc = self.pc +% 1;
+                                    break :blk next_pc;
+                                },
+                            }
+                        },
+                        LoadType.IndirectFromA => |indirect| {
+                            const value = self.registers.A;
+                            switch (indirect) {
+                                Indirect.BCIndirect => {
+                                    std.debug.print("LD (BC) A\n", .{});
+                                    self.bus.write_byte(self.registers.get_BC(), value);
+                                },
+                                Indirect.DEIndirect => {
+                                    std.debug.print("LD (DE) A\n", .{});
+                                    self.bus.write_byte(self.registers.get_DE(), value);
+                                },
+                                Indirect.HLIndirectPlus => {
+                                    std.debug.print("LD (HL+) A\n", .{});
+                                    const hl = self.registers.get_HL();
+                                    self.bus.write_byte(hl, value);
+                                    self.registers.set_HL(hl +% 1);
+                                },
+                                Indirect.HLIndirectMinus => {
+                                    std.debug.print("LD (HL-) A\n", .{});
+                                    const hl = self.registers.get_HL();
+                                    self.bus.write_byte(hl, value);
+                                    self.registers.set_HL(hl -% 1);
+                                },
+                                Indirect.WordIndirect => {
+                                    std.debug.print("LD (nn) A\n", .{});
+                                    const address = self.read_next_word();
+                                    self.bus.write_byte(address, value);
+                                },
+                                Indirect.LastByteIndirect => {
+                                    std.debug.print("LD (FF00 + C) A\n", .{});
+                                    const address = 0xFF00 +% @as(u16, self.registers.C);
+                                    self.bus.write_byte(address, value);
+                                },
+                            }
+                            switch (indirect) {
+                                Indirect.WordIndirect => {
+                                    const next_pc = self.pc +% 3;
+                                    break :blk next_pc;
+                                },
+                                else => {
+                                    const next_pc = self.pc +% 1;
+                                    break :blk next_pc;
+                                },
+                            }
+                        },
+                        LoadType.AFromByteAddress => {
+                            const offset = @as(u16, self.read_next_byte());
+                            self.registers.A = self.bus.read_byte(0xFF00 +% offset);
+                            const next_pc = self.pc +% 2;
+                            break :blk next_pc;
+                        },
+                        LoadType.ByteAddressFromA => {
+                            const offset = @as(u16, self.read_next_byte());
+                            self.bus.write_byte(0xFF00 + offset, self.registers.A);
+                            const next_pc = self.pc +% 2;
+                            break :blk next_pc;
+                        },
+                        LoadType.SPFromHL => {
+                            self.sp = self.registers.get_HL();
+                            const next_pc = self.pc +% 1;
+                            break :blk next_pc;
+                        },
+                        LoadType.HLFromSPN => {
+                            const n = self.read_next_byte();
+                            const signed: i8 = @bitCast(n);
+                            const extended: u16 = @intCast(signed);
+                            self.registers.set_HL(extended);
+                            self.registers.F.zero = false;
+                            self.registers.F.subtract = false;
+                            self.registers.F.half_carry = (self.sp & 0xF) + (extended & 0xF) > 0xF;
+                            self.registers.F.carry = (self.sp & 0xFF) + (extended & 0xFF) > 0xFF;
+                            const next_pc = self.pc +% 2;
+                            break :blk next_pc;
+                        },
+                        LoadType.IndirectFromSP => {
+                            const address = self.read_next_word();
+                            self.bus.write_word(address, self.sp);
+                            const next_pc = self.pc +% 3;
                             break :blk next_pc;
                         },
                     }
@@ -1125,6 +1303,34 @@ const CPU = struct {
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
+                Instruction.RLA => |_| {
+                    std.debug.print("RLA\n", .{});
+                    const new_value = self.rotate_left(self.registers.A);
+                    self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.RLCA => |_| {
+                    std.debug.print("RLCA\n", .{});
+                    const new_value = self.rotate_left_use_carry(self.registers.A);
+                    self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.RRA => |_| {
+                    std.debug.print("RRA\n", .{});
+                    const new_value = self.rotate_right(self.registers.A);
+                    self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.RRCA => |_| {
+                    std.debug.print("RRCA\n", .{});
+                    const new_value = self.rotate_right_use_carry(self.registers.A);
+                    self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
             }
         };
         return res;
@@ -1336,16 +1542,21 @@ const CPU = struct {
         const result = blk: {
             if (!self.registers.F.subtract) {
                 var result = value;
-                if (self.registers.F.carry || value > 0x99) {
+                if (self.registers.F.carry or value > 0x99) {
                     result = result +% 0x60;
                     carry = true;
-                } else if (self.registers.F.half_carry || (value & 0xF) > 0x9) {
+                } else if (self.registers.F.half_carry or (value & 0xF) > 0x9) {
                     result = result +% 0x06;
                 }
                 break :blk result;
             } else if (self.registers.F.carry) {
                 carry = true;
-                const result = value -% if (self.registers.F.half_carry) 0x66 else 0x60;
+                var result = value;
+                if (self.registers.F.half_carry) {
+                    result = result -% 0x66;
+                } else {
+                    result = result -% 0x60;
+                }
                 break :blk result;
             } else if (self.registers.F.half_carry) {
                 const result = value -% 0x06;
@@ -1388,6 +1599,53 @@ const CPU = struct {
             .half_carry = false,
             .carry = true,
         };
+    }
+
+    fn rotate_left(self: *CPU, value: u8) u8 {
+        const carry = value >> 7;
+        const new_value = (value << 1) | carry;
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+
+        return new_value;
+    }
+
+    fn rotate_left_use_carry(self: *CPU, value: u8) u8 {
+        const new_value = (value << 1) | @intFromBool(self.registers.F.carry);
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = value >> 7 == 1,
+        };
+        return new_value;
+    }
+
+    fn rotate_right(self: *CPU, value: u8) u8 {
+        const carry = value & 1;
+        const new_value = (value >> 1) | (carry << 7);
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+        return new_value;
+    }
+
+    fn rotate_right_use_carry(self: *CPU, value: u8) u8 {
+        const new_value = (value >> 1) | (@as(u8, @intFromBool(self.registers.F.carry)) << @intCast(7));
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = value & 1 == 1,
+        };
+        return new_value;
     }
 
     fn push(self: *CPU, value: u16) void {
@@ -1503,6 +1761,19 @@ const MemoryBus = struct {
             },
         }
         self.memory[addr] = byte;
+    }
+
+    fn read_word(self: *MemoryBus, address: u16) u16 {
+        const low = self.read_byte(address);
+        const high = self.read_byte(address +% 1);
+        return @as(u16, high) << 8 | @as(u16, low);
+    }
+
+    fn write_word(self: *MemoryBus, address: u16, word: u16) void {
+        const low: u8 = @truncate(word);
+        const high: u8 = @truncate(word >> 8);
+        self.write_byte(address, low);
+        self.write_byte(address +% 1, high);
     }
 };
 
