@@ -75,6 +75,7 @@ const ArithmeticTarget = enum {
     H,
     L,
     HL,
+    D8,
 };
 
 const JumpTest = enum {
@@ -98,6 +99,10 @@ const Instruction = union(enum) {
     ADC: ArithmeticTarget,
     SUB: ArithmeticTarget,
     SBC: ArithmeticTarget,
+    AND: ArithmeticTarget,
+    XOR: ArithmeticTarget,
+    OR: ArithmeticTarget,
+    CP: ArithmeticTarget,
     JP: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -425,6 +430,12 @@ const CPU = struct {
                                 const new_value = self.add(value);
                                 break :addBlk new_value;
                             },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("ADD D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.add(value);
+                                break :addBlk new_value;
+                            },
                         }
                     };
                     self.registers.A = value;
@@ -479,6 +490,12 @@ const CPU = struct {
                             ArithmeticTarget.HL => {
                                 std.debug.print("ADC HL\n", .{});
                                 const value = self.bus.read_byte(self.registers.get_HL());
+                                const new_value = self.adc(value);
+                                break :adcBlk new_value;
+                            },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("ADC D8\n", .{});
+                                const value = self.read_next_byte();
                                 const new_value = self.adc(value);
                                 break :adcBlk new_value;
                             },
@@ -539,6 +556,12 @@ const CPU = struct {
                                 const new_value = self.sub(value);
                                 break :subBlk new_value;
                             },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("SUB D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.sub(value);
+                                break :subBlk new_value;
+                            },
                         }
                     };
                     self.registers.A = value;
@@ -596,9 +619,255 @@ const CPU = struct {
                                 const new_value = self.sbc(value);
                                 break :sbcBlk new_value;
                             },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("sbc D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.sbc(value);
+                                break :sbcBlk new_value;
+                            },
                         }
                     };
                     self.registers.A = value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.AND => |target| {
+                    const value = andBlk: {
+                        switch (target) {
+                            ArithmeticTarget.A => {
+                                std.debug.print("and A\n", .{});
+                                const value = self.registers.A;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.B => {
+                                std.debug.print("and B\n", .{});
+                                const value = self.registers.B;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.C => {
+                                std.debug.print("and C\n", .{});
+                                const value = self.registers.C;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.D => {
+                                std.debug.print("and D\n", .{});
+                                const value = self.registers.D;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.E => {
+                                std.debug.print("and E\n", .{});
+                                const value = self.registers.E;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.H => {
+                                std.debug.print("and H\n", .{});
+                                const value = self.registers.H;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.L => {
+                                std.debug.print("and L\n", .{});
+                                const value = self.registers.L;
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.HL => {
+                                std.debug.print("and HL\n", .{});
+                                const value = self.bus.read_byte(self.registers.get_HL());
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("and D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.and_(value);
+                                break :andBlk new_value;
+                            },
+                        }
+                    };
+                    self.registers.A = value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.XOR => |target| {
+                    const value = xorBlk: {
+                        switch (target) {
+                            ArithmeticTarget.A => {
+                                std.debug.print("xor A\n", .{});
+                                const value = self.registers.A;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.B => {
+                                std.debug.print("xor B\n", .{});
+                                const value = self.registers.B;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.C => {
+                                std.debug.print("xor C\n", .{});
+                                const value = self.registers.C;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.D => {
+                                std.debug.print("xor D\n", .{});
+                                const value = self.registers.D;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.E => {
+                                std.debug.print("xor E\n", .{});
+                                const value = self.registers.E;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.H => {
+                                std.debug.print("xor H\n", .{});
+                                const value = self.registers.H;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.L => {
+                                std.debug.print("xor L\n", .{});
+                                const value = self.registers.L;
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.HL => {
+                                std.debug.print("xor HL\n", .{});
+                                const value = self.bus.read_byte(self.registers.get_HL());
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("xor D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.xor(value);
+                                break :xorBlk new_value;
+                            },
+                        }
+                    };
+                    self.registers.A = value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.OR => |target| {
+                    const value = orBlk: {
+                        switch (target) {
+                            ArithmeticTarget.A => {
+                                std.debug.print("or A\n", .{});
+                                const value = self.registers.A;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.B => {
+                                std.debug.print("or B\n", .{});
+                                const value = self.registers.B;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.C => {
+                                std.debug.print("or C\n", .{});
+                                const value = self.registers.C;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.D => {
+                                std.debug.print("or D\n", .{});
+                                const value = self.registers.D;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.E => {
+                                std.debug.print("or E\n", .{});
+                                const value = self.registers.E;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.H => {
+                                std.debug.print("or H\n", .{});
+                                const value = self.registers.H;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.L => {
+                                std.debug.print("or L\n", .{});
+                                const value = self.registers.L;
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.HL => {
+                                std.debug.print("or HL\n", .{});
+                                const value = self.bus.read_byte(self.registers.get_HL());
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                            ArithmeticTarget.D8 => {
+                                std.debug.print("or D8\n", .{});
+                                const value = self.read_next_byte();
+                                const new_value = self.or_(value);
+                                break :orBlk new_value;
+                            },
+                        }
+                    };
+                    self.registers.A = value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.CP => |target| {
+                    switch (target) {
+                        ArithmeticTarget.A => {
+                            std.debug.print("cp A\n", .{});
+                            const value = self.registers.A;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.B => {
+                            std.debug.print("cp B\n", .{});
+                            const value = self.registers.B;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.C => {
+                            std.debug.print("cp C\n", .{});
+                            const value = self.registers.C;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.D => {
+                            std.debug.print("cp D\n", .{});
+                            const value = self.registers.D;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.E => {
+                            std.debug.print("cp E\n", .{});
+                            const value = self.registers.E;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.H => {
+                            std.debug.print("cp H\n", .{});
+                            const value = self.registers.H;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.L => {
+                            std.debug.print("cp L\n", .{});
+                            const value = self.registers.L;
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.HL => {
+                            std.debug.print("cp HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            self.cp(value);
+                        },
+                        ArithmeticTarget.D8 => {
+                            std.debug.print("cp D8\n", .{});
+                            const value = self.read_next_byte();
+                            self.cp(value);
+                        },
+                    }
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
@@ -698,6 +967,63 @@ const CPU = struct {
             .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - overflow) < 0),
         };
         self.registers.F = flag_to_u8(new_flags);
+
+        return sum;
+    }
+
+    fn and_(self: *CPU, value: u8) u8 {
+        const result = self.registers.A & value;
+
+        const flags = FlagRegister{
+            .zero = result == 0,
+            .subtract = false,
+            .half_carry = true,
+            .carry = false,
+        };
+        self.registers.F = flag_to_u8(flags);
+
+        return result;
+    }
+
+    fn xor(self: *CPU, value: u8) u8 {
+        const result = self.registers.A ^ value;
+
+        const flags = FlagRegister{
+            .zero = result == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = false,
+        };
+        self.registers.F = flag_to_u8(flags);
+
+        return result;
+    }
+
+    fn or_(self: *CPU, value: u8) u8 {
+        const result = self.registers.A | value;
+
+        const flags = FlagRegister{
+            .zero = result == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = false,
+        };
+        self.registers.F = flag_to_u8(flags);
+
+        return result;
+    }
+    fn cp(self: *CPU, value: u8) void {
+        const result = @subWithOverflow(self.registers.A, value);
+        const sum = result[0];
+        const carry = result[1];
+
+        const flags = FlagRegister{
+            .zero = sum == 0,
+            .subtract = true,
+            .carry = carry == 1,
+            .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF)) < 0),
+        };
+        self.registers.F = flag_to_u8(flags);
 
         return sum;
     }
