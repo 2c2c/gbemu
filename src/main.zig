@@ -109,6 +109,7 @@ const Instruction = union(enum) {
     DEC: ArithmeticTarget,
     WDEC: WideArithmeticTarget,
     DAA: void,
+    CPL: void,
     JP: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -1104,6 +1105,12 @@ const CPU = struct {
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
+                Instruction.CPL => |_| {
+                    std.debug.print("CPL\n", .{});
+                    _ = self.cpl();
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
             }
         };
         return res;
@@ -1339,6 +1346,16 @@ const CPU = struct {
         self.registers.F.half_carry = false;
 
         return result;
+    }
+
+    fn cpl(self: *CPU) void {
+        self.registers.A = self.registers.A ^ 0xFF;
+        self.registers.F = .{
+            .zero = false,
+            .subtract = true,
+            .half_carry = true,
+            .carry = self.registers.F.carry,
+        };
     }
 
     fn push(self: *CPU, value: u16) void {
