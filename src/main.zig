@@ -108,6 +108,7 @@ const Instruction = union(enum) {
     WINC: WideArithmeticTarget,
     DEC: ArithmeticTarget,
     WDEC: WideArithmeticTarget,
+    DAA: void,
     JP: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -1096,6 +1097,13 @@ const CPU = struct {
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
+                Instruction.DAA => |_| {
+                    std.debug.print("DAA\n", .{});
+                    const new_value = self.daa(self.registers.A);
+                    self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
             }
         };
         return res;
@@ -1298,6 +1306,38 @@ const CPU = struct {
 
     fn wdec(_: *CPU, value: u16) u16 {
         const result = value -% 1;
+        return result;
+    }
+
+    fn daa(self: *CPU, value: u8) u8 {
+        var carry = false;
+
+        const result = blk: {
+            if (!self.registers.F.subtract) {
+                var result = value;
+                if (self.registers.F.carry || value > 0x99) {
+                    result = result +% 0x60;
+                    carry = true;
+                } else if (self.registers.F.half_carry || (value & 0xF) > 0x9) {
+                    result = result +% 0x06;
+                }
+                break :blk result;
+            } else if (self.registers.F.carry) {
+                carry = true;
+                const result = value -% if (self.registers.F.half_carry) 0x66 else 0x60;
+                break :blk result;
+            } else if (self.registers.F.half_carry) {
+                const result = value -% 0x06;
+                break :blk result;
+            } else {
+                break :blk value;
+            }
+        };
+
+        self.registers.F.zero = result == 0;
+        self.registers.F.carry = carry;
+        self.registers.F.half_carry = false;
+
         return result;
     }
 
