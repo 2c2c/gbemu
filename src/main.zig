@@ -263,6 +263,18 @@ const CPU = struct {
                             std.debug.print("POP BC\n", .{});
                             self.registers.set_BC(result);
                         },
+                        StackTarget.DE => {
+                            std.debug.print("POP DE\n", .{});
+                            self.registers.set_DE(result);
+                        },
+                        StackTarget.HL => {
+                            std.debug.print("POP HL\n", .{});
+                            self.registers.set_HL(result);
+                        },
+                        StackTarget.AF => {
+                            std.debug.print("POP AF\n", .{});
+                            self.registers.set_AF(result);
+                        },
                         else => {
                             std.debug.print("Unknown POP target\n", .{});
                         },
@@ -276,6 +288,18 @@ const CPU = struct {
                             StackTarget.BC => {
                                 std.debug.print("PUSH BC\n", .{});
                                 break :pushBlk self.registers.get_BC();
+                            },
+                            StackTarget.DE => {
+                                std.debug.print("PUSH DE\n", .{});
+                                break :pushBlk self.registers.get_DE();
+                            },
+                            StackTarget.HL => {
+                                std.debug.print("PUSH HL\n", .{});
+                                break :pushBlk self.registers.get_HL();
+                            },
+                            StackTarget.AF => {
+                                std.debug.print("PUSH.AF\n", .{});
+                                break :pushBlk self.registers.get_AF();
                             },
                             else => {
                                 std.debug.print("Unknown POP target\n", .{});
@@ -1397,7 +1421,7 @@ const CPU = struct {
             const unsigned: u16 = @bitCast(extended);
             new_pc = blk: {
                 if (signed_offset < 0) {
-                    break :blk new_pc -% unsigned;
+                    break :blk new_pc -% @abs(unsigned);
                 } else {
                     break :blk new_pc +% unsigned;
                 }
