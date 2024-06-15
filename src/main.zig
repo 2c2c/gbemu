@@ -6,7 +6,7 @@ const Registers = struct {
     C: u8,
     D: u8,
     E: u8,
-    F: u8,
+    F: FlagRegister,
     H: u8,
     L: u8,
 
@@ -57,14 +57,6 @@ const FlagRegister = packed struct {
     subtract: bool,
     zero: bool,
 };
-
-fn flag_to_u8(flag: FlagRegister) u8 {
-    return @as(u8, @bitCast(flag));
-}
-
-fn u8_to_flag(value: u8) FlagRegister {
-    return @bitCast(value);
-}
 
 const ArithmeticTarget = enum {
     A,
@@ -179,25 +171,23 @@ const CPU = struct {
                     break :blk next_pc;
                 },
                 Instruction.CALL => |jt| {
-                    // const flags = u8_to_flag(self.registers.F);
-                    const flags = u8_to_flag(self.registers.F);
                     const jump_condition = jmpBlk: {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("CALL NZ\n", .{});
-                                break :jmpBlk !flags.zero;
+                                break :jmpBlk !self.registers.F.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("CALL NC\n", .{});
-                                break :jmpBlk !flags.carry;
+                                break :jmpBlk !self.registers.F.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("CALL Z\n", .{});
-                                break :jmpBlk flags.zero;
+                                break :jmpBlk self.registers.F.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("CALL C\n", .{});
-                                break :jmpBlk flags.carry;
+                                break :jmpBlk self.registers.F.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("CALL\n", .{});
@@ -209,24 +199,23 @@ const CPU = struct {
                     break :blk next_pc;
                 },
                 Instruction.RET => |jt| {
-                    const flags = u8_to_flag(self.registers.F);
                     const jump_condition = jmpBlk: {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("RET NZ\n", .{});
-                                break :jmpBlk !flags.zero;
+                                break :jmpBlk !self.registers.F.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("RET NC\n", .{});
-                                break :jmpBlk !flags.carry;
+                                break :jmpBlk !self.registers.F.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("RET Z\n", .{});
-                                break :jmpBlk flags.zero;
+                                break :jmpBlk self.registers.F.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("RET C\n", .{});
-                                break :jmpBlk flags.carry;
+                                break :jmpBlk self.registers.F.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("RET\n", .{});
@@ -363,24 +352,23 @@ const CPU = struct {
                     }
                 },
                 Instruction.JP => |jt| {
-                    const flags = u8_to_flag(self.registers.F);
                     const jump_condition = jpblk: {
                         switch (jt) {
                             JumpTest.NotZero => {
                                 std.debug.print("JP NZ\n", .{});
-                                break :jpblk !flags.zero;
+                                break :jpblk !self.registers.F.zero;
                             },
                             JumpTest.NotCarry => {
                                 std.debug.print("JP NC\n", .{});
-                                break :jpblk !flags.carry;
+                                break :jpblk !self.registers.F.carry;
                             },
                             JumpTest.Zero => {
                                 std.debug.print("JP Z\n", .{});
-                                break :jpblk flags.zero;
+                                break :jpblk self.registers.F.zero;
                             },
                             JumpTest.Carry => {
                                 std.debug.print("JP C\n", .{});
-                                break :jpblk flags.carry;
+                                break :jpblk self.registers.F.carry;
                             },
                             JumpTest.Always => {
                                 std.debug.print("JP\n", .{});
@@ -1142,14 +1130,13 @@ const CPU = struct {
         const carry = result[1];
 
         // zig fmt: off
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = sum == 0,
             .subtract = false,
             .carry = carry == 1,
             .half_carry = (((self.registers.A & 0xF) + (value & 0xF)) > 0xF),
         };
         // zig fmt: on
-        self.registers.F = flag_to_u8(flags);
         return sum;
     }
 
@@ -1158,13 +1145,12 @@ const CPU = struct {
         const sum = result[0];
         const carry = result[1];
 
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = false,
             .subtract = false,
             .carry = carry == 1,
             .half_carry = (((self.registers.get_HL() & 0xFFF) + (value & 0xFFF)) > 0xFFF),
         };
-        self.registers.F = flag_to_u8(flags);
         return sum;
     }
 
@@ -1175,32 +1161,28 @@ const CPU = struct {
         const result = @addWithOverflow(self.sp, extended);
         const sum = result[0];
         const carry = result[1];
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = false,
             .subtract = false,
             .carry = carry == 1,
             .half_carry = (((self.sp & 0xF) + (value & 0xF)) > 0xF),
         };
-        self.registers.F = flag_to_u8(flags);
         return sum;
     }
 
     fn adc(self: *CPU, value: u8) u8 {
-        const flags = u8_to_flag(self.registers.F);
-        const carry: u8 = @intFromBool(flags.carry);
+        const carry: u8 = @intFromBool(self.registers.F.carry);
         const result = @addWithOverflow(self.registers.A, value);
         const result2 = @addWithOverflow(result[0], carry);
         const sum = result2[0];
         const overflow = result2[1] | result[1];
 
-        const new_flags = FlagRegister{
+        self.registers.F = FlagRegister{
             .zero = sum == 0,
             .subtract = false,
             .carry = overflow == 1,
             .half_carry = (((self.registers.A & 0xF) + (value & 0xF) + overflow) > 0xF),
         };
-
-        self.registers.F = flag_to_u8(new_flags);
 
         return sum;
     }
@@ -1210,32 +1192,29 @@ const CPU = struct {
         const sum = result[0];
         const carry = result[1];
 
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = sum == 0,
             .subtract = true,
             .carry = carry == 1,
             .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF)) < 0),
         };
-        self.registers.F = flag_to_u8(flags);
 
         return sum;
     }
 
     fn sbc(self: *CPU, value: u8) u8 {
-        const flags = u8_to_flag(self.registers.F);
-        const carry = @intFromBool(flags.carry);
+        const carry = @intFromBool(self.registers.F.carry);
         const result = @subWithOverflow(self.registers.A, value);
         const result2 = @subWithOverflow(result[0], carry);
         const sum = result2[0];
         const overflow = result2[1] | result[1];
 
-        const new_flags = FlagRegister{
+        self.registers.F = .{
             .zero = sum == 0,
             .subtract = true,
             .carry = overflow == 1,
             .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - overflow) < 0),
         };
-        self.registers.F = flag_to_u8(new_flags);
 
         return sum;
     }
@@ -1243,13 +1222,12 @@ const CPU = struct {
     fn and_(self: *CPU, value: u8) u8 {
         const result = self.registers.A & value;
 
-        const flags = FlagRegister{
+        self.registers.F = FlagRegister{
             .zero = result == 0,
             .subtract = false,
             .half_carry = true,
             .carry = false,
         };
-        self.registers.F = flag_to_u8(flags);
 
         return result;
     }
@@ -1257,13 +1235,12 @@ const CPU = struct {
     fn xor(self: *CPU, value: u8) u8 {
         const result = self.registers.A ^ value;
 
-        const flags = FlagRegister{
+        self.registers.F = FlagRegister{
             .zero = result == 0,
             .subtract = false,
             .half_carry = false,
             .carry = false,
         };
-        self.registers.F = flag_to_u8(flags);
 
         return result;
     }
@@ -1271,13 +1248,12 @@ const CPU = struct {
     fn or_(self: *CPU, value: u8) u8 {
         const result = self.registers.A | value;
 
-        const flags = FlagRegister{
+        self.registers.F = FlagRegister{
             .zero = result == 0,
             .subtract = false,
             .half_carry = false,
             .carry = false,
         };
-        self.registers.F = flag_to_u8(flags);
 
         return result;
     }
@@ -1286,26 +1262,24 @@ const CPU = struct {
         const sum = result[0];
         const carry = result[1];
 
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = sum == 0,
             .subtract = true,
             .carry = carry == 1,
             .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF)) < 0),
         };
-        self.registers.F = flag_to_u8(flags);
 
         return;
     }
 
     fn inc(self: *CPU, value: u8) u8 {
         const result = value +% 1;
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = result == 0,
             .subtract = false,
             .half_carry = (value & 0xF) == 0xF,
             .carry = false,
         };
-        self.registers.F = flag_to_u8(flags);
         return result;
     }
 
@@ -1316,13 +1290,12 @@ const CPU = struct {
 
     fn dec(self: *CPU, value: u8) u8 {
         const result = value -% 1;
-        const flags = FlagRegister{
+        self.registers.F = .{
             .zero = result == 0,
             .subtract = true,
             .half_carry = (value & 0xF) == 0,
             .carry = false,
         };
-        self.registers.F = flag_to_u8(flags);
         return result;
     }
 
@@ -1377,7 +1350,12 @@ const CPU = struct {
                 .C = 0x00,
                 .D = 0x00,
                 .E = 0x00,
-                .F = 0x00,
+                .F = .{
+                    .zero = false,
+                    .subtract = false,
+                    .half_carry = false,
+                    .carry = false,
+                },
                 .H = 0x00,
                 .L = 0x00,
             },
@@ -1515,30 +1493,29 @@ test "Add A + C" {
     var cpu = CPU.new();
     cpu.registers.A = 0xFF;
     cpu.registers.C = 0x02;
-    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, cpu.registers.F });
+    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
 
     _ = cpu.execute(instc);
-    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, cpu.registers.F });
+    std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
 }
 
 test "Adc A + E" {
     std.debug.print("Adc A + E\n", .{});
     const inste = Instruction{ .ADC = ArithmeticTarget.E };
     var cpu = CPU.new();
-    const flags = FlagRegister{
+    cpu.registers.F = .{
         .zero = true,
         .subtract = false,
         .carry = true,
         .half_carry = false,
     };
-    cpu.registers.F = @bitCast(flags);
 
     cpu.registers.A = 0xFE;
     cpu.registers.E = 0x01;
-    std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, cpu.registers.F });
+    std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, @as(u8, @bitCast(cpu.registers.F)) });
 
     _ = cpu.execute(inste);
-    std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, cpu.registers.F });
+    std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, @as(u8, @bitCast(cpu.registers.F)) });
 }
 
 test "Sub A + D" {
@@ -1547,29 +1524,28 @@ test "Sub A + D" {
     var cpu = CPU.new();
     cpu.registers.A = 0x01;
     cpu.registers.D = 0x01;
-    std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, cpu.registers.F });
+    std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
 
     _ = cpu.execute(instd);
-    std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, cpu.registers.F });
+    std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
 }
 
 test "Sbc A + B" {
     std.debug.print("Sbc A + D\n", .{});
     const instb = Instruction{ .SBC = ArithmeticTarget.B };
     var cpu = CPU.new();
-    const flags = FlagRegister{
+    cpu.registers.F = .{
         .zero = true,
         .subtract = false,
         .carry = true,
         .half_carry = false,
     };
-    cpu.registers.F = @bitCast(flags);
     cpu.registers.A = 0x01;
     cpu.registers.B = 0x01;
-    std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, cpu.registers.F });
+    std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, @as(u8, @bitCast(cpu.registers.F)) });
 
     _ = cpu.execute(instb);
-    std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, cpu.registers.F });
+    std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, @as(u8, @bitCast(cpu.registers.F)) });
 }
 
 test "sp add" {
@@ -1578,9 +1554,9 @@ test "sp add" {
     var cpu = CPU.new();
     cpu.sp = 0xFFFF;
     cpu.bus.memory[0x0001] = 0x05;
-    std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, cpu.registers.F });
+    std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
     _ = cpu.execute(inst);
-    std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, cpu.registers.F });
+    std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
 }
 
 test "Jump" {
