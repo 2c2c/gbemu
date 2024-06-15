@@ -1149,7 +1149,7 @@ const CPU = struct {
             .zero = false,
             .subtract = false,
             .carry = carry == 1,
-            .half_carry = (((self.registers.get_HL() & 0xFFF) + (value & 0xFFF)) > 0xFFF),
+            .half_carry = (((self.registers.get_HL() & 0x7FF) + (value & 0x7FF)) > 0x7FF),
         };
         return sum;
     }
