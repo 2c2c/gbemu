@@ -110,6 +110,8 @@ const Instruction = union(enum) {
     WDEC: WideArithmeticTarget,
     DAA: void,
     CPL: void,
+    CCF: void,
+    SCF: void,
     JP: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -1111,6 +1113,18 @@ const CPU = struct {
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
+                Instruction.CCF => |_| {
+                    std.debug.print("CCF\n", .{});
+                    _ = self.ccf();
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.SCF => |_| {
+                    std.debug.print("SCF\n", .{});
+                    _ = self.scf();
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
             }
         };
         return res;
@@ -1355,6 +1369,24 @@ const CPU = struct {
             .subtract = true,
             .half_carry = true,
             .carry = self.registers.F.carry,
+        };
+    }
+
+    fn ccf(self: *CPU) void {
+        self.registers.F = .{
+            .zero = self.registers.F.zero,
+            .subtract = false,
+            .half_carry = false,
+            .carry = !self.registers.F.carry,
+        };
+    }
+
+    fn scf(self: *CPU) void {
+        self.registers.F = .{
+            .zero = self.registers.F.zero,
+            .subtract = false,
+            .half_carry = false,
+            .carry = true,
         };
     }
 
