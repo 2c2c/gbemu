@@ -138,6 +138,7 @@ const Instruction = union(enum) {
     RRCA: void,
     RRA: void,
     JP: JumpTest,
+    JR: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
     POP: StackTarget,
@@ -516,12 +517,13 @@ const CPU = struct {
                         LoadType.HLFromSPN => {
                             const n = self.read_next_byte();
                             const signed: i8 = @bitCast(n);
-                            const extended: u16 = @intCast(signed);
-                            self.registers.set_HL(extended);
+                            const extended = @as(i16, signed);
+                            const unsigned: u16 = @bitCast(extended);
+                            self.registers.set_HL(unsigned);
                             self.registers.F.zero = false;
                             self.registers.F.subtract = false;
-                            self.registers.F.half_carry = (self.sp & 0xF) + (extended & 0xF) > 0xF;
-                            self.registers.F.carry = (self.sp & 0xFF) + (extended & 0xFF) > 0xFF;
+                            self.registers.F.half_carry = (self.sp & 0xF) + (unsigned & 0xF) > 0xF;
+                            self.registers.F.carry = (self.sp & 0xFF) + (unsigned & 0xFF) > 0xFF;
                             const next_pc = self.pc +% 2;
                             break :blk next_pc;
                         },
@@ -561,7 +563,34 @@ const CPU = struct {
                     const new_pc = self.jump(jump_condition);
                     break :blk new_pc;
                 },
-
+                Instruction.JR => |jt| {
+                    const jump_condition = jpblk: {
+                        switch (jt) {
+                            JumpTest.NotZero => {
+                                std.debug.print("JP NZ\n", .{});
+                                break :jpblk !self.registers.F.zero;
+                            },
+                            JumpTest.NotCarry => {
+                                std.debug.print("JP NC\n", .{});
+                                break :jpblk !self.registers.F.carry;
+                            },
+                            JumpTest.Zero => {
+                                std.debug.print("JP Z\n", .{});
+                                break :jpblk self.registers.F.zero;
+                            },
+                            JumpTest.Carry => {
+                                std.debug.print("JP C\n", .{});
+                                break :jpblk self.registers.F.carry;
+                            },
+                            JumpTest.Always => {
+                                std.debug.print("JP\n", .{});
+                                break :jpblk true;
+                            },
+                        }
+                    };
+                    const new_pc = self.jump_relative(jump_condition);
+                    break :blk new_pc;
+                },
                 Instruction.ADD => |target| {
                     const value = addBlk: {
                         switch (target) {
@@ -1359,6 +1388,27 @@ const CPU = struct {
             return self.pc +% 3;
         }
     }
+    fn jump_relative(self: *CPU, should_jump: bool) u16 {
+        var new_pc = self.pc +% 2;
+        if (should_jump) {
+            const offset = self.read_next_byte();
+            const signed_offset: i8 = @bitCast(offset);
+            const extended: i16 = @as(i16, signed_offset);
+            const unsigned: u16 = @bitCast(extended);
+            new_pc = blk: {
+                if (signed_offset < 0) {
+                    break :blk new_pc -% unsigned;
+                } else {
+                    break :blk new_pc +% unsigned;
+                }
+            };
+            return new_pc;
+        } else {
+            return self.pc +% 2;
+        }
+
+        return new_pc;
+    }
     fn add(self: *CPU, value: u8) u8 {
         const result = @addWithOverflow(self.registers.A, value);
         const sum = result[0];
@@ -1391,12 +1441,16 @@ const CPU = struct {
 
     fn spadd(self: *CPU, value: u8) u16 {
         const signed: i8 = @bitCast(value);
-        const extended: u16 = @intCast(signed);
-        const sum = self.sp +% extended;
+        // const extended: u16 = @intCast(signed);
+        const extended = @as(i16, signed);
+        // const unsigned: u16 = @intCast(@abs(extended));
+        const unsigned: u16 = @bitCast(extended);
+        std.debug.print("SPADD: {} + {}\n", .{ self.sp, unsigned });
+        const sum = self.sp +% unsigned;
         self.registers.F = .{
             .zero = false,
             .subtract = false,
-            .carry = (((self.sp & 0xFF) + (extended & 0xFF)) > 0xFF),
+            .carry = (((self.sp & 0xFF) + (unsigned & 0xFF)) > 0xFF),
             .half_carry = (((self.sp & 0xF) + (value & 0xF)) > 0xF),
         };
         return sum;
@@ -1910,7 +1964,7 @@ test "sp add" {
     const inst = Instruction{ .SPADD = {} };
     var cpu = CPU.new();
     cpu.sp = 0xFFFF;
-    cpu.bus.memory[0x0001] = 0x05;
+    cpu.bus.memory[0x0001] = 0xFF;
     std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
     _ = cpu.execute(inst);
     std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
@@ -1937,4 +1991,22 @@ test "overflow" {
     const comp_b: u8 = @bitCast(@as(i8, -0x01));
     const res = @addWithOverflow(comp_a, comp_b);
     std.debug.print("0xFF + -1 = {d} {d}\n", .{ res[0], res[1] });
+}
+
+test "signed to unsigned" {
+    std.debug.print("signed to unsigned\n", .{});
+    const value: u8 = 0xFF;
+    const signed: i8 = @bitCast(value);
+    const extended = @as(i16, signed);
+    const unsigned: u16 = @bitCast(extended);
+    std.debug.print("value: {b} signed: {b}, extended: {b}, unsigned: {b} \n", .{ value, signed, extended, unsigned });
+    std.debug.print("-1 as unsigned: {d}\n", .{unsigned});
+}
+
+test "signed to unsigned2" {
+    std.debug.print("signed to unsigned\n", .{});
+    const value: u8 = 0xFF;
+    const extended: u16 = @intCast(value);
+    std.debug.print("value {b} extended {b}", .{ value, extended });
+    std.debug.print("-1 as unsigned: {d}\n", .{extended});
 }
