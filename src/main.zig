@@ -1155,16 +1155,13 @@ const CPU = struct {
     }
 
     fn spadd(self: *CPU, value: u8) u16 {
-        // FIXME: This is wrong, we should be adding a signed byte to the SP
         const signed: i8 = @bitCast(value);
         const extended: u16 = @intCast(signed);
-        const result = @addWithOverflow(self.sp, extended);
-        const sum = result[0];
-        const carry = result[1];
+        const sum = self.sp +% extended;
         self.registers.F = .{
             .zero = false,
             .subtract = false,
-            .carry = carry == 1,
+            .carry = (((self.sp & 0xFF) + (extended & 0xFF)) > 0xFF),
             .half_carry = (((self.sp & 0xF) + (value & 0xF)) > 0xF),
         };
         return sum;
