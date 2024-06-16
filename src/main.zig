@@ -11,12 +11,14 @@ const Registers = struct {
     L: u8,
 
     fn get_AF(self: *Registers) u16 {
-        return @as(u16, self.A) << 8 | @as(u16, self.F);
+        const fu8: u8 = @bitCast(self.F);
+        return @as(u16, self.A) << 8 | @as(u16, fu8);
     }
 
     fn set_AF(self: *Registers, value: u16) void {
         self.A = @truncate((value & 0xFF00) >> 8);
-        self.F = @truncate(value & 0xFF);
+        const trunc: u8 = @truncate(value & 0xFF);
+        self.F = @bitCast(trunc);
     }
 
     fn get_BC(self: *Registers) u16 {
@@ -150,9 +152,9 @@ const Instruction = union(enum) {
     HALT: void,
     // prefixed
     RLC: PrefixTarget,
-    RRC: PrefixTarget,
-    RL: PrefixTarget,
-    RR: PrefixTarget,
+    // RRC: PrefixTarget,
+    // RL: PrefixTarget,
+    // RR: PrefixTarget,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -282,9 +284,6 @@ const CPU = struct {
                             std.debug.print("POP AF\n", .{});
                             self.registers.set_AF(result);
                         },
-                        else => {
-                            std.debug.print("Unknown POP target\n", .{});
-                        },
                     }
                     const next_pc = self.pc +% 1;
                     break :blk next_pc;
@@ -307,10 +306,6 @@ const CPU = struct {
                             StackTarget.AF => {
                                 std.debug.print("PUSH.AF\n", .{});
                                 break :pushBlk self.registers.get_AF();
-                            },
-                            else => {
-                                std.debug.print("Unknown POP target\n", .{});
-                                break :pushBlk 0xFFFF;
                             },
                         }
                     };
@@ -1771,6 +1766,52 @@ const CPU = struct {
             .carry = value & 1 == 1,
         };
         return new_value;
+    }
+
+    // fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, instruction: Instruction, op: *const fn (*CPU, u8) u8) u16 {
+    fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8) u8) u16 {
+        switch (target) {
+            PrefixTarget.A => {
+                const value = self.registers.A;
+                const new_value = op(self, value);
+                self.registers.A = new_value;
+            },
+            PrefixTarget.B => {
+                const value = self.registers.B;
+                const new_value = op(self, value);
+                self.registers.B = new_value;
+            },
+            PrefixTarget.C => {
+                const value = self.registers.C;
+                const new_value = op(self, value);
+                self.registers.C = new_value;
+            },
+            PrefixTarget.D => {
+                const value = self.registers.D;
+                const new_value = op(self, value);
+                self.registers.D = new_value;
+            },
+            PrefixTarget.E => {
+                const value = self.registers.E;
+                const new_value = op(self, value);
+                self.registers.E = new_value;
+            },
+            PrefixTarget.H => {
+                const value = self.registers.H;
+                const new_value = op(self, value);
+                self.registers.H = new_value;
+            },
+            PrefixTarget.L => {
+                const value = self.registers.L;
+                const new_value = op(self, value);
+                self.registers.L = new_value;
+            },
+            PrefixTarget.HLI => {
+                const value = self.bus.read_byte(self.registers.get_HL());
+                const new_value = op(self, value);
+                self.bus.write_byte(self.registers.get_HL(), new_value);
+            },
+        }
     }
 
     fn push(self: *CPU, value: u16) void {
