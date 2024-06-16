@@ -159,6 +159,9 @@ const Instruction = union(enum) {
     SRA: PrefixTarget,
     SWAP: PrefixTarget,
     SRL: PrefixTarget,
+    BIT: PrefixTarget,
+    SET: PrefixTarget,
+    RES: PrefixTarget,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -1392,49 +1395,67 @@ const CPU = struct {
                 },
                 Instruction.RLC => |target| {
                     std.debug.print("RLC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_left_use_carry);
+                    handle_prefix_instruction(self, target, rotate_left_use_carry, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RRC => |target| {
                     std.debug.print("RRC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_right_use_carry);
+                    handle_prefix_instruction(self, target, rotate_right_use_carry, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RL => |target| {
                     std.debug.print("RL {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_left);
+                    handle_prefix_instruction(self, target, rotate_left, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RR => |target| {
                     std.debug.print("RR {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_right);
+                    handle_prefix_instruction(self, target, rotate_right, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.SLA => |target| {
                     std.debug.print("LRA {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_left_arithmetic);
+                    handle_prefix_instruction(self, target, shift_left_arithmetic, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.SRA => |target| {
                     std.debug.print("SRA {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_right_arithmetic);
+                    handle_prefix_instruction(self, target, shift_right_arithmetic, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.SRL => |target| {
                     std.debug.print("SRL {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_right_logical);
+                    handle_prefix_instruction(self, target, shift_right_logical, null);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.SWAP => |target| {
                     std.debug.print("SWAP {}\n", .{target});
-                    handle_prefix_instruction(self, target, swap);
+                    handle_prefix_instruction(self, target, swap, null);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.BIT => |target| {
+                    std.debug.print("SWAP {}\n", .{target});
+                    handle_prefix_instruction(self, target, bit);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.SET => |target| {
+                    std.debug.print("SET {}\n", .{target});
+                    handle_prefix_instruction(self, target, set);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.RES => |target| {
+                    std.debug.print("RES {}\n", .{target});
+                    handle_prefix_instruction(self, target, reset);
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
@@ -1838,48 +1859,67 @@ const CPU = struct {
         };
         return new_value;
     }
+    fn bit(self: *CPU, value: u8, bit_position: u3) bool {
+        const bit_check = (value >> bit_position) & 1;
+        self.registers.F = .{
+            .zero = bit == 0,
+            .subtract = false,
+            .half_carry = true,
+            .carry = self.registers.F.carry,
+        };
+
+        return bit_check > 0;
+    }
+
+    fn set(_: *CPU, value: u8, bit_position: u3) u8 {
+        return value | (1 << bit_position);
+    }
+
+    fn reset(_: *CPU, value: u8, bit_position: u3) u8 {
+        return value & ~(1 << bit_position);
+    }
 
     // fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, instruction: Instruction, op: *const fn (*CPU, u8) u8) u16 {
-    fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8) u8) void {
+    fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8, ?u3) u8, bit_position: ?u3) void {
         switch (target) {
             PrefixTarget.A => {
                 const value = self.registers.A;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.A = new_value;
             },
             PrefixTarget.B => {
                 const value = self.registers.B;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.B = new_value;
             },
             PrefixTarget.C => {
                 const value = self.registers.C;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.C = new_value;
             },
             PrefixTarget.D => {
                 const value = self.registers.D;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.D = new_value;
             },
             PrefixTarget.E => {
                 const value = self.registers.E;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.E = new_value;
             },
             PrefixTarget.H => {
                 const value = self.registers.H;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.H = new_value;
             },
             PrefixTarget.L => {
                 const value = self.registers.L;
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.registers.L = new_value;
             },
             PrefixTarget.HLI => {
                 const value = self.bus.read_byte(self.registers.get_HL());
-                const new_value = op(self, value);
+                const new_value = op(self, value, bit_position);
                 self.bus.write_byte(self.registers.get_HL(), new_value);
             },
         }
