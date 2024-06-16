@@ -155,6 +155,10 @@ const Instruction = union(enum) {
     RRC: PrefixTarget,
     RL: PrefixTarget,
     RR: PrefixTarget,
+    SLA: PrefixTarget,
+    SRA: PrefixTarget,
+    SWAP: PrefixTarget,
+    SRL: PrefixTarget,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -1410,6 +1414,30 @@ const CPU = struct {
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
+                Instruction.SLA => |target| {
+                    std.debug.print("LRA {}\n", .{target});
+                    handle_prefix_instruction(self, target, shift_left_arithmetic);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.SRA => |target| {
+                    std.debug.print("SRA {}\n", .{target});
+                    handle_prefix_instruction(self, target, shift_right_arithmetic);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.SRL => |target| {
+                    std.debug.print("SRL {}\n", .{target});
+                    handle_prefix_instruction(self, target, shift_right_logical);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.SWAP => |target| {
+                    std.debug.print("SWAP {}\n", .{target});
+                    handle_prefix_instruction(self, target, swap);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
             }
         };
         return res;
@@ -1748,6 +1776,65 @@ const CPU = struct {
             .subtract = false,
             .half_carry = false,
             .carry = value & 1 == 1,
+        };
+        return new_value;
+    }
+
+    fn shift_left_arithmetic(self: *CPU, value: u8) u8 {
+        const carry = value >> 7;
+        const new_value = value << 1;
+        self.registers.F = .{
+            .zero = new_value == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+        return new_value;
+    }
+
+    fn shift_right_arithmetic(self: *CPU, value: u8) u8 {
+        const carry = value & 1;
+        const new_value = (value >> 1) | (value & 0x80);
+        self.registers.F = .{
+            .zero = new_value == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+        return new_value;
+    }
+
+    // fn shift_left_logical(self: *CPU, value: u8) u8 {
+    //     const carry = value >> 7;
+    //     const new_value = value << 1;
+    //     self.registers.F = .{
+    //         .zero = new_value == 0,
+    //         .subtract = false,
+    //         .half_carry = false,
+    //         .carry = carry == 1,
+    //     };
+    //     return new_value;
+    // }
+
+    fn shift_right_logical(self: *CPU, value: u8) u8 {
+        const carry = value & 1;
+        const new_value = value >> 1;
+        self.registers.F = .{
+            .zero = new_value == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+        return new_value;
+    }
+
+    fn swap(self: *CPU, value: u8) u8 {
+        const new_value = (value >> 4) | (value << 4);
+        self.registers.F = .{
+            .zero = new_value == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = false,
         };
         return new_value;
     }
