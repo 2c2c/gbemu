@@ -114,6 +114,8 @@ const LoadType = union(enum) {
 
 const StackTarget = enum { BC, DE, HL, AF };
 
+const PrefixTarget = enum { B, C, D, E, H, L, HLI, A };
+
 const Instruction = union(enum) {
     ADD: ArithmeticTarget,
     WADD: WideArithmeticTarget,
@@ -146,6 +148,11 @@ const Instruction = union(enum) {
     RET: JumpTest,
     NOP: void,
     HALT: void,
+    // prefixed
+    RLC: PrefixTarget,
+    RRC: PrefixTarget,
+    RL: PrefixTarget,
+    RR: PrefixTarget,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -1381,6 +1388,46 @@ const CPU = struct {
                     std.debug.print("RRCA\n", .{});
                     const new_value = self.rotate_right_use_carry(self.registers.A);
                     self.registers.A = new_value;
+                    const new_pc: u16 = self.pc +% 1;
+                    break :blk new_pc;
+                },
+                Instruction.RLC => |target| {
+                    std.debug.print("RLC {}\n", .{target});
+                    switch (target) {
+                        PrefixTarget.A => {
+                            const new_value = self.rotate_left(self.registers.A);
+                            self.registers.A = new_value;
+                        },
+                        PrefixTarget.B => {
+                            const new_value = self.rotate_left(self.registers.B);
+                            self.registers.B = new_value;
+                        },
+                        PrefixTarget.C => {
+                            const new_value = self.rotate_left(self.registers.C);
+                            self.registers.C = new_value;
+                        },
+                        PrefixTarget.D => {
+                            const new_value = self.rotate_left(self.registers.D);
+                            self.registers.D = new_value;
+                        },
+                        PrefixTarget.E => {
+                            const new_value = self.rotate_left(self.registers.E);
+                            self.registers.E = new_value;
+                        },
+                        PrefixTarget.H => {
+                            const new_value = self.rotate_left(self.registers.H);
+                            self.registers.H = new_value;
+                        },
+                        PrefixTarget.L => {
+                            const new_value = self.rotate_left(self.registers.L);
+                            self.registers.L = new_value;
+                        },
+                        PrefixTarget.HLI => {
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.rotate_left(value);
+                            self.registers.set_HL(new_value);
+                        },
+                    }
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
