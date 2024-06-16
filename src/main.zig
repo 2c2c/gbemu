@@ -152,9 +152,9 @@ const Instruction = union(enum) {
     HALT: void,
     // prefixed
     RLC: PrefixTarget,
-    // RRC: PrefixTarget,
-    // RL: PrefixTarget,
-    // RR: PrefixTarget,
+    RRC: PrefixTarget,
+    RL: PrefixTarget,
+    RR: PrefixTarget,
     fn from_byte(byte: u8, prefixed: bool) ?Instruction {
         if (prefixed) {
             return Instruction.from_byte_prefixed(byte);
@@ -1388,42 +1388,26 @@ const CPU = struct {
                 },
                 Instruction.RLC => |target| {
                     std.debug.print("RLC {}\n", .{target});
-                    switch (target) {
-                        PrefixTarget.A => {
-                            const new_value = self.rotate_left(self.registers.A);
-                            self.registers.A = new_value;
-                        },
-                        PrefixTarget.B => {
-                            const new_value = self.rotate_left(self.registers.B);
-                            self.registers.B = new_value;
-                        },
-                        PrefixTarget.C => {
-                            const new_value = self.rotate_left(self.registers.C);
-                            self.registers.C = new_value;
-                        },
-                        PrefixTarget.D => {
-                            const new_value = self.rotate_left(self.registers.D);
-                            self.registers.D = new_value;
-                        },
-                        PrefixTarget.E => {
-                            const new_value = self.rotate_left(self.registers.E);
-                            self.registers.E = new_value;
-                        },
-                        PrefixTarget.H => {
-                            const new_value = self.rotate_left(self.registers.H);
-                            self.registers.H = new_value;
-                        },
-                        PrefixTarget.L => {
-                            const new_value = self.rotate_left(self.registers.L);
-                            self.registers.L = new_value;
-                        },
-                        PrefixTarget.HLI => {
-                            const value = self.bus.read_byte(self.registers.get_HL());
-                            const new_value = self.rotate_left(value);
-                            self.registers.set_HL(new_value);
-                        },
-                    }
-                    const new_pc: u16 = self.pc +% 1;
+                    handle_prefix_instruction(self, target, rotate_left_use_carry);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.RRC => |target| {
+                    std.debug.print("RRC {}\n", .{target});
+                    handle_prefix_instruction(self, target, rotate_right_use_carry);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.RL => |target| {
+                    std.debug.print("RL {}\n", .{target});
+                    handle_prefix_instruction(self, target, rotate_left);
+                    const new_pc: u16 = self.pc +% 2;
+                    break :blk new_pc;
+                },
+                Instruction.RR => |target| {
+                    std.debug.print("RR {}\n", .{target});
+                    handle_prefix_instruction(self, target, rotate_right);
+                    const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
             }
@@ -1769,7 +1753,7 @@ const CPU = struct {
     }
 
     // fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, instruction: Instruction, op: *const fn (*CPU, u8) u8) u16 {
-    fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8) u8) u16 {
+    fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8) u8) void {
         switch (target) {
             PrefixTarget.A => {
                 const value = self.registers.A;
@@ -2105,20 +2089,29 @@ test "overflow" {
     std.debug.print("0xFF + -1 = {d} {d}\n", .{ res[0], res[1] });
 }
 
-test "signed to unsigned" {
-    std.debug.print("signed to unsigned\n", .{});
-    const value: u8 = 0xFF;
-    const signed: i8 = @bitCast(value);
-    const extended = @as(i16, signed);
-    const unsigned: u16 = @bitCast(extended);
-    std.debug.print("value: {b} signed: {b}, extended: {b}, unsigned: {b} \n", .{ value, signed, extended, unsigned });
-    std.debug.print("-1 as unsigned: {d}\n", .{unsigned});
-}
+// test "signed to unsigned" {
+//     std.debug.print("signed to unsigned\n", .{});
+//     const value: u8 = 0xFF;
+//     const signed: i8 = @bitCast(value);
+//     const extended = @as(i16, signed);
+//     const unsigned: u16 = @bitCast(extended);
+//     std.debug.print("value: {b} signed: {b}, extended: {b}, unsigned: {b} \n", .{ value, signed, extended, unsigned });
+//     std.debug.print("-1 as unsigned: {d}\n", .{unsigned});
+// }
+//
 
-test "signed to unsigned2" {
-    std.debug.print("signed to unsigned\n", .{});
-    const value: u8 = 0xFF;
-    const extended: u16 = @intCast(value);
-    std.debug.print("value {b} extended {b}", .{ value, extended });
-    std.debug.print("-1 as unsigned: {d}\n", .{extended});
+test "RRC" {
+    std.debug.print("RRC\n", .{});
+    const inst = Instruction{ .RRC = PrefixTarget.A };
+    var cpu = CPU.new();
+    cpu.registers.F = .{
+        .zero = true,
+        .subtract = false,
+        .carry = true,
+        .half_carry = false,
+    };
+    cpu.registers.A = 0b1100_1000;
+    std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
+    _ = cpu.execute(inst);
+    std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
 }
