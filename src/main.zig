@@ -1865,9 +1865,9 @@ const CPU = struct {
         return new_value;
     }
     fn bit(self: *CPU, value: u8, args: PrefixExtendedArgs) u8 {
-        const bit_check = (value >> args.bit) & 1;
+        const bit_check = (value >> args.bit.?) & 1;
         self.registers.F = .{
-            .zero = bit == 0,
+            .zero = args.bit.? == 0,
             .subtract = false,
             .half_carry = true,
             .carry = self.registers.F.carry,
@@ -1877,11 +1877,11 @@ const CPU = struct {
     }
 
     fn set(_: *CPU, value: u8, args: PrefixExtendedArgs) u8 {
-        return value | (1 << args.bit);
+        return value | (@as(u8, 1) << args.bit.?);
     }
 
     fn reset(_: *CPU, value: u8, args: PrefixExtendedArgs) u8 {
-        return value & ~(1 << args.bit);
+        return value & ~(@as(u8, 1) << args.bit.?);
     }
 
     // fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, instruction: Instruction, op: *const fn (*CPU, u8) u8) u16 {
