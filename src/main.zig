@@ -456,6 +456,7 @@ const CPU = struct {
     sp: u16,
     bus: MemoryBus,
     is_halted: bool,
+    interrupts_enabled: bool,
     fn execute(self: *CPU, instruction: Instruction) u16 {
         if (self.is_halted) {
             return self.pc;
@@ -525,6 +526,21 @@ const CPU = struct {
                         }
                     };
                     const next_pc = self.ret(jump_condition);
+                    break :blk next_pc;
+                },
+                Instruction.RETI => {
+                    std.debug.print("RETI\n", .{});
+                    const next_pc = self.reti();
+                    break :blk next_pc;
+                },
+                Instruction.DI => {
+                    std.debug.print("DI\n", .{});
+                    const next_pc = self.di();
+                    break :blk next_pc;
+                },
+                Instruction.EI => {
+                    std.debug.print("EI\n", .{});
+                    const next_pc = self.ei();
                     break :blk next_pc;
                 },
                 Instruction.RST => |location| {
@@ -2222,6 +2238,22 @@ const CPU = struct {
             return self.pc +% 1;
         }
     }
+
+    fn di(self: *CPU) u16 {
+        self.interrupts_enabled = false;
+        return self.pc +% 1;
+    }
+
+    fn ei(self: *CPU) u16 {
+        self.interrupts_enabled = true;
+        return self.pc +% 1;
+    }
+
+    fn reti(self: *CPU) u16 {
+        self.interrupts_enabled = true;
+        const address = self.pop();
+        return address;
+    }
     fn rst(self: *CPU, location: RstLocation) u16 {
         const address: u16 = @intFromEnum(location);
         self.push(self.pc +% 1);
@@ -2249,6 +2281,7 @@ const CPU = struct {
             .sp = 0x00,
             .bus = MemoryBus.new(),
             .is_halted = false,
+            .interrupts_enabled = true,
         };
         return cpu;
     }
@@ -2269,8 +2302,18 @@ const CPU = struct {
     }
 };
 
+const IERegister = packed struct {
+    enable_vblank: bool,
+    enable_lcd_stat: bool,
+    enable_timer: bool,
+    enable_serial: bool,
+    enable_joypad: bool,
+    _padding: u3,
+};
+
 const MemoryBus = struct {
     memory: [0x10000]u8,
+
     gpu: GPU,
     pub fn new() MemoryBus {
         return MemoryBus{
