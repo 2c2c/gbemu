@@ -1789,14 +1789,12 @@ const CPU = struct {
         const sum = result[0];
         const carry = result[1];
 
-        // zig fmt: off
         self.registers.F = .{
             .zero = sum == 0,
             .subtract = false,
             .carry = carry == 1,
             .half_carry = (((self.registers.A & 0xF) + (value & 0xF)) > 0xF),
         };
-        // zig fmt: on
         return sum;
     }
 
