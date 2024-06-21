@@ -440,11 +440,89 @@ const Instruction = union(enum) {
         };
         return inst;
     }
+
     fn from_byte_prefixed(byte: u8) ?Instruction {
         const inst = switch (byte) {
-            // 0x80 => return Instruction{ .ADD = ArithmeticTarget.A },
-            // 0x81 => return Instruction{ .ADD = ArithmeticTarget.B },
-            _ => unreachable,
+            0x00 => return Instruction{ .RLC = PrefixTarget.B },
+            0x01 => return Instruction{ .RLC = PrefixTarget.C },
+            0x02 => return Instruction{ .RLC = PrefixTarget.D },
+            0x03 => return Instruction{ .RLC = PrefixTarget.E },
+            0x04 => return Instruction{ .RLC = PrefixTarget.H },
+            0x05 => return Instruction{ .RLC = PrefixTarget.L },
+            0x06 => return Instruction{ .RLC = PrefixTarget.HLI },
+            0x07 => return Instruction{ .RLC = PrefixTarget.A },
+            0x08 => return Instruction{ .RRC = PrefixTarget.B },
+            0x09 => return Instruction{ .RRC = PrefixTarget.C },
+            0x0A => return Instruction{ .RRC = PrefixTarget.D },
+            0x0B => return Instruction{ .RRC = PrefixTarget.E },
+            0x0C => return Instruction{ .RRC = PrefixTarget.H },
+            0x0D => return Instruction{ .RRC = PrefixTarget.L },
+            0x0E => return Instruction{ .RRC = PrefixTarget.HLI },
+            0x0F => return Instruction{ .RRC = PrefixTarget.A },
+            0x10 => return Instruction{ .RL = PrefixTarget.B },
+            0x11 => return Instruction{ .RL = PrefixTarget.C },
+            0x12 => return Instruction{ .RL = PrefixTarget.D },
+            0x13 => return Instruction{ .RL = PrefixTarget.E },
+            0x14 => return Instruction{ .RL = PrefixTarget.H },
+            0x15 => return Instruction{ .RL = PrefixTarget.L },
+            0x16 => return Instruction{ .RL = PrefixTarget.HLI },
+            0x17 => return Instruction{ .RL = PrefixTarget.A },
+            0x18 => return Instruction{ .RR = PrefixTarget.B },
+            0x19 => return Instruction{ .RR = PrefixTarget.C },
+            0x1A => return Instruction{ .RR = PrefixTarget.D },
+            0x1B => return Instruction{ .RR = PrefixTarget.E },
+            0x1C => return Instruction{ .RR = PrefixTarget.H },
+            0x1D => return Instruction{ .RR = PrefixTarget.L },
+            0x1E => return Instruction{ .RR = PrefixTarget.HLI },
+            0x1F => return Instruction{ .RR = PrefixTarget.A },
+            0x20 => return Instruction{ .SLA = PrefixTarget.B },
+            0x21 => return Instruction{ .SLA = PrefixTarget.C },
+            0x22 => return Instruction{ .SLA = PrefixTarget.D },
+            0x23 => return Instruction{ .SLA = PrefixTarget.E },
+            0x24 => return Instruction{ .SLA = PrefixTarget.H },
+            0x25 => return Instruction{ .SLA = PrefixTarget.L },
+            0x26 => return Instruction{ .SLA = PrefixTarget.HLI },
+            0x27 => return Instruction{ .SLA = PrefixTarget.A },
+            0x28 => return Instruction{ .SRA = PrefixTarget.B },
+            0x29 => return Instruction{ .SRA = PrefixTarget.C },
+            0x2A => return Instruction{ .SRA = PrefixTarget.D },
+            0x2B => return Instruction{ .SRA = PrefixTarget.E },
+            0x2C => return Instruction{ .SRA = PrefixTarget.H },
+            0x2D => return Instruction{ .SRA = PrefixTarget.L },
+            0x2E => return Instruction{ .SRA = PrefixTarget.HLI },
+            0x2F => return Instruction{ .SRA = PrefixTarget.A },
+            0x30 => return Instruction{ .SWAP = PrefixTarget.B },
+            0x31 => return Instruction{ .SWAP = PrefixTarget.C },
+            0x32 => return Instruction{ .SWAP = PrefixTarget.D },
+            0x33 => return Instruction{ .SWAP = PrefixTarget.E },
+            0x34 => return Instruction{ .SWAP = PrefixTarget.H },
+            0x35 => return Instruction{ .SWAP = PrefixTarget.L },
+            0x36 => return Instruction{ .SWAP = PrefixTarget.HLI },
+            0x37 => return Instruction{ .SWAP = PrefixTarget.A },
+            0x38 => return Instruction{ .SRL = PrefixTarget.B },
+            0x39 => return Instruction{ .SRL = PrefixTarget.C },
+            0x3A => return Instruction{ .SRL = PrefixTarget.D },
+            0x3B => return Instruction{ .SRL = PrefixTarget.E },
+            0x3C => return Instruction{ .SRL = PrefixTarget.H },
+            0x3D => return Instruction{ .SRL = PrefixTarget.L },
+            0x3E => return Instruction{ .SRL = PrefixTarget.HLI },
+            0x3F => return Instruction{ .SRL = PrefixTarget.A },
+            0x40...0x7F => {
+                const bit = (byte & 0x38) >> 3;
+                const target: PrefixTarget = @enumFromInt(byte & 0x07);
+                return Instruction{ .BIT = .{ .target = target, .bit = bit } };
+            },
+            0x80...0xBF => {
+                const bit = (byte & 0x38) >> 3;
+                const target: PrefixTarget = @enumFromInt(byte & 0x07);
+                return Instruction{ .RES = .{ .target = target, .bit = bit } };
+            },
+            0xC0...0xFF => {
+                const bit = (byte & 0x38) >> 3;
+                const target: PrefixTarget = @enumFromInt(byte & 0x07);
+                return Instruction{ .SET = .{ .target = target, .bit = bit } };
+            },
+            else => unreachable,
         };
         return inst;
     }
@@ -2377,6 +2455,173 @@ fn empty_tile() Tile {
     return .{.{.Zero} ** 8} ** 8;
 }
 
+const JoypadAction = packed struct {
+    A: bool,
+    B: bool,
+    SELECT: bool,
+    START: bool,
+    column: u1 = 0,
+    _padding: u3 = 0,
+};
+
+const JoypadDirection = packed struct {
+    RIGHT: bool,
+    LEFT: bool,
+    UP: bool,
+    DOWN: bool,
+    column: u1 = 1,
+    _padding: u3 = 0,
+};
+
+const Joypad = struct {
+    COLUMN: u1,
+    action: JoypadAction,
+    direction: JoypadDirection,
+
+    pub fn new() Joypad {
+        return Joypad{
+            .COLUMN = 0,
+            .action = .{
+                .A = false,
+                .B = false,
+                .SELECT = false,
+                .START = false,
+            },
+            .direction = .{
+                .RIGHT = false,
+                .LEFT = false,
+                .UP = false,
+                .DOWN = false,
+            },
+        };
+    }
+    pub fn to_bytes(self: *const Joypad) u8 {
+        if (self.COLUMN == 0) {
+            return @bitCast(self.action);
+        } else {
+            return @bitCast(self.direction);
+        }
+    }
+};
+
+const Object = packed struct {
+    y: u8,
+    x: u8,
+    attributes: packed struct {
+        // gbc
+        cgb_palette: u3,
+        bank: bool,
+
+        dmg_palette: bool,
+        x_flip: bool,
+        y_flip: bool,
+        palette: bool,
+    },
+};
+
+// FF00
+// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
+const DIV = 0;
+
+// FF05
+// when overflows, resets to TMA + interrupt is called
+const TIMA: u8 = 0;
+// FF06
+// Timer Modulo
+//
+const TMA: u8 = 0;
+// FF07
+const TAC = packed struct {
+    // 4096, 262144, 65536, 16384
+    frequency: u2,
+    enabled: bool,
+    _padding: u5,
+};
+// FF40
+const LCDC = packed struct {
+    bg_display: bool,
+    obj_display: bool,
+    // 8x8 8x16
+    obj_size: bool,
+    // 0x9800-0x9BFF 0x9C00-0x9FFF
+    bg_tile_map: bool,
+    // 0x8800-0x97FF 0x8000-0x8FFF
+    bg_tile_set: bool,
+    window_display: bool,
+    // 0x9800-0x9BFF 0x9C00-0x9FFF
+    window_tile_map: bool,
+    lcd_display: bool,
+};
+
+// FF41 STAT
+// LCD Status
+const Stat = packed struct {
+    ppu_mode: u2,
+    lyc_ly_compare: bool,
+    mode_0_select: bool,
+    mode_1_select: bool,
+    mode_2_select: bool,
+    lyc_int_select: bool,
+};
+
+// viewport only displays 160x144 out of the entire 256x256 background
+//
+const background_viewport = packed struct {
+    // FF42 SCY
+    y: u8,
+    // FF43 SCX
+    x: u8,
+    fn bottom(self: *const background_viewport) u8 {
+        return self.y +% 143;
+    }
+    fn right(self: *const background_viewport) u8 {
+        return self.x +% 159;
+    }
+};
+
+// WX=7, WY=0 is the top left corner of the window
+// viewport only displays 160x144 out of the entire 256x256 background
+//
+const window_position = packed struct {
+    // FF4A WY
+    // 0-143
+    y: u8,
+    // FF4B WX
+    // 0-166
+    x: u8,
+};
+
+// FF44
+// current horizontal line
+// 0-153, 144-153 are vblank
+const LY: u8 = undefined;
+
+// FF45
+// LYC compare
+// 0-153
+// LY == LYC
+// STAT interrupt
+const LYC: u8 = undefined;
+
+const Palette = packed struct {
+    color_0: u2,
+    color_1: u2,
+    color_2: u2,
+    color_3: u2,
+};
+
+// FF47
+// bg pallette
+// assigns colors to bg / window
+// tiles are indexed by two bits into bgp to derive its color
+// this lets dev tweak the color of the game by changing just bgp
+// rather than changing every single tile indepenently
+const BGP = Palette;
+
+// same for but for objects
+// lower 2 bits are ignored transparent
+const OBP = [2]Palette;
+
 const GPU = struct {
     vram: [VRAM_SIZE]u8,
     tile_set: [384]Tile,
@@ -2410,15 +2655,6 @@ const GPU = struct {
             const low = @intFromBool((byte1 & mask) > 0);
             const high = @intFromBool((byte2 & mask) > 0);
             const pixel_value = @as(u2, low) | (@as(u2, high) << 1);
-
-            // const value = blk: {
-            //     switch (v) {
-            //         0b11 => break :blk TilePixelValue.Three,
-            //         0b10 => break :blk TilePixelValue.Two,
-            //         0b01 => break :blk TilePixelValue.One,
-            //         0b00 => break :blk TilePixelValue.Zero,
-            //     }
-            // };
 
             self.tile_set[tile_index][row_index][pixel_index] = @enumFromInt(pixel_value);
         }
