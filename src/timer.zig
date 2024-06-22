@@ -49,6 +49,7 @@ const Timer = struct {
             .div = 0,
             .tima = 0,
             .tma = 0,
+
             .frequency = Frequency.Hz4096,
             .cycles = 0,
             .value = 0,

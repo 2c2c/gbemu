@@ -2449,9 +2449,9 @@ const MemoryBus = struct {
         self.write_byte(address +% 1, high);
     }
 
-    fn read_io(self: *MemoryBus, address: u16) u8 {
+    fn read_io(self: *MemoryBus, io_addr: u16) u8 {
         return blk: {
-            switch (address) {
+            switch (io_addr) {
                 0xFF00 => break :blk self.joypad.to_bytes(),
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
@@ -2467,9 +2467,9 @@ const MemoryBus = struct {
         };
     }
 
-    fn write_io(self: *MemoryBus, address: u16, byte: u8) void {
+    fn write_io(self: *MemoryBus, io_addr: u16, byte: u8) void {
         const res = blk: {
-            switch (address) {
+            switch (io_addr) {
                 0xFF00 => {
                     if (self.joypad.is_action_row) {
                         self.joypad.action = @bitCast(byte);
@@ -2527,6 +2527,24 @@ const MemoryBus = struct {
                 0xFF45 => {
                     self.gpu.lyc = byte;
                 },
+                0xFF46 => {
+                    std.debug.assert(byte >= 0x00 and byte <= 0xDF);
+                    const dma_high = @as(u16, byte) << 8;
+                    for (0x00..0x9F) |dma_low| {
+                        const value = self.read_byte(dma_high +% dma_low);
+                        self.write_byte(0xFE +% dma_low, value);
+                    }
+                },
+                0xFF47 => {
+                    self.gpu.bgp = @bitCast(byte);
+                },
+                0xFF48 => {
+                    self.gpu.obp[0] = @bitCast(byte);
+                },
+                0xFF49 => {
+                    self.gpu.obp[1] = @bitCast(byte);
+                },
+
                 else => break :blk,
             }
         };
@@ -2663,6 +2681,8 @@ const GPU = struct {
     lcdc: LCDC,
     stat: Stat,
     background_viewport: BackgroundViewport,
+    bgp: BGP,
+    obp: OBP,
 
     /// FF44
     /// current horizontal line
@@ -2684,6 +2704,8 @@ const GPU = struct {
             .background_viewport = .{ .y = 0, .x = 0 },
             .ly = 0,
             .lyc = 0,
+            .bgp = @bitCast(0),
+            .obp = @bitCast(0),
         };
     }
 
