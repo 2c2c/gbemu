@@ -2453,14 +2453,23 @@ const MemoryBus = struct {
         };
     }
 
-    fn step(self: *MemoryBus, cycles: u8) void {
+    pub fn step(self: *MemoryBus, cycles: u8) void {
         if (self.timer.step(cycles)) {
             self.interrupt_flag.enable_timer = true;
         }
         self.divider.step(cycles);
 
         const res = self.gpu.step(cycles);
-        _ = res; // autofix
+        self.interrupt_flag.enable_lcd_stat |= res.enable_lcd_stat;
+        self.interrupt_flag.enable_vblank |= res.enable_vblank;
+    }
+
+    pub fn has_interrupt(self: *MemoryBus) bool {
+        return self.interrupt_flag.enable_vblank and self.interrupt_enable.enable_vblank or
+            self.interrupt_flag.enable_timer and self.interrupt_enable.enable_timer or
+            self.interrupt_flag.enable_lcd_stat and self.interrupt_enable.enable_lcd_stat or
+            self.interrupt_flag.enable_serial and self.interrupt_enable.enable_serial or
+            self.interrupt_flag.enable_joypad and self.interrupt_enable.enable_joypad;
     }
 
     fn read_byte(self: *const MemoryBus, address: u16) u8 {
@@ -2793,7 +2802,27 @@ const GPU = struct {
 
         self.cycles += cycles;
 
-        switch (self.stat.ppu_mode) {}
+        switch (self.stat.ppu_mode) {
+            0b00 => {
+                if (self.cycles >= 204) {
+                    self.cycles = self.cycles % 204;
+                    self.ly += 1;
+                }
+
+                if (self.ly >= 144) {
+                    self.stat.ppu_mode = 0b01;
+                    request.enable_vblank = true;
+                    // TODO:
+                    // if (self.) {
+                    //     if (self.ly == self.lyc) {
+                    //         request.enable_lcd_stat = true;
+                    //     }
+                    // }
+                } else {
+                    self.stat.ppu_mode = 0b10;
+                }
+            },
+        }
     }
     fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
