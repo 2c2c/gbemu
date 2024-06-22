@@ -1,4 +1,6 @@
 const std = @import("std");
+const joypad = @import("joypad.zig");
+const timer = @import("timer.zig");
 
 const Registers = struct {
     A: u8,
@@ -2389,12 +2391,22 @@ const IERegister = packed struct {
 
 const MemoryBus = struct {
     memory: [0x10000]u8,
+    joypad: joypad.Joypad,
+    divider: timer.Timer,
+    timer: timer.Timer,
+    interrupt_enable: IERegister,
+    interrupt_flag: IERegister,
 
     gpu: GPU,
     pub fn new() MemoryBus {
         return MemoryBus{
             .memory = [_]u8{0} ** 0x10000,
             .gpu = GPU.new(),
+            .joypad = joypad.Joypad.new(),
+            .divider = timer.Timer.new(),
+            .timer = timer.Timer.new(),
+            .interrupt_enable = @bitCast(0),
+            .interrupt_flag = @bitCast(0),
         };
     }
     fn read_byte(self: *const MemoryBus, address: u16) u8 {
@@ -2436,6 +2448,23 @@ const MemoryBus = struct {
         self.write_byte(address, low);
         self.write_byte(address +% 1, high);
     }
+
+    fn read_io(self: *MemoryBus, address: u16) u8 {
+        const register_value: u8 = blk: {
+            switch (address) {
+                0xFF00 => break :blk self.joypad.to_bytes(),
+                0xFF01 => break :blk 0x00,
+                0xFF02 => break :blk 0x00,
+                0xFF04 => break :blk self.divider.value,
+                0xFF0F => break :blk @bitCast(self.interrupt_flag),
+                0xFF40 => break :blk @bitCast(self.gpu.lcdc),
+                0xFF41 => break :blk @bitCast(self.gpu.stat),
+                0xFF42 => break :blk self.gpu.background_viewport.y,
+                0xFF44 => break :blk self.gpu.LY,
+            }
+        };
+        _ = register_value; // autofix
+    }
 };
 
 const VRAM_BEGIN: usize = 0x8000;
@@ -2470,43 +2499,42 @@ const Object = packed struct {
     },
 };
 
-// FF04
-// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
+/// FF04
+/// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
 const DIV = 0;
 
-// FF05
-// when overflows, resets to TMA + interrupt is called
+/// FF05
+/// when overflows, resets to TMA + interrupt is called
 const TIMA: u8 = 0;
-// FF06
-// Timer Modulo
-//
+/// FF06
+/// Timer Modulo
+///
 const TMA: u8 = 0;
-// FF07
+/// FF07
 const TAC = packed struct {
-    // 4096, 262144, 65536, 16384
+    /// 4096, 262144, 65536, 16384
     frequency: u2,
     enabled: bool,
     _padding: u5 = 0,
 };
 
-// FF40
+/// FF40 LCD Control
 const LCDC = packed struct {
     bg_display: bool,
     obj_display: bool,
-    // 8x8 8x16
+    /// 8x8 8x16
     obj_size: bool,
-    // 0x9800-0x9BFF 0x9C00-0x9FFF
+    /// 0x9800-0x9BFF 0x9C00-0x9FFF
     bg_tile_map: bool,
-    // 0x8800-0x97FF 0x8000-0x8FFF
+    /// 0x8800-0x97FF 0x8000-0x8FFF
     bg_tile_set: bool,
     window_display: bool,
-    // 0x9800-0x9BFF 0x9C00-0x9FFF
+    /// 0x9800-0x9BFF 0x9C00-0x9FFF
     window_tile_map: bool,
     lcd_display: bool,
 };
 
-// FF41 STAT
-// LCD Status
+/// FF41 STAT LCD Status
 const Stat = packed struct {
     ppu_mode: u2,
     lyc_ly_compare: bool,
@@ -2516,43 +2544,38 @@ const Stat = packed struct {
     lyc_int_select: bool,
 };
 
-// viewport only displays 160x144 out of the entire 256x256 background
-//
-const background_viewport = packed struct {
+/// viewport only displays 160x144 out of the entire 256x256 background
+///
+const BackgroundViewport = packed struct {
     // FF42 SCY
     y: u8,
     // FF43 SCX
     x: u8,
-    fn bottom(self: *const background_viewport) u8 {
+    fn bottom(self: *const BackgroundViewport) u8 {
         return self.y +% 143;
     }
-    fn right(self: *const background_viewport) u8 {
+    fn right(self: *const BackgroundViewport) u8 {
         return self.x +% 159;
     }
 };
 
-// WX=7, WY=0 is the top left corner of the window
-// viewport only displays 160x144 out of the entire 256x256 background
-//
+/// WX=7, WY=0 is the top left corner of the window
+/// viewport only displays 160x144 out of the entire 256x256 background
+///
 const window_position = packed struct {
-    // FF4A WY
-    // 0-143
+    /// FF4A WY
+    /// 0-143
     y: u8,
-    // FF4B WX
-    // 0-166
+    /// FF4B WX
+    /// 0-166
     x: u8,
 };
 
-// FF44
-// current horizontal line
-// 0-153, 144-153 are vblank
-const LY: u8 = undefined;
-
-// FF45
-// LYC compare
-// 0-153
-// LY == LYC
-// STAT interrupt
+/// FF45
+/// LYC compare
+/// 0-153
+/// LY == LYC
+/// STAT interrupt
 const LYC: u8 = undefined;
 
 const Palette = packed struct {
@@ -2562,26 +2585,36 @@ const Palette = packed struct {
     color_3: u2,
 };
 
-// FF47
-// bg pallette
-// assigns colors to bg / window
-// tiles are indexed by two bits into bgp to derive its color
-// this lets dev tweak the color of the game by changing just bgp
-// rather than changing every single tile indepenently
+/// FF47
+/// bg pallette
+/// assigns colors to bg / window
+/// tiles are indexed by two bits into bgp to derive its color
+/// this lets dev tweak the color of the game by changing just bgp
+/// rather than changing every single tile indepenently
 const BGP = Palette;
 
-// same for but for objects
-// lower 2 bits are ignored transparent
+/// same for but for objects
+/// lower 2 bits are ignored transparent
 const OBP = [2]Palette;
 
 const GPU = struct {
     vram: [VRAM_SIZE]u8,
     tile_set: [384]Tile,
+    lcdc: LCDC,
+    stat: Stat,
+    background_viewport: BackgroundViewport,
+    // FF44
+    // current horizontal line
+    // 0-153, 144-153 are vblank
+    const LY: u8 = undefined;
 
     pub fn new() GPU {
         return GPU{
             .vram = [_]u8{0} ** VRAM_SIZE,
             .tile_set = .{empty_tile()} ** 384,
+            .lcdc = @bitCast(0),
+            .stat = @bitCast(0),
+            .background_viewport = .{ .y = 0, .x = 0 },
         };
     }
 
