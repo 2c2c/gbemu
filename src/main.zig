@@ -2680,18 +2680,18 @@ const TAC = packed struct {
 
 /// FF40 LCD Control
 const LCDC = packed struct {
-    bg_display: bool,
-    obj_display: bool,
+    bg_enable: bool,
+    obj_enable: bool,
     /// 8x8 8x16
     obj_size: bool,
     /// 0x9800-0x9BFF 0x9C00-0x9FFF
     bg_tile_map: bool,
     /// 0x8800-0x97FF 0x8000-0x8FFF
     bg_tile_set: bool,
-    window_display: bool,
+    window_enable: bool,
     /// 0x9800-0x9BFF 0x9C00-0x9FFF
     window_tile_map: bool,
-    lcd_display: bool,
+    lcd_enable: bool,
 };
 
 /// FF41 STAT LCD Status
@@ -2772,13 +2772,13 @@ const GPU = struct {
     /// LY == LYC trigger STAT interrupt
     /// 0-153
     lyc: u8,
-
-    const obp: [2]Palette = .{
-        .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
-        .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
-    };
+    cycles: usize,
 
     pub fn new() GPU {
+        const obp: [2]Palette = .{
+            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+        };
         return GPU{
             .vram = [_]u8{0} ** VRAM_SIZE,
             .tile_set = .{empty_tile()} ** 384,
@@ -2796,7 +2796,7 @@ const GPU = struct {
 
     fn step(self: *GPU, cycles: u8) IERegister {
         const request: IERegister = @bitCast(@as(u8, 0));
-        if (!self.lcdc.lcd_display) {
+        if (!self.lcdc.lcd_enable) {
             return request;
         }
 
@@ -2812,6 +2812,7 @@ const GPU = struct {
                 if (self.ly >= 144) {
                     self.stat.ppu_mode = 0b01;
                     request.enable_vblank = true;
+                    self.lcdc.
                     // TODO:
                     // if (self.) {
                     //     if (self.ly == self.lyc) {
