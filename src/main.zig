@@ -2544,6 +2544,18 @@ const MemoryBus = struct {
                 0xFF49 => {
                     self.gpu.obp[1] = @bitCast(byte);
                 },
+                0xFF4A => {
+                    self.gpu.window_position.wy = byte;
+                },
+                0xFF4B => {
+                    self.gpu.window_position.wx = byte;
+                },
+                0xFF50 => {
+                    // disable boot rom
+                    for (0x00..0x100) |i| {
+                        self.memory[i] = 0;
+                    }
+                },
 
                 else => break :blk,
             }
@@ -2647,7 +2659,7 @@ const BackgroundViewport = packed struct {
 /// WX=7, WY=0 is the top left corner of the window
 /// viewport only displays 160x144 out of the entire 256x256 background
 ///
-const window_position = packed struct {
+const WindowPosition = packed struct {
     /// FF4A WY
     /// 0-143
     wy: u8,
@@ -2683,6 +2695,7 @@ const GPU = struct {
     background_viewport: BackgroundViewport,
     bgp: BGP,
     obp: OBP,
+    window_position: WindowPosition,
 
     /// FF44
     /// current horizontal line
@@ -2706,6 +2719,7 @@ const GPU = struct {
             .lyc = 0,
             .bgp = @bitCast(0),
             .obp = @bitCast(0),
+            .window_position = .{ .wy = 0, .wx = 0 },
         };
     }
 
