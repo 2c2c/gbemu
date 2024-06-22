@@ -3,6 +3,7 @@
 const DIV = 0;
 
 /// FF05
+/// increases at rate of TAC frequency
 /// when overflows, resets to TMA + interrupt is called
 const TIMA: u8 = 0;
 /// FF06
@@ -41,7 +42,7 @@ const Timer = struct {
     frequency: Frequency,
     cycles: usize,
     value: u8,
-    modulo: u8,
+    overflow: u8,
     enabled: bool,
     fn new() Timer {
         return Timer{
@@ -50,32 +51,33 @@ const Timer = struct {
             .tima = 0,
             .tma = 0,
 
-            .frequency = Frequency.Hz4096,
-            .cycles = 0,
-            .value = 0,
-            .modulo = 0,
-            .enabled = false,
+            // .frequency = Frequency.Hz4096,
+            // .cycles = 0,
+            // .value = 0,
+            // .overflow = 0,
+            // .enabled = false,
         };
     }
     fn step(self: *Timer, cycles: u8) bool {
         if (!self.enabled) {
             return false;
         }
-        self.cycles += @as(usize, cycles);
-        const cycles_per_tick = self.frequency.cycles_per_tick();
+        self.div += @as(usize, cycles);
+        const freq = Frequency(self.tac.frequency);
+        const cycles_per_tick = freq.cycles_per_tick();
         const did_overflow = blk: {
-            if (self.cycles >= cycles_per_tick) {
-                self.cycles = self.cycles % cycles_per_tick;
+            if (self.div >= cycles_per_tick) {
+                self.div = self.div % cycles_per_tick;
 
-                const res: u8, const overflow: u1 = @addWithOverflow(self.value, 1);
-                self.value = res;
-                break :blk overflow;
+                const res: u8, const overflow: u1 = @addWithOverflow(self.tima, 1);
+                self.tima = res;
+                break :blk overflow == 1;
             } else {
                 break :blk false;
             }
         };
         if (did_overflow) {
-            self.value = self.modulo;
+            self.tima = self.tma;
         }
         return did_overflow;
     }

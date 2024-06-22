@@ -2,6 +2,9 @@ const std = @import("std");
 const joypad = @import("joypad.zig");
 const timer = @import("timer.zig");
 
+const ArrayList = std.ArrayList;
+const ArenaAllocator = std.heap.ArenaAllocator;
+
 const Registers = struct {
     A: u8,
     B: u8,
@@ -2390,6 +2393,7 @@ const IERegister = packed struct {
 };
 
 const MemoryBus = struct {
+    boot_rom: [0x100]u8,
     memory: [0x10000]u8,
     joypad: joypad.Joypad,
     divider: timer.Timer,
@@ -2398,9 +2402,23 @@ const MemoryBus = struct {
     interrupt_flag: IERegister,
 
     gpu: GPU,
-    pub fn new() MemoryBus {
+    pub fn new(boot_rom_buffer: *ArrayList, game_rom: *ArrayList) MemoryBus {
+        const memory = [_]u8{0} ** 0x10000;
+
+        const boot_rom = [_]u8{0} ** 0x100;
+        for (0x0000..0x0100) |i| {
+            // temp separate memory for boot rom, idk what to do with it yet
+            boot_rom[i] = boot_rom_buffer[i];
+            memory[i] = boot_rom_buffer[i];
+        }
+
+        for (0x0000..0x8000) |i| {
+            memory[i] = game_rom[i];
+        }
+
         return MemoryBus{
-            .memory = [_]u8{0} ** 0x10000,
+            .boot_rom = boot_rom,
+            .memory = memory,
             .gpu = GPU.new(),
             .joypad = joypad.Joypad.new(),
             .divider = timer.Timer.new(),
