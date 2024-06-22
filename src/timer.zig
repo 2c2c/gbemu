@@ -1,3 +1,22 @@
+/// FF04
+/// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
+const DIV = 0;
+
+/// FF05
+/// when overflows, resets to TMA + interrupt is called
+const TIMA: u8 = 0;
+/// FF06
+/// Timer Modulo
+///
+const TMA: u8 = 0;
+/// FF07
+const TAC = packed struct {
+    /// 4096, 262144, 65536, 16384
+    frequency: u2,
+    enabled: bool,
+    _padding: u5 = 0,
+};
+
 const Frequency = enum(u2) {
     Hz4096,
     Hz262144,
@@ -14,6 +33,11 @@ const Frequency = enum(u2) {
 };
 
 const Timer = struct {
+    tac: TAC,
+    div: u8,
+    tima: u8,
+    tma: u8,
+
     frequency: Frequency,
     cycles: usize,
     value: u8,
@@ -21,6 +45,10 @@ const Timer = struct {
     enabled: bool,
     fn new() Timer {
         return Timer{
+            .tac = @bitCast(0),
+            .div = 0,
+            .tima = 0,
+            .tma = 0,
             .frequency = Frequency.Hz4096,
             .cycles = 0,
             .value = 0,

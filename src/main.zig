@@ -2450,7 +2450,7 @@ const MemoryBus = struct {
     }
 
     fn read_io(self: *MemoryBus, address: u16) u8 {
-        const register_value: u8 = blk: {
+        return blk: {
             switch (address) {
                 0xFF00 => break :blk self.joypad.to_bytes(),
                 0xFF01 => break :blk 0x00,
@@ -2459,11 +2459,53 @@ const MemoryBus = struct {
                 0xFF0F => break :blk @bitCast(self.interrupt_flag),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
-                0xFF42 => break :blk self.gpu.background_viewport.y,
-                0xFF44 => break :blk self.gpu.LY,
+                0xFF42 => break :blk self.gpu.background_viewport.scy,
+                0xFF44 => break :blk self.gpu.ly,
+                // 0xFF45 => break :blk self.gpu.lyc,
+                else => break :blk 0x00,
             }
         };
-        _ = register_value; // autofix
+    }
+
+    fn write_io(self: *MemoryBus, address: u16, byte: u8) void {
+        const res = blk: {
+            switch (address) {
+                0xFF00 => {
+                    if (self.joypad.is_action_row) {
+                        self.joypad.action = @bitCast(byte);
+                    } else {
+                        self.joypad.direction = @bitCast(byte);
+                    }
+                },
+                0xFF01 => break :blk,
+                0xFF02 => break :blk,
+                0xFF04 => {
+                    self.divider.value = 0;
+                },
+                0xFF05 => self.timer.value = byte,
+                0xFF06 => self.timer.modulo = byte,
+                0xFF0F => {
+                    self.interrupt_flag = @bitCast(byte);
+                },
+                0xFF40 => {
+                    self.gpu.lcdc = @bitCast(byte);
+                },
+                0xFF41 => {
+                    self.gpu.stat = @bitCast(byte);
+                },
+                0xFF42 => {
+                    self.gpu.background_viewport.scy = byte;
+                },
+                0xFF44 => {
+                    self.gpu.ly = 0;
+                },
+                0xFF45 => {
+                    self.gpu.lyc = byte;
+                },
+                else => break :blk,
+            }
+        };
+        _ = res; // autofix
     }
 };
 
@@ -2547,15 +2589,15 @@ const Stat = packed struct {
 /// viewport only displays 160x144 out of the entire 256x256 background
 ///
 const BackgroundViewport = packed struct {
-    // FF42 SCY
-    y: u8,
-    // FF43 SCX
-    x: u8,
+    /// FF42 SCY
+    scy: u8,
+    /// FF43 SCX
+    scx: u8,
     fn bottom(self: *const BackgroundViewport) u8 {
-        return self.y +% 143;
+        return self.scy +% 143;
     }
     fn right(self: *const BackgroundViewport) u8 {
-        return self.x +% 159;
+        return self.scx +% 159;
     }
 };
 
@@ -2565,18 +2607,11 @@ const BackgroundViewport = packed struct {
 const window_position = packed struct {
     /// FF4A WY
     /// 0-143
-    y: u8,
+    wy: u8,
     /// FF4B WX
     /// 0-166
-    x: u8,
+    wx: u8,
 };
-
-/// FF45
-/// LYC compare
-/// 0-153
-/// LY == LYC
-/// STAT interrupt
-const LYC: u8 = undefined;
 
 const Palette = packed struct {
     color_0: u2,
@@ -2603,10 +2638,16 @@ const GPU = struct {
     lcdc: LCDC,
     stat: Stat,
     background_viewport: BackgroundViewport,
-    // FF44
-    // current horizontal line
-    // 0-153, 144-153 are vblank
-    const LY: u8 = undefined;
+
+    /// FF44
+    /// current horizontal line
+    /// 0-153, 144-153 are vblank
+    ly: u8,
+
+    /// FF45
+    /// LY == LYC trigger STAT interrupt
+    /// 0-153
+    lyc: u8,
 
     pub fn new() GPU {
         return GPU{
@@ -2615,6 +2656,8 @@ const GPU = struct {
             .lcdc = @bitCast(0),
             .stat = @bitCast(0),
             .background_viewport = .{ .y = 0, .x = 0 },
+            .ly = 0,
+            .lyc = 0,
         };
     }
 
