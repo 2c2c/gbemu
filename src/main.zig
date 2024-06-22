@@ -2416,13 +2416,20 @@ const MemoryBus = struct {
             memory[i] = game_rom[i];
         }
 
+        const divider = timer.Timer.new();
+        divider.tac.enabled = 1;
+        divider.tac.frequency = @intFromEnum(timer.Frequency.Hz16384);
+
+        const timer_ = timer.Timer.new();
+        timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
+
         return MemoryBus{
             .boot_rom = boot_rom,
             .memory = memory,
             .gpu = GPU.new(),
             .joypad = joypad.Joypad.new(),
-            .divider = timer.Timer.new(),
-            .timer = timer.Timer.new(),
+            .divider = divider,
+            .timer = timer_,
             .interrupt_enable = @bitCast(0),
             .interrupt_flag = @bitCast(0),
         };
@@ -2473,7 +2480,7 @@ const MemoryBus = struct {
                 0xFF00 => break :blk self.joypad.to_bytes(),
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
-                0xFF04 => break :blk self.divider.value,
+                0xFF04 => break :blk self.divider.tima,
                 0xFF0F => break :blk @bitCast(self.interrupt_flag),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
@@ -2498,10 +2505,10 @@ const MemoryBus = struct {
                 0xFF01 => break :blk,
                 0xFF02 => break :blk,
                 0xFF04 => {
-                    self.divider.value = 0;
+                    self.divider.tima = 0;
                 },
-                0xFF05 => self.timer.value = byte,
-                0xFF06 => self.timer.modulo = byte,
+                0xFF05 => self.timer.tima = byte,
+                0xFF06 => self.timer.tma = byte,
                 0xFF07 => self.timer.tma = @bitCast(byte),
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
