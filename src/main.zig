@@ -2484,9 +2484,34 @@ const MemoryBus = struct {
                 },
                 0xFF05 => self.timer.value = byte,
                 0xFF06 => self.timer.modulo = byte,
+                0xFF07 => self.timer.tma = @bitCast(byte),
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
                 },
+                // sound
+                0xFF10 => {},
+                0xFF11 => {},
+                0xFF12 => {},
+                0xFF13 => {},
+                0xFF14 => {},
+                0xFF16 => {},
+                0xFF17 => {},
+                0xFF18 => {},
+                0xFF19 => {},
+                0xFF1A => {},
+                0xFF1B => {},
+                0xFF1C => {},
+                0xFF1D => {},
+                0xFF1E => {},
+                0xFF20 => {},
+                0xFF21 => {},
+                0xFF22 => {},
+                0xFF23 => {},
+                0xFF24 => {},
+                0xFF25 => {},
+                0xFF26 => {},
+                0xFF30...0xFF3F => {},
+                //
                 0xFF40 => {
                     self.gpu.lcdc = @bitCast(byte);
                 },
@@ -2496,8 +2521,8 @@ const MemoryBus = struct {
                 0xFF42 => {
                     self.gpu.background_viewport.scy = byte;
                 },
-                0xFF44 => {
-                    self.gpu.ly = 0;
+                0xFF43 => {
+                    self.gpu.background_viewport.scx = byte;
                 },
                 0xFF45 => {
                     self.gpu.lyc = byte;
@@ -2642,6 +2667,7 @@ const GPU = struct {
     /// FF44
     /// current horizontal line
     /// 0-153, 144-153 are vblank
+    /// (readonly)
     ly: u8,
 
     /// FF45
