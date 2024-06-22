@@ -1,3 +1,4 @@
+// FF00 - P1/JOYP - Joypad (R/W)
 const JoypadAction = packed struct {
     A: bool,
     B: bool,
@@ -17,13 +18,13 @@ const JoypadDirection = packed struct {
 };
 
 const Joypad = struct {
-    COLUMN: u1,
+    is_action_row: u1,
     action: JoypadAction,
     direction: JoypadDirection,
 
     pub fn new() Joypad {
         return Joypad{
-            .COLUMN = 0,
+            .is_action_row = 0,
             .action = .{
                 .A = false,
                 .B = false,
@@ -39,7 +40,7 @@ const Joypad = struct {
         };
     }
     pub fn to_bytes(self: *const Joypad) u8 {
-        if (self.COLUMN == 0) {
+        if (self.is_action_row) {
             return @bitCast(self.action);
         } else {
             return @bitCast(self.direction);
