@@ -2687,6 +2687,7 @@ const LCDC = packed struct {
 
 /// FF41 STAT LCD Status
 const Stat = packed struct {
+    /// 0: HBlank, 1: VBlank, 2: OAM, 3: VRAM
     ppu_mode: u2,
     lyc_ly_compare: bool,
     mode_0_select: bool,
@@ -2780,9 +2781,20 @@ const GPU = struct {
             .bgp = @bitCast(@as(u8, 0)),
             .obp = obp,
             .window_position = .{ .wy = 0, .wx = 0 },
+            .cycles = 0,
         };
     }
 
+    fn step(self: *GPU, cycles: u8) IERegister {
+        const request: IERegister = @bitCast(@as(u8, 0));
+        if (!self.lcdc.lcd_display) {
+            return request;
+        }
+
+        self.cycles += cycles;
+
+        switch (self.stat.ppu_mode) {}
+    }
     fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
     }
