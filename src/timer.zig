@@ -18,7 +18,7 @@ const TAC = packed struct {
     _padding: u5 = 0,
 };
 
-const Frequency = enum(u2) {
+pub const Frequency = enum(u3) {
     Hz4096,
     Hz262144,
     Hz65536,
@@ -33,20 +33,20 @@ const Frequency = enum(u2) {
     }
 };
 
-const Timer = struct {
+pub const Timer = struct {
     tac: TAC,
     div: u8,
     tima: u8,
     tma: u8,
 
-    frequency: Frequency,
-    cycles: usize,
-    value: u8,
-    overflow: u8,
-    enabled: bool,
-    fn new() Timer {
+    // frequency: Frequency,
+    // cycles: usize,
+    // value: u8,
+    // overflow: u8,
+    // enabled: bool,
+    pub fn new() Timer {
         return Timer{
-            .tac = @bitCast(0),
+            .tac = @bitCast(@as(u8, 0)),
             .div = 0,
             .tima = 0,
             .tma = 0,
@@ -59,7 +59,7 @@ const Timer = struct {
         };
     }
     fn step(self: *Timer, cycles: u8) bool {
-        if (!self.enabled) {
+        if (!self.tac.enabled) {
             return false;
         }
         self.div += @as(usize, cycles);

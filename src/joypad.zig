@@ -17,7 +17,7 @@ const JoypadDirection = packed struct {
     _padding: u3 = 0,
 };
 
-const Joypad = struct {
+pub const Joypad = struct {
     is_action_row: u1,
     action: JoypadAction,
     direction: JoypadDirection,

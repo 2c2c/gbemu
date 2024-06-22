@@ -2341,7 +2341,25 @@ const CPU = struct {
         return address;
     }
 
-    pub fn new() CPU {
+    pub fn new() !CPU {
+        // init game_rom buffer and boot_rom buffer
+        // mock data wiht 1s for now
+        var arena_allocator = ArenaAllocator.init(std.heap.page_allocator);
+        defer arena_allocator.deinit();
+        const allocator = arena_allocator.allocator();
+        var boot_rom = ArrayList(u8).init(allocator);
+
+        defer boot_rom.deinit();
+        // init to 0x100 0s
+        for (0..0x100) |_| {
+            try boot_rom.append(0);
+        }
+
+        var game_rom = ArrayList(u8).init(allocator);
+        defer game_rom.deinit();
+        for (0..0x8000) |_| {
+            try game_rom.append(0);
+        }
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x00,
@@ -2360,7 +2378,7 @@ const CPU = struct {
             },
             .pc = 0x00,
             .sp = 0x00,
-            .bus = MemoryBus.new(),
+            .bus = MemoryBus.new(&boot_rom, &game_rom),
             .is_halted = false,
             .interrupts_enabled = true,
         };
@@ -2402,25 +2420,25 @@ const MemoryBus = struct {
     interrupt_flag: IERegister,
 
     gpu: GPU,
-    pub fn new(boot_rom_buffer: *ArrayList, game_rom: *ArrayList) MemoryBus {
-        const memory = [_]u8{0} ** 0x10000;
+    pub fn new(boot_rom_buffer: *ArrayList(u8), game_rom: *ArrayList(u8)) MemoryBus {
+        var memory = [_]u8{0} ** 0x10000;
 
-        const boot_rom = [_]u8{0} ** 0x100;
+        var boot_rom = [_]u8{0} ** 0x100;
         for (0x0000..0x0100) |i| {
             // temp separate memory for boot rom, idk what to do with it yet
-            boot_rom[i] = boot_rom_buffer[i];
-            memory[i] = boot_rom_buffer[i];
+            boot_rom[i] = boot_rom_buffer.items[i];
+            memory[i] = boot_rom_buffer.items[i];
         }
 
         for (0x0000..0x8000) |i| {
-            memory[i] = game_rom[i];
+            memory[i] = game_rom.items[i];
         }
 
-        const divider = timer.Timer.new();
-        divider.tac.enabled = 1;
+        var divider = timer.Timer.new();
+        divider.tac.enabled = true;
         divider.tac.frequency = @intFromEnum(timer.Frequency.Hz16384);
 
-        const timer_ = timer.Timer.new();
+        var timer_ = timer.Timer.new();
         timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
 
         return MemoryBus{
@@ -2430,10 +2448,21 @@ const MemoryBus = struct {
             .joypad = joypad.Joypad.new(),
             .divider = divider,
             .timer = timer_,
-            .interrupt_enable = @bitCast(0),
-            .interrupt_flag = @bitCast(0),
+            .interrupt_enable = @bitCast(@as(u8, 0)),
+            .interrupt_flag = @bitCast(@as(u8, 0)),
         };
     }
+
+    fn step(self: *MemoryBus, cycles: u8) void {
+        if (self.timer.step(cycles)) {
+            self.interrupt_flag.enable_timer = true;
+        }
+        self.divider.step(cycles);
+
+        const res = self.gpu.step(cycles);
+        _ = res; // autofix
+    }
+
     fn read_byte(self: *const MemoryBus, address: u16) u8 {
         const addr = @as(usize, address);
         switch (addr) {
@@ -2664,6 +2693,7 @@ const Stat = packed struct {
     mode_1_select: bool,
     mode_2_select: bool,
     lyc_int_select: bool,
+    _padding: u1 = 0,
 };
 
 /// viewport only displays 160x144 out of the entire 256x256 background
@@ -2733,17 +2763,22 @@ const GPU = struct {
     /// 0-153
     lyc: u8,
 
+    const obp: [2]Palette = .{
+        .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+        .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+    };
+
     pub fn new() GPU {
         return GPU{
             .vram = [_]u8{0} ** VRAM_SIZE,
             .tile_set = .{empty_tile()} ** 384,
-            .lcdc = @bitCast(0),
-            .stat = @bitCast(0),
-            .background_viewport = .{ .y = 0, .x = 0 },
+            .lcdc = @bitCast(@as(u8, 0)),
+            .stat = @bitCast(@as(u8, 0)),
+            .background_viewport = .{ .scy = 0, .scx = 1 },
             .ly = 0,
             .lyc = 0,
-            .bgp = @bitCast(0),
-            .obp = @bitCast(0),
+            .bgp = @bitCast(@as(u8, 0)),
+            .obp = obp,
             .window_position = .{ .wy = 0, .wx = 0 },
         };
     }
@@ -2781,7 +2816,7 @@ pub fn main() !void {}
 test "Add A + C" {
     std.debug.print("Add A + C\n", .{});
     const instc = Instruction{ .ADD = ArithmeticTarget.C };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.A = 0xFF;
     cpu.registers.C = 0x02;
     std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2793,7 +2828,7 @@ test "Add A + C" {
 test "Adc A + E" {
     std.debug.print("Adc A + E\n", .{});
     const inste = Instruction{ .ADC = ArithmeticTarget.E };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2812,7 +2847,7 @@ test "Adc A + E" {
 test "Sub A + D" {
     std.debug.print("Sub A + D\n", .{});
     const instd = Instruction{ .SUB = ArithmeticTarget.D };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.A = 0x01;
     cpu.registers.D = 0x01;
     std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2824,7 +2859,7 @@ test "Sub A + D" {
 test "Sbc A + B" {
     std.debug.print("Sbc A + D\n", .{});
     const instb = Instruction{ .SBC = ArithmeticTarget.B };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2842,7 +2877,7 @@ test "Sbc A + B" {
 test "sp add" {
     std.debug.print("SP ADD\n", .{});
     const inst = Instruction{ .SPADD = {} };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.sp = 0xFFFF;
     cpu.bus.memory[0x0001] = 0xFF;
     std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2853,7 +2888,7 @@ test "sp add" {
 test "Jump" {
     std.debug.print("Jump\n", .{});
     const jp_inst = Instruction{ .JP = JumpTest.Always };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     const old_pos = 0x0000;
     const new_pos = 0x1234;
     cpu.bus.memory[old_pos + 1] = 0x34;
@@ -2887,7 +2922,7 @@ test "overflow" {
 test "RRC" {
     std.debug.print("RRC\n", .{});
     const inst = Instruction{ .RRC = PrefixTarget.A };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2902,7 +2937,7 @@ test "RRC" {
 test "RES" {
     std.debug.print("RES\n", .{});
     const inst = Instruction{ .RES = .{ .target = PrefixTarget.A, .bit = 3 } };
-    var cpu = CPU.new();
+    var cpu = try CPU.new();
     cpu.registers.A = 0b1100_1000;
     std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
     _ = cpu.execute(inst);
