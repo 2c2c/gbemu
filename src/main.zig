@@ -2778,7 +2778,7 @@ const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
 
 const GPU = struct {
-    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * 4]u8,
+    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * @as(usize, 4)]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -2806,14 +2806,13 @@ const GPU = struct {
             .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
             .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
         };
-        const object = Object{
+        const objects = [_]Object{.{
             .y = 0,
             .x = 0,
             .attributes = @bitCast(@as(u8, 0)),
-        };
-        const objects = [40]Object{object} ** 40;
+        }} ** 40;
         return GPU{
-            .canvas = [_]u8{0} ** SCREEN_WIDTH * SCREEN_HEIGHT * 4,
+            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * @as(usize, 4)),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             .lcdc = @bitCast(@as(u8, 0)),
@@ -2961,17 +2960,18 @@ const GPU = struct {
         return self.vram[address];
     }
 
-    fn write_vram(self: *GPU, index: usize, byte: u8) void {
-        self.vram[index] = byte;
+    fn write_vram(self: *GPU, addr: usize, byte: u8) void {
+        self.vram[addr] = byte;
 
-        if (index >= 0x9800) {
+        if (addr >= 0x9800) {
             return;
         }
-        const normalized_index = index & 0xFFFE;
-        const byte1 = self.vram[normalized_index];
-        const byte2 = self.vram[normalized_index + 1];
+        const normalized_addr = addr & 0xFFFE;
+        const byte1 = self.vram[normalized_addr];
+        const byte2 = self.vram[normalized_addr + 1];
 
-        const tile_index = index / 16;
+        const index = (addr - VRAM_BEGIN);
+        const tile_index = (index) / 16;
         const row_index = (index % 16) / 2;
 
         for (0..8) |pixel_index| {
