@@ -445,7 +445,7 @@ const Instruction = union(enum) {
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
-            _ => unreachable,
+            else => std.debug.panic("Invalid instruction byte: 0x{x}", .{}),
         };
         return inst;
     }
@@ -517,21 +517,20 @@ const Instruction = union(enum) {
             0x3E => return Instruction{ .SRL = PrefixTarget.HLI },
             0x3F => return Instruction{ .SRL = PrefixTarget.A },
             0x40...0x7F => {
-                const bit = (byte & 0x38) >> 3;
+                const bit: u3 = @intCast((byte & 0x38) >> 3);
                 const target: PrefixTarget = @enumFromInt(byte & 0x07);
                 return Instruction{ .BIT = .{ .target = target, .bit = bit } };
             },
             0x80...0xBF => {
-                const bit = (byte & 0x38) >> 3;
+                const bit: u3 = @intCast((byte & 0x38) >> 3);
                 const target: PrefixTarget = @enumFromInt(byte & 0x07);
                 return Instruction{ .RES = .{ .target = target, .bit = bit } };
             },
             0xC0...0xFF => {
-                const bit = (byte & 0x38) >> 3;
+                const bit: u3 = @intCast((byte & 0x38) >> 3);
                 const target: PrefixTarget = @enumFromInt(byte & 0x07);
                 return Instruction{ .SET = .{ .target = target, .bit = bit } };
             },
-            else => unreachable,
         };
         return inst;
     }
@@ -1826,17 +1825,17 @@ pub const CPU = struct {
         };
         return res;
     }
-    pub fn step(self: *const CPU) void {
+    pub fn step(self: *CPU) void {
         var instruction_byte = self.bus.read_byte(self.pc);
 
         const prefixed = instruction_byte == 0xCB;
         if (prefixed) {
             instruction_byte = self.bus.read_byte(self.pc +% 1);
         }
-        const next_pc = if (Instruction.from_byte(instruction_byte)) |instruction| blk: {
+        const next_pc = if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
             break :blk self.execute(instruction);
         } else {
-            std.debug.panic("Unknown instruction for 0x{}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
+            std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
         };
 
         self.pc = next_pc;

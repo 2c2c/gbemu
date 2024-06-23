@@ -5,7 +5,7 @@ const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 pub fn main() !void {
-    const cpu = try CPU.new();
+    var cpu = try CPU.new();
     while (true) {
         cpu.step();
     }
