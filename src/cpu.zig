@@ -448,6 +448,18 @@ const Instruction = union(enum) {
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
+
+            // 1. 0xD3: This is an invalid/unused opcode on the Game Boy.
+            // 2. 0xDB: This is an invalid/unused opcode on the Game Boy.
+            // 3. 0xDD: This is an invalid/unused opcode on the Game Boy.
+            // 4. 0xE3: This is an invalid/unused opcode on the Game Boy.
+            // 5. 0xE4: This is an invalid/unused opcode on the Game Boy.
+            // 6. 0xEB: This is an invalid/unused opcode on the Game Boy.
+            // 7. 0xEC: This is an invalid/unused opcode on the Game Boy.
+            // 8. 0xED: This is an invalid/unused opcode on the Game Boy.
+            // 9. 0xF4: This is an invalid/unused opcode on the Game Boy.
+            // 10. 0xFC: This is an invalid/unused opcode on the Game Boy.
+            // 11. 0xFD: This is an invalid/unused opcode on the Game Boy.
             else => std.debug.panic("Invalid instruction byte: 0x{x}", .{byte}),
         };
         return inst;
