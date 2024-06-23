@@ -174,6 +174,7 @@ const Instruction = union(enum) {
     RET: JumpTest,
     RST: RstLocation,
     NOP: void,
+    STOP: void,
     HALT: void,
     // prefixed
     RLC: PrefixTarget,
@@ -543,6 +544,7 @@ pub const CPU = struct {
     sp: u16,
     bus: MemoryBus,
     is_halted: bool,
+    is_stopped: bool,
     interrupts_enabled: bool,
     fn execute(self: *CPU, instruction: Instruction) u16 {
         if (self.is_halted) {
@@ -551,6 +553,11 @@ pub const CPU = struct {
         const res = blk: {
             switch (instruction) {
                 Instruction.NOP => {
+                    const next_pc = self.pc +% 1;
+                    break :blk next_pc;
+                },
+                Instruction.STOP => {
+                    self.is_stopped = true;
                     const next_pc = self.pc +% 1;
                     break :blk next_pc;
                 },
@@ -2385,6 +2392,7 @@ pub const CPU = struct {
             .sp = 0x00,
             .bus = MemoryBus.new(&boot_rom, &game_rom),
             .is_halted = false,
+            .is_stopped = false,
             .interrupts_enabled = true,
         };
         return cpu;
