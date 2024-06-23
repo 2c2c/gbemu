@@ -459,7 +459,10 @@ const Instruction = union(enum) {
             // 9. 0xF4: This is an invalid/unused opcode on the Game Boy.
             // 10. 0xFC: This is an invalid/unused opcode on the Game Boy.
             // 11. 0xFD: This is an invalid/unused opcode on the Game Boy.
-            else => std.debug.panic("Invalid instruction byte: 0x{x}", .{byte}),
+            else => {
+                std.debug.print("Invalid instruction byte: 0x{x}", .{byte});
+                return Instruction.NOP;
+            },
         };
         return inst;
     }

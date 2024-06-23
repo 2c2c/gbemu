@@ -23,6 +23,7 @@ pub const MemoryBus = struct {
         var boot_rom = [_]u8{0} ** 0x100;
         for (0x0000..0x0100) |i| {
             // temp separate memory for boot rom, idk what to do with it yet
+            // std.debug.print("byte 0x{x}\n", .{boot_rom_buffer[i]});
             boot_rom[i] = boot_rom_buffer[i];
             memory[i] = boot_rom_buffer[i];
         }

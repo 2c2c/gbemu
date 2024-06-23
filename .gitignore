@@ -4,3 +4,4 @@ zig-cache
 main
 main.o
 *gb
+.vscode

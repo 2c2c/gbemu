@@ -9,6 +9,7 @@ const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
     const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
+    // const file = try std.fs.cwd().openFile("test_rom.gb", .{});
     defer file.close();
 
     const size = try file.getEndPos();
@@ -18,11 +19,15 @@ pub fn main() !void {
     const allocator = arena_allocator.allocator();
     const game_rom = try allocator.alloc(u8, size);
     defer allocator.free(game_rom);
+    _ = try file.readAll(game_rom);
+
+    // for (game_rom) |rom| {
+    //     std.debug.print("0x{x}\n", .{rom});
+    // }
 
     var cpu = try CPU.new(game_rom);
     while (true) {
         cpu.step();
-        break;
     }
 }
 
