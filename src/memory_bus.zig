@@ -18,18 +18,17 @@ pub const MemoryBus = struct {
     interrupt_flag: IERegister,
 
     gpu: GPU,
-    pub fn new(boot_rom_buffer: *ArrayList(u8), game_rom: *ArrayList(u8)) MemoryBus {
+    pub fn new(boot_rom_buffer: []u8, game_rom: []u8) MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
-
         var boot_rom = [_]u8{0} ** 0x100;
         for (0x0000..0x0100) |i| {
             // temp separate memory for boot rom, idk what to do with it yet
-            boot_rom[i] = boot_rom_buffer.items[i];
-            memory[i] = boot_rom_buffer.items[i];
+            boot_rom[i] = boot_rom_buffer[i];
+            memory[i] = boot_rom_buffer[i];
         }
 
         for (0x0000..0x8000) |i| {
-            memory[i] = game_rom.items[i];
+            memory[i] = game_rom[i];
         }
 
         var divider = timer.Timer.new();
@@ -74,11 +73,11 @@ pub const MemoryBus = struct {
         const addr = @as(usize, address);
         switch (addr) {
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
-                std.debug.print("Vram byte read\n", .{});
+                // std.debug.print("Vram byte read\n", .{});
                 return self.gpu.read_vram(addr);
             },
             else => {
-                std.debug.print("Non Vram byte read\n", .{});
+                // std.debug.print("Non Vram byte read\n", .{});
             },
         }
         return self.memory[address];

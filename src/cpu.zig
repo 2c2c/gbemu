@@ -448,7 +448,6 @@ const Instruction = union(enum) {
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
-
             // 1. 0xD3: This is an invalid/unused opcode on the Game Boy.
             // 2. 0xDB: This is an invalid/unused opcode on the Game Boy.
             // 3. 0xDD: This is an invalid/unused opcode on the Game Boy.
@@ -1847,6 +1846,7 @@ pub const CPU = struct {
         return res;
     }
     pub fn step(self: *CPU) void {
+        std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         var instruction_byte = self.bus.read_byte(self.pc);
 
         const prefixed = instruction_byte == 0xCB;
@@ -2366,25 +2366,24 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new() !CPU {
+    pub fn new(game_rom: []u8) !CPU {
         // init game_rom buffer and boot_rom buffer
         // mock data wiht 1s for now
-        var arena_allocator = ArenaAllocator.init(std.heap.page_allocator);
-        defer arena_allocator.deinit();
-        const allocator = arena_allocator.allocator();
-        var boot_rom = ArrayList(u8).init(allocator);
+        // var arena_allocator = ArenaAllocator.init(std.heap.page_allocator);
+        // defer arena_allocator.deinit();
+        // const allocator = arena_allocator.allocator();
+        // var boot_rom = ArrayList(u8).init(allocator);
 
-        defer boot_rom.deinit();
+        // defer boot_rom.deinit();
         // init to 0x100 0s
-        for (0..0x100) |_| {
-            try boot_rom.append(0);
-        }
+        // slice game_rom
+        var boot_rom = game_rom[0..0x100];
 
-        var game_rom = ArrayList(u8).init(allocator);
-        defer game_rom.deinit();
-        for (0..0x8000) |_| {
-            try game_rom.append(0);
-        }
+        // var game_rom = ArrayList(u8).init(allocator);
+        // defer game_rom.deinit();
+        // for (0..0x8000) |_| {
+        //     try game_rom.append(0);
+        // }
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x00,
@@ -2403,7 +2402,7 @@ pub const CPU = struct {
             },
             .pc = 0x00,
             .sp = 0x00,
-            .bus = MemoryBus.new(&boot_rom, &game_rom),
+            .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
             .is_halted = false,
             .is_stopped = false,
             .interrupts_enabled = true,
@@ -2430,7 +2429,8 @@ pub const CPU = struct {
 test "Add A + C" {
     std.debug.print("Add A + C\n", .{});
     const instc = Instruction{ .ADD = ArithmeticTarget.C };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.A = 0xFF;
     cpu.registers.C = 0x02;
     std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2442,7 +2442,8 @@ test "Add A + C" {
 test "Adc A + E" {
     std.debug.print("Adc A + E\n", .{});
     const inste = Instruction{ .ADC = ArithmeticTarget.E };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2461,7 +2462,8 @@ test "Adc A + E" {
 test "Sub A + D" {
     std.debug.print("Sub A + D\n", .{});
     const instd = Instruction{ .SUB = ArithmeticTarget.D };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.A = 0x01;
     cpu.registers.D = 0x01;
     std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2473,7 +2475,8 @@ test "Sub A + D" {
 test "Sbc A + B" {
     std.debug.print("Sbc A + D\n", .{});
     const instb = Instruction{ .SBC = ArithmeticTarget.B };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2491,7 +2494,8 @@ test "Sbc A + B" {
 test "sp add" {
     std.debug.print("SP ADD\n", .{});
     const inst = Instruction{ .SPADD = {} };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.sp = 0xFFFF;
     cpu.bus.memory[0x0001] = 0xFF;
     std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
@@ -2502,7 +2506,8 @@ test "sp add" {
 test "Jump" {
     std.debug.print("Jump\n", .{});
     const jp_inst = Instruction{ .JP = JumpTest.Always };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     const old_pos = 0x0000;
     const new_pos = 0x1234;
     cpu.bus.memory[old_pos + 1] = 0x34;
@@ -2536,7 +2541,8 @@ test "overflow" {
 test "RRC" {
     std.debug.print("RRC\n", .{});
     const inst = Instruction{ .RRC = PrefixTarget.A };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.F = .{
         .zero = true,
         .subtract = false,
@@ -2551,9 +2557,23 @@ test "RRC" {
 test "RES" {
     std.debug.print("RES\n", .{});
     const inst = Instruction{ .RES = .{ .target = PrefixTarget.A, .bit = 3 } };
-    var cpu = try CPU.new();
+    var game_rom = [_]u8{0} ** 0x8000;
+    var cpu = try CPU.new(&game_rom);
     cpu.registers.A = 0b1100_1000;
     std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
     _ = cpu.execute(inst);
     std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
+}
+
+const expect = std.testing.expect;
+const eql = std.mem.eql;
+const test_allocator = std.testing.allocator;
+test "io reader usage" {
+    const file = try std.fs.cwd().openFile("test_rom.gb", .{});
+    defer file.close();
+
+    const size = try file.getEndPos();
+    const buffer = try test_allocator.alloc(u8, size);
+    defer test_allocator.free(buffer);
+    _ = try file.readAll(buffer);
 }

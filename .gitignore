@@ -3,3 +3,4 @@ zig-cache
 .zig-cache
 main
 main.o
+*gb
