@@ -2407,7 +2407,7 @@ const IERegister = packed struct {
     enable_timer: bool,
     enable_serial: bool,
     enable_joypad: bool,
-    _padding: u3,
+    _padding: u3 = 0,
 };
 
 const MemoryBus = struct {
@@ -2699,10 +2699,14 @@ const Stat = packed struct {
     /// 0: HBlank, 1: VBlank, 2: OAM, 3: VRAM
     ppu_mode: u2,
     lyc_ly_compare: bool,
-    mode_0_select: bool,
-    mode_1_select: bool,
-    mode_2_select: bool,
-    lyc_int_select: bool,
+
+    /// hblank
+    mode_0_interrupt_enabled: bool,
+    /// vblank
+    mode_1_interrupt_enabled: bool,
+    /// oam
+    mode_2_interrupt_enabled: bool,
+    lyc_int_interrupt_enabled: bool,
     _padding: u1 = 0,
 };
 
@@ -2752,6 +2756,8 @@ const BGP = Palette;
 /// lower 2 bits are ignored transparent
 const OBP = [2]Palette;
 
+const SCREEN_WIDTH: usize = 160;
+const SCREEN_HEIGHT: usize = 144;
 const GPU = struct {
     vram: [VRAM_SIZE]u8,
     tile_set: [384]Tile,
@@ -2803,6 +2809,7 @@ const GPU = struct {
         self.cycles += cycles;
 
         switch (self.stat.ppu_mode) {
+            // Horizontal blank
             0b00 => {
                 if (self.cycles >= 204) {
                     self.cycles = self.cycles % 204;
@@ -2812,17 +2819,73 @@ const GPU = struct {
                 if (self.ly >= 144) {
                     self.stat.ppu_mode = 0b01;
                     request.enable_vblank = true;
-                    self.lcdc.
-                    // TODO:
-                    // if (self.) {
-                    //     if (self.ly == self.lyc) {
-                    //         request.enable_lcd_stat = true;
-                    //     }
-                    // }
+                    // if (self.lcdc.lcd_enable) {
+                    if (self.stat.mode_1_interrupt_enabled) {
+                        request.enable_lcd_stat = true;
+                    }
                 } else {
                     self.stat.ppu_mode = 0b10;
+                    // if (self.lcdc.obj_enable) {
+                    if (self.stat.mode_2_interrupt_enabled) {
+                        request.enable_lcd_stat = true;
+                    }
+                }
+                self.lyc_ly_check(request);
+            },
+            // Vertical blank
+            0b01 => {
+                if (self.cycles >= 456) {
+                    self.cycles = self.cycles % 456;
+                    self.ly += 1;
+                }
+                if (self.ly >= 154) {
+                    self.ly = 0;
+                    self.stat.ppu_mode = 0b10;
+                    // if (self.lcdc.obj_enable) {
+                    if (self.stat.mode_2_interrupt_enabled) {
+                        request.enable_lcd_stat = true;
+                    }
+                }
+                self.lyc_ly_check(request);
+            },
+            // OAM read
+            0b10 => {
+                if (self.cycles >= 80) {
+                    self.cycles = self.cycles % 80;
+                    self.stat.ppu_mode = 0b11;
                 }
             },
+            // VRAM read
+            0b11 => {
+                if (self.cycles >= 172) {
+                    self.cycles = self.cycles % 172;
+                    if (self.stat.mode_0_select) {
+                        request.enable_lcd_stat = true;
+                    }
+                    self.stat.ppu_mode = 0b00;
+                }
+                // render scan line
+            },
+        }
+    }
+
+    fn lyc_ly_check(self: *GPU, request: *IERegister) void {
+        const check = self.ly == self.lyc;
+        if (check and self.stat.lyc_int_interrupt_enabled) {
+            request.enable_lcd_stat = true;
+        }
+        self.stat.lyc_ly_compare = check;
+    }
+
+    fn render_scanline(self: *GPU) void {
+        if (self.lcdc.bg_enable) {
+            self.render_background();
+        }
+        if (self.lcdc.obj_enable) {
+            self.render_objects();
+        }
+        if (self.lcdc.window_enable) {
+            self.render_window();
         }
     }
     fn read_vram(self: *const GPU, address: usize) u8 {
