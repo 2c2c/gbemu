@@ -2659,6 +2659,7 @@ fn empty_tile() Tile {
 const Object = packed struct {
     y: u8,
     x: u8,
+    tile_index: u8,
     attributes: packed struct {
         // gbc
         cgb_palette: u3,
@@ -2667,7 +2668,7 @@ const Object = packed struct {
         dmg_palette: bool,
         x_flip: bool,
         y_flip: bool,
-        palette: bool,
+        priority: bool,
     },
 };
 
@@ -2809,6 +2810,7 @@ const GPU = struct {
         const objects = [_]Object{.{
             .y = 0,
             .x = 0,
+            .tile_index = 0,
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
         return GPU{
@@ -2949,11 +2951,42 @@ const GPU = struct {
         }
         if (self.lcdc.obj_enable) {
             const object_height = if (self.lcdc.obj_size) 16 else 8;
-            _ = object_height; // autofix
+            for (self.objects) |object| {
+                if (object.y <= self.ly and object.y + object_height > self.ly) {
+                    const pixel_y_offset = self.ly - object.y;
+                    const tile_index = if ((object_height == 16) and (!object.attributes.y_flip and pixel_y_offset)) blk: {
+                        break :blk object.tile_index + 1;
+                    } else blk: {
+                        break :blk object.tile_index;
+                    };
 
+                    const tile = self.tile_set[tile_index];
+                    const tile_row = if (object.attributes.y_flip) tile[7 - (pixel_y_offset % 8)] else tile[pixel_y_offset % 8];
+
+                    const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * 4;
+                    var canvas_offset: usize = @bitCast(@as(i32, canvas_y_offset + object.x) * 4);
+                    for (0..8) |x| {
+                        const pixel_x_offset: usize = if (object.attributes.x_flip) 7 - x else x;
+                        const x_offset = object.x + x;
+                        const pixel = tile_row[pixel_x_offset];
+                        if (x_offset >= 0 and
+                            x_offset < SCREEN_WIDTH and
+                            pixel != TilePixelValue.Zero and
+                            (object.attributes.priority or scan_line[x_offset] == TilePixelValue.Zero))
+                        {
+                            const color = pixel.to_color();
+                            self.canvas[canvas_offset] = color;
+                            self.canvas[canvas_offset +% 1] = color;
+                            self.canvas[canvas_offset +% 2] = color;
+                            self.canvas[canvas_offset +% 3] = 0xFF;
+                            canvas_offset += 4;
+                        }
+                    }
+                }
+            }
         }
         if (self.lcdc.window_enable) {
-            self.render_window();
+            // TODO:
         }
     }
     fn read_vram(self: *const GPU, address: usize) u8 {
@@ -2994,9 +3027,10 @@ const GPU = struct {
         // could be cut, just lookup straight from memory instead
         const byte = (addr - 0xFE00) % 4;
         switch (byte) {
-            0 => self.objects[object_index].y = value,
-            1 => self.objects[object_index].x = value,
-            2 => self.objects[object_index].attributes = @bitCast(value),
+            0 => self.objects[object_index].y = value + 0x10,
+            1 => self.objects[object_index].x = value + 0x08,
+            2 => self.objects[object_index].tile_index = value,
+            3 => self.objects[object_index].attributes = @bitCast(value),
             else => {},
         }
     }
