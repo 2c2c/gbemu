@@ -2477,7 +2477,7 @@ const MemoryBus = struct {
         switch (addr) {
             VRAM_BEGIN...VRAM_END => {
                 std.debug.print("Vram byte read\n", .{});
-                return self.gpu.read_vram(addr - VRAM_BEGIN);
+                return self.gpu.read_vram(addr);
             },
             else => {
                 std.debug.print("Non Vram byte read\n", .{});
@@ -2489,7 +2489,7 @@ const MemoryBus = struct {
         const addr = @as(usize, address);
         switch (addr) {
             VRAM_BEGIN...VRAM_END => {
-                self.gpu.write_vram(addr - VRAM_BEGIN, byte);
+                self.gpu.write_vram(addr, byte);
                 return;
             },
             else => {
@@ -2629,13 +2629,25 @@ const MemoryBus = struct {
 
 const VRAM_BEGIN: usize = 0x8000;
 const VRAM_END: usize = 0x9FFF;
-const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
+// const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
 
 const TilePixelValue = enum {
+    /// white
     Zero,
+    /// light gray
     One,
+    /// dark gray
     Two,
+    /// black
     Three,
+    fn to_color(self: TilePixelValue) u8 {
+        return switch (self) {
+            TilePixelValue.Zero => 0xFF,
+            TilePixelValue.One => 0xAA,
+            TilePixelValue.Two => 0x55,
+            TilePixelValue.Three => 0x00,
+        };
+    }
 };
 
 const Tile = [8][8]TilePixelValue;
@@ -2682,15 +2694,21 @@ const TAC = packed struct {
 const LCDC = packed struct {
     bg_enable: bool,
     obj_enable: bool,
+
     /// 8x8 8x16
     obj_size: bool,
+
     /// 0x9800-0x9BFF 0x9C00-0x9FFF
     bg_tile_map: bool,
+
     /// 0x8800-0x97FF 0x8000-0x8FFF
     bg_tile_set: bool,
+
     window_enable: bool,
+
     /// 0x9800-0x9BFF 0x9C00-0x9FFF
     window_tile_map: bool,
+
     lcd_enable: bool,
 };
 
@@ -2758,8 +2776,11 @@ const OBP = [2]Palette;
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
+
 const GPU = struct {
-    vram: [VRAM_SIZE]u8,
+    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * 4]u8,
+    objects: [40]Object,
+    vram: [0x10000]u8,
     tile_set: [384]Tile,
     lcdc: LCDC,
     stat: Stat,
@@ -2785,8 +2806,15 @@ const GPU = struct {
             .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
             .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
         };
+        const object = Object{
+            .y = 0,
+            .x = 0,
+            .attributes = @bitCast(@as(u8, 0)),
+        };
+        const objects = [40]Object{object} ** 40;
         return GPU{
-            .vram = [_]u8{0} ** VRAM_SIZE,
+            .canvas = [_]u8{0} ** SCREEN_WIDTH * SCREEN_HEIGHT * 4,
+            .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             .lcdc = @bitCast(@as(u8, 0)),
             .stat = @bitCast(@as(u8, 0)),
@@ -2795,6 +2823,7 @@ const GPU = struct {
             .lyc = 0,
             .bgp = @bitCast(@as(u8, 0)),
             .obp = obp,
+            .objects = objects,
             .window_position = .{ .wy = 0, .wx = 0 },
             .cycles = 0,
         };
@@ -2878,11 +2907,51 @@ const GPU = struct {
     }
 
     fn render_scanline(self: *GPU) void {
+        var scan_line: TilePixelValue = [_]u8{.Zero} ** SCREEN_WIDTH;
         if (self.lcdc.bg_enable) {
-            self.render_background();
+            var tile_x_index = self.background_viewport.scx / 8;
+            const tile_y_index = self.ly +% self.background_viewport.scy;
+            const tile_offset: u16 = (tile_y_index / 8) * 32;
+
+            const background_tile_map = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+            const tile_map_begin = background_tile_map;
+            const tile_map_offset = tile_map_begin +% tile_offset;
+            const row_y_offset = tile_y_index % 8;
+            var pixel_x_index = self.background_viewport.scx % 8;
+            if (!self.lcdc.bg_tile_set) {
+                // handle 0x8800-0x97FF
+                std.debug.panic("Implement 0x8800-0x97FF\n", .{});
+            }
+            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * 4;
+            for (0..SCREEN_WIDTH) |line_x| {
+                const tile_index = self.bus.read_byte(tile_map_offset +% tile_x_index);
+                const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
+                const color = tile_value.to_color();
+                self.canvas[canvas_offset] = color;
+                self.canvas[canvas_offset +% 1] = color;
+                self.canvas[canvas_offset +% 2] = color;
+                // why
+                self.canvas[canvas_offset +% 3] = 0xFF;
+                canvas_offset += 4;
+
+                scan_line[line_x] = tile_value;
+                pixel_x_index = (pixel_x_index + 1) % 8;
+
+                if (pixel_x_index == 0) {
+                    // tile_x_index = (tile_x_index + 1) % 32;
+                    // tile_map_offset = tile_map_begin +% tile_offset +% tile_x_index;
+                    tile_x_index += 1;
+                }
+                if (!self.lcdc.bg_tile_set) {
+                    // handle 0x8800-0x97FF
+                    std.debug.panic("Implement 0x8800-0x97FF\n", .{});
+                }
+            }
         }
         if (self.lcdc.obj_enable) {
-            self.render_objects();
+            const object_height = if (self.lcdc.obj_size) 16 else 8;
+            _ = object_height; // autofix
+
         }
         if (self.lcdc.window_enable) {
             self.render_window();
@@ -2895,7 +2964,7 @@ const GPU = struct {
     fn write_vram(self: *GPU, index: usize, byte: u8) void {
         self.vram[index] = byte;
 
-        if (index >= 0x1800) {
+        if (index >= 0x9800) {
             return;
         }
         const normalized_index = index & 0xFFFE;
@@ -2912,6 +2981,23 @@ const GPU = struct {
             const pixel_value = @as(u2, low) | (@as(u2, high) << 1);
 
             self.tile_set[tile_index][row_index][pixel_index] = @enumFromInt(pixel_value);
+        }
+    }
+    pub fn write_oam(self: *GPU, addr: usize, value: u8) void {
+        std.debug.assert(addr >= 0xFE00 and addr < 0xFEA0);
+        self.vram[addr] = value;
+        const object_index = (addr - 0xFE00) / 4;
+        if (object_index >= 40) {
+            return;
+        }
+
+        // could be cut, just lookup straight from memory instead
+        const byte = (addr - 0xFE00) % 4;
+        switch (byte) {
+            0 => self.objects[object_index].y = value,
+            1 => self.objects[object_index].x = value,
+            2 => self.objects[object_index].attributes = @bitCast(value),
+            else => {},
         }
     }
 };
