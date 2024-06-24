@@ -11,6 +11,12 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const log = std.io.getStdOut().writer();
 
+const IME = enum {
+    Disabled,
+    EILagCycle,
+    Enabled,
+};
+
 const Registers = struct {
     A: u8,
     B: u8,
@@ -564,6 +570,7 @@ pub const CPU = struct {
     is_halted: bool,
     is_stopped: bool,
     interrupts_enabled: bool,
+    ime: IME,
     fn execute(self: *CPU, instruction: Instruction) u16 {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
         if (self.is_halted) {
@@ -664,6 +671,7 @@ pub const CPU = struct {
                 Instruction.POP => |target| {
                     const result = self.pop();
                     if (self.pc == 0xC31E) {
+                        //TODO: fixme instr1 breaking here
                         std.debug.print("POP result 0x{x}\n", .{result});
                     }
                     switch (target) {
@@ -2368,16 +2376,19 @@ pub const CPU = struct {
 
     fn di(self: *CPU) u16 {
         self.interrupts_enabled = false;
+        self.ime = IME.Disabled;
         return self.pc +% 1;
     }
 
     fn ei(self: *CPU) u16 {
         self.interrupts_enabled = true;
+        self.ime = IME.EILagCycle;
         return self.pc +% 1;
     }
 
     fn reti(self: *CPU) u16 {
         self.interrupts_enabled = true;
+        self.ime = IME.Enabled;
         const address = self.pop();
         return address;
     }
@@ -2426,7 +2437,8 @@ pub const CPU = struct {
         //     .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
         //     .is_halted = false,
         //     .is_stopped = false,
-        //     .interrupts_enabled = true,
+        //     .interrupts_enabled = false,
+        //     .ime = IME.Disabled,
         // };
         // //debug
         const cpu: CPU = CPU{
@@ -2451,7 +2463,8 @@ pub const CPU = struct {
             .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
             .is_halted = false,
             .is_stopped = false,
-            .interrupts_enabled = true,
+            .interrupts_enabled = false,
+            .ime = IME.Disabled,
         };
         return cpu;
     }
