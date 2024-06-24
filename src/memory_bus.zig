@@ -190,7 +190,7 @@ pub const MemoryBus = struct {
                 // debug
                 0xFF44 => break :blk 0x90,
                 // 0xFF45 => break :blk self.gpu.lyc,
-                else => break :blk 0x00,
+                else => break :blk 0xFF,
             }
         };
     }
