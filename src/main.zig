@@ -19,8 +19,9 @@ pub fn main() !void {
     // const file = try std.fs.cwd().openFile("./07-jr,jp,call,ret,rst.gb", .{});
     // fail
     // const file = try std.fs.cwd().openFile("./08-misc instrs.gb", .{});
-    const file = try std.fs.cwd().openFile("./09-op r,r.gb", .{});
-    // const file = try std.fs.cwd().openFile("./10-bit ops.gb", .{});
+    // pass
+    // const file = try std.fs.cwd().openFile("./09-op r,r.gb", .{});
+    const file = try std.fs.cwd().openFile("./10-bit ops.gb", .{});
     // const file = try std.fs.cwd().openFile("./11-op a,(hl).gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("test_rom.gb", .{});

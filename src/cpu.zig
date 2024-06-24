@@ -2371,13 +2371,13 @@ pub const CPU = struct {
     fn bit(self: *CPU, value: u8, args: PrefixExtendedArgs) u8 {
         const bit_check = (value >> args.bit.?) & 1;
         self.registers.F = .{
-            .zero = args.bit.? == 0,
+            .zero = bit_check == 0,
             .subtract = false,
             .half_carry = true,
             .carry = self.registers.F.carry,
         };
 
-        return if (bit_check > 0) 1 else 0;
+        return value;
     }
 
     fn set(_: *CPU, value: u8, args: PrefixExtendedArgs) u8 {
