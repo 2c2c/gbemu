@@ -2033,7 +2033,7 @@ pub const CPU = struct {
             .zero = sum == 0,
             .subtract = false,
             .carry = overflow == 1,
-            .half_carry = (((self.registers.A & 0xF) + (value & 0xF) + overflow) > 0xF),
+            .half_carry = (((self.registers.A & 0xF) + (value & 0xF) + carry) > 0xF),
         };
 
         return sum;
@@ -2065,7 +2065,7 @@ pub const CPU = struct {
             .zero = sum == 0,
             .subtract = true,
             .carry = overflow == 1,
-            .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - overflow) < 0),
+            .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - carry) < 0),
         };
 
         return sum;

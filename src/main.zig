@@ -11,7 +11,9 @@ pub fn main() !void {
     // const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("./01-special.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
-    const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
+    // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
+    const file = try std.fs.cwd().openFile("./04-op r,imm.gb", .{});
+    // const file = try std.fs.cwd().openFile("./05-op rp.gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("test_rom.gb", .{});
     defer file.close();
