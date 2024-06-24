@@ -564,6 +564,7 @@ pub const CPU = struct {
     is_stopped: bool,
     interrupts_enabled: bool,
     fn execute(self: *CPU, instruction: Instruction) u16 {
+        log.print("Instruction {}\n", .{instruction}) catch unreachable;
         if (self.is_halted) {
             return self.pc;
         }
@@ -2062,12 +2063,9 @@ pub const CPU = struct {
 
     fn inc(self: *CPU, value: u8) u8 {
         const result = value +% 1;
-        self.registers.F = .{
-            .zero = result == 0,
-            .subtract = false,
-            .half_carry = (value & 0xF) == 0xF,
-            .carry = false,
-        };
+        self.registers.F.zero = result == 0;
+        self.registers.F.subtract = false;
+        self.registers.F.half_carry = (value & 0xF) == 0xF;
         return result;
     }
 
@@ -2078,12 +2076,9 @@ pub const CPU = struct {
 
     fn dec(self: *CPU, value: u8) u8 {
         const result = value -% 1;
-        self.registers.F = .{
-            .zero = result == 0,
-            .subtract = true,
-            .half_carry = (value & 0xF) == 0,
-            .carry = false,
-        };
+        self.registers.F.zero = result == 0;
+        self.registers.F.subtract = true;
+        self.registers.F.half_carry = (value & 0xF) == 0xF;
         return result;
     }
 
