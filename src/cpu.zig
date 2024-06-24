@@ -2173,13 +2173,15 @@ pub const CPU = struct {
     }
 
     fn rotate_right(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const carry = value & 1;
-        const new_value = (value >> 1) | (carry << 7);
+        // const carry = value & 1;
+        // const new_value = (value >> 1) | (carry << 7);
+        const carry: u1 = @intFromBool(self.registers.F.carry);
+        const new_value = (value >> 1) | @as(u8, (carry)) << @intCast(7);
         self.registers.F = .{
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = carry == 1,
+            .carry = value & 1 == 1,
         };
         return new_value;
     }
