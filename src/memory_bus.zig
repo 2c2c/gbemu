@@ -151,7 +151,7 @@ pub const MemoryBus = struct {
                 return;
             },
             else => {
-                std.debug.print("Implement other writes\n", .{});
+                // std.debug.print("Implement other writes\n", .{});
             },
         }
         self.memory[addr] = byte;
@@ -181,7 +181,9 @@ pub const MemoryBus = struct {
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
-                0xFF44 => break :blk self.gpu.ly,
+                // 0xFF44 => break :blk self.gpu.ly,
+                // debug
+                0xFF44 => break :blk 0x90,
                 // 0xFF45 => break :blk self.gpu.lyc,
                 else => break :blk 0x00,
             }

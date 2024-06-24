@@ -5,3 +5,5 @@ main
 main.o
 *gb
 .vscode
+dump*
+EpicLog*
