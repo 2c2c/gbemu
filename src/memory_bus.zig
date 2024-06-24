@@ -92,12 +92,6 @@ pub const MemoryBus = struct {
             memory[i] = game_rom[i];
         }
 
-        const meta = get_game_rom_metadata(&memory);
-        _ = meta; // autofix
-        // std.debug.print("Title: {s}\n", .{meta.title.title});
-        // std.debug.print("rom size: {}\n", .{meta.rom_size});
-        // std.debug.print("rom size: {}\n", .{meta.ram_size});
-
         var divider = timer.Timer.new();
         divider.tac.enabled = true;
         divider.tac.frequency = @intFromEnum(timer.Frequency.Hz16384);
