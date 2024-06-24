@@ -8,7 +8,8 @@ const eql = std.mem.eql;
 const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
-    const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
+    const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("test_rom.gb", .{});
     defer file.close();
 

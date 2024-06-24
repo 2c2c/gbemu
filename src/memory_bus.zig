@@ -8,6 +8,66 @@ const GPU = gpu.GPU;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
+const RomSize = enum(u8) {
+    _32KB = 0x00,
+    _64KB = 0x01,
+    _128KB = 0x02,
+    _256KB = 0x03,
+    _512KB = 0x04,
+    _1MB = 0x05,
+    _2MB = 0x06,
+    _4MB = 0x07,
+    _1_1MB = 0x52,
+    _1_2MB = 0x53,
+    _1_5MB = 0x54,
+};
+
+const RamSize = enum(u8) {
+    _None = 0x00,
+    _2KB = 0x01,
+    _8KB = 0x02,
+    _32KB = 0x03,
+};
+
+/// this isnt consistent
+// 0x0134 - 0x0143
+const Title = extern struct {
+    // 0x0134 - 0x013E
+    title: [11]u8,
+    // 0x013F - 0x0142
+    manufacturer_code: [4]u8,
+    // 0x0143
+    cgb_flag: u8,
+};
+
+const GameBoyRomHeader = extern struct {
+    // 0x0100 - 0x0103
+    entry_point: [4]u8,
+    // 0x0104 - 0x0133
+    nintendo_logo: [48]u8,
+    // 0x0134 - 0x0143
+    title: Title,
+    // 0x0144 - 0x0145
+    new_licensee_code: [2]u8,
+    // 0x0146
+    sgb_flag: u8,
+    // 0x0147
+    cartridge_type: u8,
+    // 0x0148
+    rom_size: RomSize,
+    // 0x0149
+    ram_size: RamSize,
+    // 0x014A
+    destination_code: u8,
+    // 0x014B
+    old_licensee_code: u8,
+    // 0x014C
+    mask_rom_version: u8,
+    // 0x014D
+    header_checksum: u8,
+    // 0x014E - 0x014F
+    global_checksum: [2]u8,
+};
 pub const MemoryBus = struct {
     boot_rom: [0x100]u8,
     memory: [0x10000]u8,
@@ -31,6 +91,12 @@ pub const MemoryBus = struct {
         for (0x0000..0x8000) |i| {
             memory[i] = game_rom[i];
         }
+
+        const meta = get_game_rom_metadata(&memory);
+        _ = meta; // autofix
+        // std.debug.print("Title: {s}\n", .{meta.title.title});
+        // std.debug.print("rom size: {}\n", .{meta.rom_size});
+        // std.debug.print("rom size: {}\n", .{meta.ram_size});
 
         var divider = timer.Timer.new();
         divider.tac.enabled = true;
@@ -222,5 +288,10 @@ pub const MemoryBus = struct {
             }
         };
         _ = res; // autofix
+    }
+    pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {
+        const slice = memory[0x100..0x150];
+        const header: *GameBoyRomHeader = @ptrCast(slice);
+        return header.*;
     }
 };
