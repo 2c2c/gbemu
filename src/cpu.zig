@@ -1516,51 +1516,51 @@ pub const CPU = struct {
                         ArithmeticTarget.A => {
                             // std.debug.print("inc A\n", .{});
                             const value = self.registers.A;
-                            _ = self.inc(value);
-                            self.registers.A = value;
+                            const res = self.inc(value);
+                            self.registers.A = res;
                         },
                         ArithmeticTarget.B => {
                             // std.debug.print("inc B\n", .{});
                             const value = self.registers.B;
-                            _ = self.inc(value);
-                            self.registers.B = value;
+                            const res = self.inc(value);
+                            self.registers.B = res;
                         },
                         ArithmeticTarget.C => {
                             // std.debug.print("inc C\n", .{});
                             const value = self.registers.C;
-                            _ = self.inc(value);
-                            self.registers.C = value;
+                            const res = self.inc(value);
+                            self.registers.C = res;
                         },
                         ArithmeticTarget.D => {
                             // std.debug.print("inc D\n", .{});
                             const value = self.registers.D;
-                            _ = self.inc(value);
-                            self.registers.D = value;
+                            const res = self.inc(value);
+                            self.registers.D = res;
                         },
                         ArithmeticTarget.E => {
                             // std.debug.print("inc E\n", .{});
                             const value = self.registers.E;
-                            _ = self.inc(value);
-                            self.registers.E = value;
+                            const res = self.inc(value);
+                            self.registers.E = res;
                         },
                         ArithmeticTarget.H => {
                             // std.debug.print("inc H\n", .{});
                             const value = self.registers.H;
-                            _ = self.inc(value);
-                            self.registers.H = value;
+                            const res = self.inc(value);
+                            self.registers.H = res;
                         },
                         ArithmeticTarget.L => {
                             // std.debug.print("inc L\n", .{});
                             const value = self.registers.L;
-                            _ = self.inc(value);
-                            self.registers.L = value;
+                            const res = self.inc(value);
+                            self.registers.L = res;
                         },
                         ArithmeticTarget.HL => {
                             // std.debug.print("inc HL\n", .{});
                             const HL = self.registers.get_HL();
                             const value = self.bus.read_byte(HL);
-                            _ = self.inc(value);
-                            self.bus.write_byte(HL, value);
+                            const res = self.inc(value);
+                            self.bus.write_byte(HL, res);
                         },
                         else => {
                             // std.debug.print("Unknown INC target\n", .{});
@@ -1574,51 +1574,51 @@ pub const CPU = struct {
                         ArithmeticTarget.A => {
                             // std.debug.print("dec A\n", .{});
                             const value = self.registers.A;
-                            _ = self.dec(value);
-                            self.registers.A = value;
+                            const res = self.dec(value);
+                            self.registers.A = res;
                         },
                         ArithmeticTarget.B => {
                             // std.debug.print("dec B\n", .{});
                             const value = self.registers.B;
-                            _ = self.dec(value);
-                            self.registers.B = value;
+                            const res = self.dec(value);
+                            self.registers.B = res;
                         },
                         ArithmeticTarget.C => {
                             // std.debug.print("dec C\n", .{});
                             const value = self.registers.C;
-                            _ = self.dec(value);
-                            self.registers.C = value;
+                            const res = self.dec(value);
+                            self.registers.C = res;
                         },
                         ArithmeticTarget.D => {
                             // std.debug.print("dec D\n", .{});
                             const value = self.registers.D;
-                            _ = self.dec(value);
-                            self.registers.D = value;
+                            const res = self.dec(value);
+                            self.registers.D = res;
                         },
                         ArithmeticTarget.E => {
                             // std.debug.print("dec E\n", .{});
                             const value = self.registers.E;
-                            _ = self.dec(value);
-                            self.registers.E = value;
+                            const res = self.dec(value);
+                            self.registers.E = res;
                         },
                         ArithmeticTarget.H => {
                             // std.debug.print("dec H\n", .{});
                             const value = self.registers.H;
-                            _ = self.dec(value);
-                            self.registers.H = value;
+                            const res = self.dec(value);
+                            self.registers.H = res;
                         },
                         ArithmeticTarget.L => {
                             // std.debug.print("dec L\n", .{});
                             const value = self.registers.L;
-                            _ = self.dec(value);
-                            self.registers.L = value;
+                            const res = self.dec(value);
+                            self.registers.L = res;
                         },
                         ArithmeticTarget.HL => {
                             // std.debug.print("dec HL\n", .{});
                             const HL = self.registers.get_HL();
                             const value = self.bus.read_byte(HL);
-                            _ = self.dec(value);
-                            self.bus.write_byte(HL, value);
+                            const res = self.dec(value);
+                            self.bus.write_byte(HL, res);
                         },
                         else => {
                             // std.debug.print("Unknown DEC target\n", .{});
