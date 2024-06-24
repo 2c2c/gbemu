@@ -1821,53 +1821,53 @@ pub const CPU = struct {
                 },
                 Instruction.RLA => |_| {
                     // std.debug.print("RLA\n", .{});
-                    const new_value = self.rotate_left(self.registers.A, .{});
+                    const new_value = self.rla(self.registers.A);
                     self.registers.A = new_value;
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
                 Instruction.RLCA => |_| {
                     // std.debug.print("RLCA\n", .{});
-                    const new_value = self.rotate_left_use_carry(self.registers.A, .{});
+                    const new_value = self.rlca(self.registers.A);
                     self.registers.A = new_value;
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
                 Instruction.RRA => |_| {
                     // std.debug.print("RRA\n", .{});
-                    const new_value = self.rotate_right(self.registers.A, .{});
+                    const new_value = self.rra(self.registers.A);
                     self.registers.A = new_value;
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
                 Instruction.RRCA => |_| {
                     // std.debug.print("RRCA\n", .{});
-                    const new_value = self.rotate_right_use_carry(self.registers.A, .{});
+                    const new_value = self.rrca(self.registers.A);
                     self.registers.A = new_value;
                     const new_pc: u16 = self.pc +% 1;
                     break :blk new_pc;
                 },
                 Instruction.RLC => |target| {
                     // std.debug.print("RLC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_left_use_carry, .{});
+                    handle_prefix_instruction(self, target, rlc, .{});
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RRC => |target| {
                     // std.debug.print("RRC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_right_use_carry, .{});
+                    handle_prefix_instruction(self, target, rrc, .{});
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RL => |target| {
                     // std.debug.print("RL {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_left, .{});
+                    handle_prefix_instruction(self, target, rl, .{});
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
                 Instruction.RR => |target| {
                     // std.debug.print("RR {}\n", .{target});
-                    handle_prefix_instruction(self, target, rotate_right, .{});
+                    handle_prefix_instruction(self, target, rr, .{});
                     const new_pc: u16 = self.pc +% 2;
                     break :blk new_pc;
                 },
@@ -2212,31 +2212,56 @@ pub const CPU = struct {
         };
     }
 
-    fn rotate_left(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const carry = value >> 7;
-        const new_value = (value << 1) | carry;
+    // would rather have clear rotate instructions than generalize these ugly things
+    fn rl(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
+        const new_value = (value << 1) | self.registers.F.carry;
         self.registers.F = .{
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = carry == 1,
+            .carry = (value << 7) & 0x80 == 0,
         };
 
         return new_value;
     }
 
-    fn rotate_left_use_carry(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const new_value = (value << 1) | @intFromBool(self.registers.F.carry);
+    fn rla(self: *CPU, value: u8) u8 {
+        const new_value = (value << 1) | self.registers.F.carry;
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = (value << 7) & 0x80 == 0,
+        };
+
+        return new_value;
+    }
+
+    fn rlc(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
+        const shift_carry = value >> 7;
+        const new_value = (value << 1) | shift_carry;
         self.registers.F = .{
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = value >> 7 == 1,
+            .carry = shift_carry,
         };
         return new_value;
     }
 
-    fn rotate_right(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
+    fn rlca(self: *CPU, value: u8) u8 {
+        const shift_carry = value >> 7;
+        const new_value = (value << 1) | shift_carry;
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = shift_carry,
+        };
+        return new_value;
+    }
+
+    fn rr(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
         // const carry = value & 1;
         // const new_value = (value >> 1) | (carry << 7);
         const carry: u1 = @intFromBool(self.registers.F.carry);
@@ -2250,13 +2275,38 @@ pub const CPU = struct {
         return new_value;
     }
 
-    fn rotate_right_use_carry(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const new_value = (value >> 1) | (@as(u8, @intFromBool(self.registers.F.carry)) << @intCast(7));
+    fn rra(self: *CPU, value: u8) u8 {
+        const carry: u1 = @intFromBool(self.registers.F.carry);
+        const new_value = (value >> 1) | @as(u8, carry) << @intCast(7);
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = value & 1 == 1,
+        };
+        return new_value;
+    }
+
+    fn rrc(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
+        const shift_carry = value & 1;
+        const new_value = (value >> 1) | @as(u8, shift_carry) << @intCast(7);
         self.registers.F = .{
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = value & 1 == 1,
+            .carry = shift_carry,
+        };
+        return new_value;
+    }
+
+    fn rrca(self: *CPU, value: u8) u8 {
+        const shift_carry = value & 1;
+        const new_value = (value >> 1) | @as(u8, shift_carry) << @intCast(7);
+        self.registers.F = .{
+            .zero = false,
+            .subtract = false,
+            .half_carry = false,
+            .carry = shift_carry,
         };
         return new_value;
     }
