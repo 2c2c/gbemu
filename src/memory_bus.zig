@@ -132,7 +132,10 @@ pub const MemoryBus = struct {
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
         switch (address) {
-            0xFF00...0xFFFF => {
+            0xFFFF => {
+                return @bitCast(self.interrupt_enable);
+            },
+            0xFF00...0xFF7F => {
                 return self.read_io(address);
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
@@ -147,7 +150,11 @@ pub const MemoryBus = struct {
     }
     pub fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
         switch (address) {
-            0xFF00...0xFFFF => {
+            0xFFFF => {
+                self.interrupt_enable = @bitCast(byte);
+                return;
+            },
+            0xFF00...0xFF7F => {
                 self.write_io(address, byte);
                 return;
             },
