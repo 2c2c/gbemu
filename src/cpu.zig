@@ -44,7 +44,7 @@ const Registers = struct {
 
     fn set_AF(self: *Registers, value: u16) void {
         self.A = @truncate((value & 0xFF00) >> 8);
-        const trunc: u8 = @truncate(value & 0xFF);
+        const trunc: u8 = @truncate(value & 0xF0);
         self.F = @bitCast(trunc);
     }
 
@@ -719,10 +719,6 @@ pub const CPU = struct {
                 },
                 Instruction.POP => |target| {
                     const result = self.pop();
-                    if (self.pc == 0xC31E) {
-                        //TODO: fixme instr1 breaking here
-                        std.debug.print("POP result 0x{x}\n", .{result});
-                    }
                     switch (target) {
                         StackTarget.BC => {
                             // std.debug.print("POP BC\n", .{});
