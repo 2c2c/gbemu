@@ -595,23 +595,28 @@ pub const CPU = struct {
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.ime = IME.Disabled;
-                    self.pc = self.call(@intFromEnum(ISR.VBlank), true);
+                    self.push(self.pc);
+                    self.pc = @intFromEnum(ISR.VBlank);
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.ime = IME.Disabled;
-                    self.pc = self.call(@intFromEnum(ISR.LCDStat), true);
+                    self.push(self.pc);
+                    self.pc = @intFromEnum(ISR.LCDStat);
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
                     self.bus.interrupt_flag.enable_timer = false;
                     self.ime = IME.Disabled;
-                    self.pc = self.call(@intFromEnum(ISR.Timer), true);
+                    self.push(self.pc);
+                    self.pc = @intFromEnum(ISR.Timer);
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
                     self.bus.interrupt_flag.enable_serial = false;
                     self.ime = IME.Disabled;
-                    self.pc = self.call(@intFromEnum(ISR.Serial), true);
+                    self.push(self.pc);
+                    self.pc = @intFromEnum(ISR.Serial);
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.ime = IME.Disabled;
-                    self.pc = self.call(@intFromEnum(ISR.Joypad), true);
+                    self.push(self.pc);
+                    self.pc = @intFromEnum(ISR.Joypad);
                 }
             },
         }
@@ -2408,6 +2413,11 @@ pub const CPU = struct {
         } else {
             return next_pc;
         }
+    }
+
+    fn interrupt_call(self: *CPU, address: u16) u16 {
+        self.push(self.pc);
+        return address;
     }
 
     fn ret(self: *CPU, should_return: bool) u16 {
