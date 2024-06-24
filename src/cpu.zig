@@ -2214,7 +2214,7 @@ pub const CPU = struct {
 
     // would rather have clear rotate instructions than generalize these ugly things
     fn rl(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const new_value = (value << 1) | self.registers.F.carry;
+        const new_value = (value << 1) | @intFromBool(self.registers.F.carry);
         self.registers.F = .{
             .zero = new_value == 0,
             .subtract = false,
@@ -2226,7 +2226,7 @@ pub const CPU = struct {
     }
 
     fn rla(self: *CPU, value: u8) u8 {
-        const new_value = (value << 1) | self.registers.F.carry;
+        const new_value = (value << 1) | @intFromBool(self.registers.F.carry);
         self.registers.F = .{
             .zero = false,
             .subtract = false,
@@ -2244,7 +2244,7 @@ pub const CPU = struct {
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = shift_carry,
+            .carry = shift_carry == 1,
         };
         return new_value;
     }
@@ -2256,7 +2256,7 @@ pub const CPU = struct {
             .zero = false,
             .subtract = false,
             .half_carry = false,
-            .carry = shift_carry,
+            .carry = shift_carry == 1,
         };
         return new_value;
     }
@@ -2294,7 +2294,7 @@ pub const CPU = struct {
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = shift_carry,
+            .carry = shift_carry == 1,
         };
         return new_value;
     }
@@ -2306,7 +2306,7 @@ pub const CPU = struct {
             .zero = false,
             .subtract = false,
             .half_carry = false,
-            .carry = shift_carry,
+            .carry = shift_carry == 1,
         };
         return new_value;
     }
