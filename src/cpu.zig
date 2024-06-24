@@ -2189,12 +2189,8 @@ pub const CPU = struct {
 
     fn cpl(self: *CPU) void {
         self.registers.A = self.registers.A ^ 0xFF;
-        self.registers.F = .{
-            .zero = false,
-            .subtract = true,
-            .half_carry = true,
-            .carry = self.registers.F.carry,
-        };
+        self.registers.F.subtract = true;
+        self.registers.F.half_carry = true;
     }
 
     fn ccf(self: *CPU) void {
@@ -2222,7 +2218,7 @@ pub const CPU = struct {
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = (value << 7) & 0x80 == 0,
+            .carry = (value << 7) & 0x80 == 1,
         };
 
         return new_value;
@@ -2234,7 +2230,7 @@ pub const CPU = struct {
             .zero = false,
             .subtract = false,
             .half_carry = false,
-            .carry = (value << 7) & 0x80 == 0,
+            .carry = (value << 7) & 0x80 == 1,
         };
 
         return new_value;
