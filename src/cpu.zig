@@ -999,13 +999,16 @@ pub const CPU = struct {
                         LoadType.HLFromSPN => {
                             const n = self.read_next_byte();
                             const signed: i8 = @bitCast(n);
-                            const extended = @as(i16, signed);
-                            const unsigned: u16 = @bitCast(extended);
-                            self.registers.set_HL(unsigned);
+                            if (signed >= 0) {
+                                self.registers.set_HL(self.sp +% @abs(signed));
+                            } else {
+                                self.registers.set_HL(self.sp -% @abs(signed));
+                            }
                             self.registers.F.zero = false;
                             self.registers.F.subtract = false;
-                            self.registers.F.half_carry = (self.sp & 0xF) + (unsigned & 0xF) > 0xF;
-                            self.registers.F.carry = (self.sp & 0xFF) + (unsigned & 0xFF) > 0xFF;
+                            // i passed instr3 rom, but should still review these flags
+                            self.registers.F.half_carry = (self.sp & 0xF) + (n & 0xF) > 0xF;
+                            self.registers.F.carry = (self.sp & 0xFF) + n > 0xFF;
                             const next_pc = self.pc +% 2;
                             break :blk next_pc;
                         },
