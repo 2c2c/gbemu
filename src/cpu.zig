@@ -13,8 +13,18 @@ const log = std.io.getStdOut().writer();
 
 const IME = enum {
     Disabled,
+    /// EI register "turns on" IME, but it takes an extra instruction for it to actually be enabled
+    /// this isn't the case for RETI
     EILagCycle,
     Enabled,
+};
+
+const ISR = enum(u16) {
+    VBlank = 0x0040,
+    LCDStat = 0x0048,
+    Timer = 0x0050,
+    Serial = 0x0058,
+    Joypad = 0x0060,
 };
 
 const Registers = struct {
@@ -569,10 +579,43 @@ pub const CPU = struct {
     bus: MemoryBus,
     is_halted: bool,
     is_stopped: bool,
-    interrupts_enabled: bool,
     ime: IME,
     fn execute(self: *CPU, instruction: Instruction) u16 {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
+        switch (self.ime) {
+            IME.Disabled => {
+                // std.debug.print("IME Disabled\n", .{});
+            },
+            IME.EILagCycle => {
+                self.ime = IME.Enabled;
+            },
+            IME.Enabled => {
+                // std.debug.print("IME Enabled\n", .{});
+                self.is_halted = false;
+                if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
+                    self.bus.interrupt_flag.enable_vblank = false;
+                    self.ime = IME.Disabled;
+                    self.pc = self.call(@intFromEnum(ISR.VBlank), true);
+                } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
+                    self.bus.interrupt_flag.enable_lcd_stat = false;
+                    self.ime = IME.Disabled;
+                    self.pc = self.call(@intFromEnum(ISR.LCDStat), true);
+                } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
+                    self.bus.interrupt_flag.enable_timer = false;
+                    self.ime = IME.Disabled;
+                    self.pc = self.call(@intFromEnum(ISR.Timer), true);
+                } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
+                    self.bus.interrupt_flag.enable_serial = false;
+                    self.ime = IME.Disabled;
+                    self.pc = self.call(@intFromEnum(ISR.Serial), true);
+                } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
+                    self.bus.interrupt_flag.enable_joypad = false;
+                    self.ime = IME.Disabled;
+                    self.pc = self.call(@intFromEnum(ISR.Joypad), true);
+                }
+            },
+        }
+
         if (self.is_halted) {
             return self.pc;
         }
@@ -617,7 +660,8 @@ pub const CPU = struct {
                             },
                         }
                     };
-                    const next_pc = self.call(jump_condition);
+                    var next_pc = self.pc +% 3;
+                    next_pc = self.call(next_pc, jump_condition);
                     break :blk next_pc;
                 },
                 Instruction.RET => |jt| {
@@ -2354,8 +2398,9 @@ pub const CPU = struct {
         return @as(u16, high) << 8 | @as(u16, low);
     }
 
-    fn call(self: *CPU, should_call: bool) u16 {
-        const next_pc = self.pc +% 3;
+    /// For the call opcode, we increment pc prior to the call
+    /// wheras for interrupt usage we return to the current instruction so leave pc as is
+    fn call(self: *CPU, next_pc: u16, should_call: bool) u16 {
         if (should_call) {
             self.push(next_pc);
             const address = self.read_next_word();
@@ -2375,19 +2420,16 @@ pub const CPU = struct {
     }
 
     fn di(self: *CPU) u16 {
-        self.interrupts_enabled = false;
         self.ime = IME.Disabled;
         return self.pc +% 1;
     }
 
     fn ei(self: *CPU) u16 {
-        self.interrupts_enabled = true;
         self.ime = IME.EILagCycle;
         return self.pc +% 1;
     }
 
     fn reti(self: *CPU) u16 {
-        self.interrupts_enabled = true;
         self.ime = IME.Enabled;
         const address = self.pop();
         return address;
@@ -2437,7 +2479,6 @@ pub const CPU = struct {
         //     .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
         //     .is_halted = false,
         //     .is_stopped = false,
-        //     .interrupts_enabled = false,
         //     .ime = IME.Disabled,
         // };
         // //debug
@@ -2463,7 +2504,6 @@ pub const CPU = struct {
             .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
             .is_halted = false,
             .is_stopped = false,
-            .interrupts_enabled = false,
             .ime = IME.Disabled,
         };
         return cpu;
