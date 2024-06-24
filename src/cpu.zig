@@ -2074,7 +2074,7 @@ pub const CPU = struct {
         const result = value -% 1;
         self.registers.F.zero = result == 0;
         self.registers.F.subtract = true;
-        self.registers.F.half_carry = (value & 0xF) == 0xF;
+        self.registers.F.half_carry = (value & 0xF) == 0x0;
         return result;
     }
 
