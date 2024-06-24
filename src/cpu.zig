@@ -168,6 +168,7 @@ const Instruction = union(enum) {
     RRCA: void,
     RRA: void,
     JP: JumpTest,
+    JPI: void,
     JR: JumpTest,
     LD: LoadType,
     PUSH: StackTarget,
@@ -433,7 +434,7 @@ const Instruction = union(enum) {
             0xE6 => return Instruction{ .AND = ArithmeticTarget.D8 },
             0xE7 => return Instruction{ .RST = RstLocation.Rst20 },
             0xE8 => return Instruction.SPADD,
-            0xE9 => return Instruction{ .JP = JumpTest.Always }, // Jump to HL
+            0xE9 => return Instruction.JPI,
             0xEA => return Instruction{ .LD = .{ .IndirectFromA = Indirect.WordIndirect } },
             0xEE => return Instruction{ .XOR = ArithmeticTarget.D8 },
             0xEF => return Instruction{ .RST = RstLocation.Rst28 },
@@ -662,6 +663,9 @@ pub const CPU = struct {
                 },
                 Instruction.POP => |target| {
                     const result = self.pop();
+                    if (self.pc == 0xC31E) {
+                        std.debug.print("POP result 0x{x}\n", .{result});
+                    }
                     switch (target) {
                         StackTarget.BC => {
                             // std.debug.print("POP BC\n", .{});
@@ -982,6 +986,11 @@ pub const CPU = struct {
                         }
                     };
                     const new_pc = self.jump(jump_condition);
+                    break :blk new_pc;
+                },
+                Instruction.JPI => {
+                    // std.debug.print("JP HL\n", .{});
+                    const new_pc = self.registers.get_HL();
                     break :blk new_pc;
                 },
                 Instruction.JR => |jt| {
@@ -1929,12 +1938,10 @@ pub const CPU = struct {
         const sum = result[0];
         const carry = result[1];
 
-        self.registers.F = .{
-            .zero = false,
-            .subtract = false,
-            .carry = carry == 1,
-            .half_carry = (((self.registers.get_HL() & 0x7FF) + (value & 0x7FF)) > 0x7FF),
-        };
+        self.registers.F.subtract = false;
+        self.registers.F.half_carry = (((self.registers.get_HL() & 0xFFF) + (value & 0xFFF)) > 0xFFF);
+        self.registers.F.carry = carry == 1;
+
         return sum;
     }
 
