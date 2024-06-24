@@ -2150,50 +2150,38 @@ pub const CPU = struct {
         return result;
     }
 
+    // there are a million implementations that are blargg inaccurate
+    // an emu accuracy tester posted these simple set of rules that seem to nail the quirks:
+    //
+    // If N == 0 and A >= $9A, set C
+    // If N == 0 and (A & $0F) >= $0A, set H
+    // adjustment is ($06 if H else $00) | ($60 if C else $00)
+    // Add adjustment if N is 0 or subtract adjustment if N is 1
+    // Z = A == 0, N unchanged, clear H to 0
     fn daa(self: *CPU, value: u8) u8 {
-        var correction: u8 = 0;
-        var should_carry = false;
-        if (value == 0xF0 and @as(u8, @bitCast(self.registers.F)) == 0xE0) {
-            std.debug.print("here", .{});
+        if (!self.registers.F.subtract and (value >= 0x9A)) {
+            self.registers.F.carry = true;
         }
-        if (self.registers.F.half_carry or (value & 0x0F) > 9) {
-            correction |= 0x6;
+        if (!self.registers.F.subtract and ((value & 0xF) >= 0xA)) {
+            self.registers.F.half_carry = true;
         }
-        if (self.registers.F.carry or value > 0x99) {
-            correction |= 0x60;
-            should_carry = true;
+        var adjustment: u8 = 0;
+        if (self.registers.F.half_carry) {
+            adjustment = 0x06;
         }
-
-        // using higher size avoids redoing overflow logic
+        if (self.registers.F.carry) {
+            adjustment = adjustment | 0x60;
+        }
         var new_value = value;
         if (self.registers.F.subtract) {
-            const res = @subWithOverflow(new_value, correction);
-            new_value = res[0];
-            should_carry = res[1] == 1;
-
-            if (new_value & 0x0F > 9) {
-                new_value -= 0x06;
-            }
-            if (new_value & 0xF0 > 0x90) {
-                new_value -= 0x60;
-            }
+            new_value = value -% adjustment;
         } else {
-            const res = @addWithOverflow(new_value, correction);
-            new_value = res[0];
-            should_carry = res[1] == 1;
-            if (new_value & 0x0F > 9) {
-                new_value += 0x06;
-            }
-            if (new_value & 0xF0 > 0x90) {
-                new_value += 0x60;
-            }
+            new_value = value +% adjustment;
         }
-
         self.registers.F.zero = new_value == 0;
         self.registers.F.half_carry = false;
-        self.registers.F.carry = should_carry;
 
-        return @truncate(new_value);
+        return new_value;
     }
 
     fn cpl(self: *CPU) void {
