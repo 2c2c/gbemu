@@ -2152,7 +2152,7 @@ pub const CPU = struct {
         const carry = value >> 7;
         const new_value = (value << 1) | carry;
         self.registers.F = .{
-            .zero = false,
+            .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
             .carry = carry == 1,
@@ -2164,7 +2164,7 @@ pub const CPU = struct {
     fn rotate_left_use_carry(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
         const new_value = (value << 1) | @intFromBool(self.registers.F.carry);
         self.registers.F = .{
-            .zero = false,
+            .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
             .carry = value >> 7 == 1,
@@ -2176,7 +2176,7 @@ pub const CPU = struct {
         const carry = value & 1;
         const new_value = (value >> 1) | (carry << 7);
         self.registers.F = .{
-            .zero = false,
+            .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
             .carry = carry == 1,
@@ -2187,7 +2187,7 @@ pub const CPU = struct {
     fn rotate_right_use_carry(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
         const new_value = (value >> 1) | (@as(u8, @intFromBool(self.registers.F.carry)) << @intCast(7));
         self.registers.F = .{
-            .zero = false,
+            .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
             .carry = value & 1 == 1,
