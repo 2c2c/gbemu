@@ -18,13 +18,13 @@ const JoypadDirection = packed struct {
 };
 
 pub const Joypad = struct {
-    is_action_row: u1,
+    is_action_row: bool,
     action: JoypadAction,
     direction: JoypadDirection,
 
     pub fn new() Joypad {
         return Joypad{
-            .is_action_row = 0,
+            .is_action_row = false,
             .action = .{
                 .A = false,
                 .B = false,

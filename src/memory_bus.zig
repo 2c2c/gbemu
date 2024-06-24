@@ -131,11 +131,13 @@ pub const MemoryBus = struct {
     }
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
-        const addr = @as(usize, address);
-        switch (addr) {
+        switch (address) {
+            0xFF00...0xFFFF => {
+                return self.read_io(address);
+            },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
                 // std.debug.print("Vram byte read\n", .{});
-                return self.gpu.read_vram(addr);
+                return self.gpu.read_vram(address);
             },
             else => {
                 // std.debug.print("Non Vram byte read\n", .{});
@@ -144,17 +146,20 @@ pub const MemoryBus = struct {
         return self.memory[address];
     }
     pub fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
-        const addr = @as(usize, address);
-        switch (addr) {
+        switch (address) {
+            0xFF00...0xFFFF => {
+                self.write_io(address, byte);
+                return;
+            },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
-                self.gpu.write_vram(addr, byte);
+                self.gpu.write_vram(address, byte);
                 return;
             },
             else => {
                 // std.debug.print("Implement other writes\n", .{});
             },
         }
-        self.memory[addr] = byte;
+        self.memory[address] = byte;
     }
 
     pub fn read_word(self: *MemoryBus, address: u16) u16 {
@@ -170,7 +175,7 @@ pub const MemoryBus = struct {
         self.write_byte(address +% 1, high);
     }
 
-    pub fn read_io(self: *MemoryBus, io_addr: u16) u8 {
+    pub fn read_io(self: *const MemoryBus, io_addr: u16) u8 {
         return blk: {
             switch (io_addr) {
                 0xFF00 => break :blk self.joypad.to_bytes(),
@@ -252,10 +257,11 @@ pub const MemoryBus = struct {
                 },
                 0xFF46 => {
                     std.debug.assert(byte >= 0x00 and byte <= 0xDF);
-                    const dma_high = @as(u16, byte) << 8;
+                    const dma_high: u16 = @as(u16, byte) << 8;
                     for (0x00..0x9F) |dma_low| {
-                        const value = self.read_byte(dma_high +% dma_low);
-                        self.write_byte(0xFE +% dma_low, value);
+                        const dma_low_u16 = @as(u16, @intCast(dma_low));
+                        const value = self.read_byte(dma_high +% dma_low_u16);
+                        self.write_byte(0xFE +% dma_low_u16, value);
                     }
                 },
                 0xFF47 => {

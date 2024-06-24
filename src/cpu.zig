@@ -434,7 +434,7 @@ const Instruction = union(enum) {
             0xE7 => return Instruction{ .RST = RstLocation.Rst20 },
             0xE8 => return Instruction.SPADD,
             0xE9 => return Instruction{ .JP = JumpTest.Always }, // Jump to HL
-            0xEA => return Instruction{ .LD = .ByteAddressFromA },
+            0xEA => return Instruction{ .LD = .{ .IndirectFromA = Indirect.WordIndirect } },
             0xEE => return Instruction{ .XOR = ArithmeticTarget.D8 },
             0xEF => return Instruction{ .RST = RstLocation.Rst28 },
             0xF0 => return Instruction{ .LD = .AFromByteAddress },
@@ -446,7 +446,7 @@ const Instruction = union(enum) {
             0xF7 => return Instruction{ .RST = RstLocation.Rst30 },
             0xF8 => return Instruction{ .LD = .HLFromSPN },
             0xF9 => return Instruction{ .LD = .SPFromHL },
-            0xFA => return Instruction{ .LD = .AFromByteAddress },
+            0xFA => return Instruction{ .LD = .{ .AFromIndirect = Indirect.WordIndirect } },
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
