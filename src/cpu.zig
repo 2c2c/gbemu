@@ -564,7 +564,7 @@ pub const CPU = struct {
     is_stopped: bool,
     interrupts_enabled: bool,
     fn execute(self: *CPU, instruction: Instruction) u16 {
-        log.print("Instruction {}\n", .{instruction}) catch unreachable;
+        // log.print("Instruction {}\n", .{instruction}) catch unreachable;
         if (self.is_halted) {
             return self.pc;
         }
@@ -1897,16 +1897,12 @@ pub const CPU = struct {
         var new_pc = self.pc +% 2;
         if (should_jump) {
             const offset = self.read_next_byte();
-            const signed_offset: i8 = @bitCast(offset);
-            const extended: i16 = @as(i16, signed_offset);
-            const unsigned: u16 = @bitCast(extended);
-            new_pc = blk: {
-                if (signed_offset < 0) {
-                    break :blk new_pc -% @abs(unsigned);
-                } else {
-                    break :blk new_pc +% unsigned;
-                }
-            };
+            const signed: i8 = @bitCast(offset);
+            if (signed < 0) {
+                new_pc = new_pc -% @abs(signed);
+            } else {
+                new_pc = new_pc +% @abs(signed);
+            }
             return new_pc;
         } else {
             return self.pc +% 2;
