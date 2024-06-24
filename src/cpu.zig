@@ -2151,40 +2151,49 @@ pub const CPU = struct {
     }
 
     fn daa(self: *CPU, value: u8) u8 {
-        var carry = false;
+        var correction: u8 = 0;
+        var should_carry = false;
+        if (value == 0xF0 and @as(u8, @bitCast(self.registers.F)) == 0xE0) {
+            std.debug.print("here", .{});
+        }
+        if (self.registers.F.half_carry or (value & 0x0F) > 9) {
+            correction |= 0x6;
+        }
+        if (self.registers.F.carry or value > 0x99) {
+            correction |= 0x60;
+            should_carry = true;
+        }
 
-        const result = blk: {
-            if (!self.registers.F.subtract) {
-                var result = value;
-                if (self.registers.F.carry or value > 0x99) {
-                    result = result +% 0x60;
-                    carry = true;
-                } else if (self.registers.F.half_carry or (value & 0xF) > 0x9) {
-                    result = result +% 0x06;
-                }
-                break :blk result;
-            } else if (self.registers.F.carry) {
-                carry = true;
-                var result = value;
-                if (self.registers.F.half_carry) {
-                    result = result -% 0x66;
-                } else {
-                    result = result -% 0x60;
-                }
-                break :blk result;
-            } else if (self.registers.F.half_carry) {
-                const result = value -% 0x06;
-                break :blk result;
-            } else {
-                break :blk value;
+        // using higher size avoids redoing overflow logic
+        var new_value = value;
+        if (self.registers.F.subtract) {
+            const res = @subWithOverflow(new_value, correction);
+            new_value = res[0];
+            should_carry = res[1] == 1;
+
+            if (new_value & 0x0F > 9) {
+                new_value -= 0x06;
             }
-        };
+            if (new_value & 0xF0 > 0x90) {
+                new_value -= 0x60;
+            }
+        } else {
+            const res = @addWithOverflow(new_value, correction);
+            new_value = res[0];
+            should_carry = res[1] == 1;
+            if (new_value & 0x0F > 9) {
+                new_value += 0x06;
+            }
+            if (new_value & 0xF0 > 0x90) {
+                new_value += 0x60;
+            }
+        }
 
-        self.registers.F.zero = result == 0;
-        self.registers.F.carry = carry;
+        self.registers.F.zero = new_value == 0;
         self.registers.F.half_carry = false;
+        self.registers.F.carry = should_carry;
 
-        return result;
+        return @truncate(new_value);
     }
 
     fn cpl(self: *CPU) void {
