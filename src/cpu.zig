@@ -2218,7 +2218,7 @@ pub const CPU = struct {
             .zero = new_value == 0,
             .subtract = false,
             .half_carry = false,
-            .carry = (value << 7) & 0x80 == 1,
+            .carry = (value & 0x80) > 0,
         };
 
         return new_value;
@@ -2230,7 +2230,7 @@ pub const CPU = struct {
             .zero = false,
             .subtract = false,
             .half_carry = false,
-            .carry = (value << 7) & 0x80 == 1,
+            .carry = (value & 0x80) > 0,
         };
 
         return new_value;
