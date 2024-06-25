@@ -219,7 +219,7 @@ pub const MemoryBus = struct {
                 },
                 0xFF05 => self.timer.tima = byte,
                 0xFF06 => self.timer.tma = byte,
-                0xFF07 => self.timer.tma = @bitCast(byte),
+                0xFF07 => self.timer.tac = @bitCast(byte),
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
                 },

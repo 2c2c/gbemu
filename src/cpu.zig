@@ -11,6 +11,12 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const log = std.io.getStdOut().writer();
 
+const HaltState = enum {
+    Enabled,
+    Bugged,
+    Disabled,
+};
+
 const IME = enum {
     Disabled,
     /// EI register "turns on" IME, but it takes an extra instruction for it to actually be enabled
@@ -578,54 +584,77 @@ pub const CPU = struct {
     sp: u16,
     bus: MemoryBus,
     is_halted: bool,
+    halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
     fn execute(self: *CPU, instruction: Instruction) u16 {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
-        switch (self.ime) {
-            IME.Disabled => {
-                // std.debug.print("IME Disabled\n", .{});
-            },
-            IME.EILagCycle => {
-                self.ime = IME.Enabled;
-            },
-            IME.Enabled => {
-                // std.debug.print("IME Enabled\n", .{});
-                self.is_halted = false;
+
+        var mutable_instruction = instruction;
+        if (self.pc == 0xC2C0) {
+            std.debug.print("Instruction {}\n", .{mutable_instruction});
+        }
+        // halt bug isnt needed to pass blargg fully i think
+        //
+        // if (self.halt_state == HaltState.Bugged) {
+        //     self.halt_state = HaltState.Disabled;
+        //     self.pc +%= 1;
+        // }
+        // IE IF checks run before cpu's IME is even checked. halts are ended regardless of if any interrupts
+        // actually run
+        if (self.bus.has_interrupt()) {
+            if (self.halt_state == HaltState.Enabled) {
+                self.is_halted = true;
+                self.halt_state = HaltState.Disabled;
+                self.pc +%= 1;
+            }
+
+            if (self.ime == IME.Enabled) {
+                std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
+                std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
+                std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
+                self.ime = IME.Disabled;
+                self.push(self.pc);
+
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
+                    std.debug.print("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
-                    self.ime = IME.Disabled;
-                    self.push(self.pc);
                     self.pc = @intFromEnum(ISR.VBlank);
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
+                    std.debug.print("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
-                    self.ime = IME.Disabled;
-                    self.push(self.pc);
                     self.pc = @intFromEnum(ISR.LCDStat);
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
+                    std.debug.print("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
-                    self.ime = IME.Disabled;
-                    self.push(self.pc);
                     self.pc = @intFromEnum(ISR.Timer);
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
+                    std.debug.print("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
-                    self.ime = IME.Disabled;
-                    self.push(self.pc);
                     self.pc = @intFromEnum(ISR.Serial);
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
+                    std.debug.print("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
-                    self.ime = IME.Disabled;
-                    self.push(self.pc);
                     self.pc = @intFromEnum(ISR.Joypad);
                 }
-            },
+                // return self.pc;
+                var byte = self.bus.read_byte(self.pc);
+                if (byte == 0xCB) {
+                    byte = self.bus.read_byte(self.pc +% 1);
+                    mutable_instruction = Instruction.from_byte(byte, true).?;
+                } else {
+                    mutable_instruction = Instruction.from_byte(byte, false).?;
+                }
+                std.debug.print("FOLLOW UP INSTR PC=0x{x}, INSTR={}\n", .{ self.pc, mutable_instruction });
+            }
         }
 
-        if (self.is_halted) {
-            return self.pc;
+        if (self.ime == IME.EILagCycle) {
+            self.ime = IME.Enabled;
         }
+
         const res = blk: {
-            switch (instruction) {
+            switch (mutable_instruction) {
                 Instruction.NOP => {
                     const next_pc = self.pc +% 1;
                     break :blk next_pc;
@@ -636,9 +665,18 @@ pub const CPU = struct {
                     break :blk next_pc;
                 },
                 Instruction.HALT => {
-                    self.is_halted = true;
-                    const next_pc = self.pc +% 1;
-                    break :blk next_pc;
+                    if (self.ime != IME.Enabled and self.bus.has_interrupt()) {
+                        // fix halt bug sometime
+                        // self.halt_state = HaltState.Bugged;
+                        // break :blk self.pc + 1;
+                        self.is_halted = true;
+                        self.halt_state = HaltState.Enabled;
+                        break :blk self.pc;
+                    } else {
+                        self.is_halted = true;
+                        self.halt_state = HaltState.Enabled;
+                        break :blk self.pc;
+                    }
                 },
                 Instruction.CALL => |jt| {
                     const jump_condition = jmpBlk: {
@@ -976,6 +1014,11 @@ pub const CPU = struct {
                             }
                         },
                         LoadType.AFromByteAddress => {
+                            if (self.pc == 0xC34E) {
+                                // FIXME: in instr2, an IF bit is getting 0x04 -> 0x00 incorrectly before reaching here on this PC
+                                // causing A to return 0 instead of 4
+                                std.debug.print("LD A (FF00 + a8)\n", .{});
+                            }
                             const offset = @as(u16, self.read_next_byte());
                             self.registers.A = self.bus.read_byte(0xFF00 +% offset);
                             const next_pc = self.pc +% 2;
@@ -1918,22 +1961,7 @@ pub const CPU = struct {
     }
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        log.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
-            self.registers.A,
-            @as(u8, @bitCast(self.registers.F)),
-            self.registers.B,
-            self.registers.C,
-            self.registers.D,
-            self.registers.E,
-            self.registers.H,
-            self.registers.L,
-            self.sp,
-            self.pc,
-            self.bus.read_byte(self.pc),
-            self.bus.read_byte(self.pc +% 1),
-            self.bus.read_byte(self.pc +% 2),
-            self.bus.read_byte(self.pc +% 3),
-        }) catch unreachable;
+        gameboy_doctor_print(self);
 
         var instruction_byte = self.bus.read_byte(self.pc);
 
@@ -2530,6 +2558,7 @@ pub const CPU = struct {
         //     .sp = 0x00,
         //     .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
         //     .is_halted = false,
+        //     .halt_state = HaltState.Disabled,
         //     .is_stopped = false,
         //     .ime = IME.Disabled,
         // };
@@ -2555,6 +2584,7 @@ pub const CPU = struct {
             .sp = 0xFFFE,
             .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
             .is_halted = false,
+            .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,
         };
@@ -2728,4 +2758,26 @@ test "io reader usage" {
     const buffer = try test_allocator.alloc(u8, size);
     defer test_allocator.free(buffer);
     _ = try file.readAll(buffer);
+}
+
+/// Prints state of cpu that can be diffed against using gameboy_doctor
+/// just pipe GBEMU | gameboy_doctor
+fn gameboy_doctor_print(self: *CPU) void {
+    log.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
+        self.registers.A,
+        @as(u8, @bitCast(self.registers.F)),
+        self.registers.B,
+        self.registers.C,
+        self.registers.D,
+        self.registers.E,
+        self.registers.H,
+        self.registers.L,
+        self.sp,
+        self.pc,
+        self.bus.read_byte(self.pc),
+        self.bus.read_byte(self.pc +% 1),
+        self.bus.read_byte(self.pc +% 2),
+        self.bus.read_byte(self.pc +% 3),
+    }) catch unreachable;
+    return;
 }
