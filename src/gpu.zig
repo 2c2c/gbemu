@@ -5,7 +5,7 @@ pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
 // const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
 
-const TilePixelValue = enum {
+pub const TilePixelValue = enum {
     /// white
     Zero,
     /// light gray
@@ -14,7 +14,7 @@ const TilePixelValue = enum {
     Two,
     /// black
     Three,
-    fn to_color(self: TilePixelValue) u8 {
+    pub fn to_color(self: TilePixelValue) u8 {
         return switch (self) {
             TilePixelValue.Zero => 0xFF,
             TilePixelValue.One => 0xAA,
