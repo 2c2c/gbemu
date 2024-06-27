@@ -1,5 +1,6 @@
 const std = @import("std");
 const CPU = @import("cpu.zig").CPU;
+const draw = @import("draw.zig");
 
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -7,7 +8,10 @@ const expect = std.testing.expect;
 const eql = std.mem.eql;
 const test_allocator = std.testing.allocator;
 
-pub fn main() !void {
+pub fn main() void {
+    try draw.main();
+}
+pub fn cpumain() !void {
     // const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // pass
     // const file = try std.fs.cwd().openFile("./01-special.gb", .{});
@@ -59,4 +63,8 @@ test "io reader usage" {
     const buffer = try test_allocator.alloc(u8, size);
     defer test_allocator.free(buffer);
     _ = try file.readAll(buffer);
+}
+
+test "sdl" {
+    try draw.main();
 }
