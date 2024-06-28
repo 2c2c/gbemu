@@ -205,7 +205,7 @@ pub const GPU = struct {
     }
 
     pub fn step(self: *GPU, cycles: u8) IERegister {
-        const request: IERegister = @bitCast(@as(u8, 0));
+        var request: IERegister = @bitCast(@as(u8, 0));
         if (!self.lcdc.lcd_enable) {
             return request;
         }
@@ -223,18 +223,16 @@ pub const GPU = struct {
                 if (self.ly >= 144) {
                     self.stat.ppu_mode = 0b01;
                     request.enable_vblank = true;
-                    // if (self.lcdc.lcd_enable) {
                     if (self.stat.mode_1_interrupt_enabled) {
                         request.enable_lcd_stat = true;
                     }
                 } else {
                     self.stat.ppu_mode = 0b10;
-                    // if (self.lcdc.obj_enable) {
                     if (self.stat.mode_2_interrupt_enabled) {
                         request.enable_lcd_stat = true;
                     }
                 }
-                self.lyc_ly_check(request);
+                self.lyc_ly_check(&request);
             },
             // Vertical blank
             0b01 => {
@@ -245,12 +243,11 @@ pub const GPU = struct {
                 if (self.ly >= 154) {
                     self.ly = 0;
                     self.stat.ppu_mode = 0b10;
-                    // if (self.lcdc.obj_enable) {
                     if (self.stat.mode_2_interrupt_enabled) {
                         request.enable_lcd_stat = true;
                     }
                 }
-                self.lyc_ly_check(request);
+                self.lyc_ly_check(&request);
             },
             // OAM read
             0b10 => {
@@ -263,7 +260,7 @@ pub const GPU = struct {
             0b11 => {
                 if (self.cycles >= 172) {
                     self.cycles = self.cycles % 172;
-                    if (self.stat.mode_0_select) {
+                    if (self.stat.mode_0_interrupt_enabled) {
                         request.enable_lcd_stat = true;
                     }
                     self.stat.ppu_mode = 0b00;
@@ -271,6 +268,7 @@ pub const GPU = struct {
                 // render scan line
             },
         }
+        return request;
     }
 
     fn lyc_ly_check(self: *GPU, request: *IERegister) void {

@@ -38,7 +38,7 @@ pub const Timer = struct {
     div: u8,
     tima: u8,
     tma: u8,
-    total_cycles: u64,
+    total_cycles: usize,
 
     // frequency: Frequency,
     // cycles: usize,
@@ -51,6 +51,7 @@ pub const Timer = struct {
             .div = 0,
             .tima = 0,
             .tma = 0,
+            .total_cycles = 0,
 
             // .frequency = Frequency.Hz4096,
             // .cycles = 0,
@@ -60,16 +61,17 @@ pub const Timer = struct {
         };
     }
     pub fn step(self: *Timer, cycles: u8, div: u8) bool {
-        _ = cycles; // autofix
+        self.total_cycles += cycles;
         if (!self.tac.enabled) {
             return false;
         }
         self.div = div;
+
         const freq: Frequency = @enumFromInt(self.tac.frequency);
         const cycles_per_tick = freq.cycles_per_tick();
-        const did_overflow = blk: {
-            if (self.div >= cycles_per_tick) {
-                self.div = self.div % cycles_per_tick;
+        const tac_overflow = blk: {
+            if (self.total_cycles >= cycles_per_tick) {
+                self.total_cycles = self.total_cycles % cycles_per_tick;
 
                 const res: u8, const overflow: u1 = @addWithOverflow(self.tima, 1);
                 self.tima = res;
@@ -78,9 +80,9 @@ pub const Timer = struct {
                 break :blk false;
             }
         };
-        if (did_overflow) {
+        if (tac_overflow) {
             self.tima = self.tma;
         }
-        return did_overflow;
+        return tac_overflow;
     }
 };

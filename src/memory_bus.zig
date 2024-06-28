@@ -115,11 +115,11 @@ pub const MemoryBus = struct {
         if (self.timer.step(cycles, div)) {
             self.interrupt_flag.enable_timer = true;
         }
-        self.divider.step(cycles, div);
+        _ = self.divider.step(cycles, div);
         const res = self.gpu.step(cycles);
 
-        self.interrupt_flag.enable_lcd_stat |= res.enable_lcd_stat;
-        self.interrupt_flag.enable_vblank |= res.enable_vblank;
+        self.interrupt_flag.enable_lcd_stat = res.enable_lcd_stat;
+        self.interrupt_flag.enable_vblank = res.enable_vblank;
     }
 
     pub fn has_interrupt(self: *MemoryBus) bool {
