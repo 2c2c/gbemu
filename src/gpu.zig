@@ -285,7 +285,7 @@ pub const GPU = struct {
         if (self.lcdc.bg_enable) {
             var tile_x_index = self.background_viewport.scx / 8;
             const tile_y_index = self.ly +% self.background_viewport.scy;
-            const tile_offset: u16 = (tile_y_index / 8) * 32;
+            const tile_offset: u16 = (@as(u16, tile_y_index) / 8) * 32;
 
             const background_tile_map: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
             const tile_map_begin = background_tile_map;
@@ -296,9 +296,9 @@ pub const GPU = struct {
                 // handle 0x8800-0x97FF
                 std.debug.panic("Implement 0x8800-0x97FF\n", .{});
             }
-            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * 4;
+            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * 1;
             for (0..SCREEN_WIDTH) |line_x| {
-                const tile_index = self.bus.read_byte(tile_map_offset +% tile_x_index);
+                const tile_index = self.vram[tile_map_offset +% tile_x_index];
                 const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
                 const color = tile_value.to_color();
                 self.canvas[canvas_offset] = color;
@@ -323,11 +323,11 @@ pub const GPU = struct {
             }
         }
         if (self.lcdc.obj_enable) {
-            const object_height = if (self.lcdc.obj_size) 16 else 8;
+            const object_height: u8 = if (self.lcdc.obj_size) 16 else 8;
             for (self.objects) |object| {
                 if (object.y <= self.ly and object.y + object_height > self.ly) {
                     const pixel_y_offset = self.ly - object.y;
-                    const tile_index = if ((object_height == 16) and (!object.attributes.y_flip and pixel_y_offset)) blk: {
+                    const tile_index: u8 = if ((object_height == 16) and (!object.attributes.y_flip and pixel_y_offset > 7)) blk: {
                         break :blk object.tile_index + 1;
                     } else blk: {
                         break :blk object.tile_index;
@@ -336,8 +336,10 @@ pub const GPU = struct {
                     const tile = self.tile_set[tile_index];
                     const tile_row = if (object.attributes.y_flip) tile[7 - (pixel_y_offset % 8)] else tile[pixel_y_offset % 8];
 
-                    const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * 4;
-                    var canvas_offset: usize = @bitCast(@as(i32, canvas_y_offset + object.x) * 4);
+                    // why signed
+                    // const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * 1;
+                    const canvas_y_offset: u32 = @as(u32, self.ly) * @as(u32, SCREEN_WIDTH) * 1;
+                    var canvas_offset: usize = @intCast(@as(u32, canvas_y_offset + object.x) * 1);
                     for (0..8) |x| {
                         const pixel_x_offset: usize = if (object.attributes.x_flip) 7 - x else x;
                         const x_offset = object.x + x;
