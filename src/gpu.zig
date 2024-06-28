@@ -264,6 +264,7 @@ pub const GPU = struct {
                         request.enable_lcd_stat = true;
                     }
                     self.stat.ppu_mode = 0b00;
+                    self.render_scanline();
                 }
                 // render scan line
             },
@@ -280,13 +281,13 @@ pub const GPU = struct {
     }
 
     fn render_scanline(self: *GPU) void {
-        var scan_line: TilePixelValue = [_]u8{.Zero} ** SCREEN_WIDTH;
+        var scan_line: [SCREEN_WIDTH]TilePixelValue = [_]TilePixelValue{.Zero} ** SCREEN_WIDTH;
         if (self.lcdc.bg_enable) {
             var tile_x_index = self.background_viewport.scx / 8;
             const tile_y_index = self.ly +% self.background_viewport.scy;
             const tile_offset: u16 = (tile_y_index / 8) * 32;
 
-            const background_tile_map = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+            const background_tile_map: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
             const tile_map_begin = background_tile_map;
             const tile_map_offset = tile_map_begin +% tile_offset;
             const row_y_offset = tile_y_index % 8;

@@ -116,6 +116,9 @@ pub const MemoryBus = struct {
             self.interrupt_flag.enable_timer = true;
         }
         _ = self.divider.step(cycles, div);
+        // TODO: should gpu control memory bus? gpu having direct oam write access?
+        // seems like delegating memory control to bus makes more sense
+        // would need to hand off the enabled interrupts to the bus from cpu
         const res = self.gpu.step(cycles);
 
         self.interrupt_flag.enable_lcd_stat = res.enable_lcd_stat;
