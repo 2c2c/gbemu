@@ -904,25 +904,37 @@ pub const CPU = struct {
                                 self.bus.write_byte(self.registers.get_HL(), source_value);
                             },
                         }
+
+                        // this is cringe but i designed things bad before implementing cycles and cba to refactor
+                        var hl_op = false;
+                        var d8_op = false;
                         switch (byte.source) {
                             LoadByteSource.HLI => {
-                                self.pc +%= 1;
-                                self.clock.t_cycles += 4;
+                                hl_op = true;
                             },
                             LoadByteSource.D8 => {
-                                self.pc +%= 2;
-                                self.clock.t_cycles += 4;
-                            },
-                            else => {
-                                self.pc +%= 1;
-                            },
-                        }
-                        switch (byte.target) {
-                            LoadByteSource.HLI => {
-                                self.pc +%= 1;
-                                self.clock.t_cycles += 4;
+                                d8_op = true;
                             },
                             else => {},
+                        }
+                        switch (byte.target) {
+                            LoadByteTarget.HLI => {
+                                hl_op = true;
+                            },
+                            else => {},
+                        }
+                        if (hl_op and d8_op) {
+                            self.pc = self.pc +% 2;
+                            self.clock.t_cycles += 12;
+                        } else if (d8_op) {
+                            self.pc = self.pc +% 2;
+                            self.clock.t_cycles += 8;
+                        } else if (hl_op) {
+                            self.pc = self.pc +% 1;
+                            self.clock.t_cycles += 8;
+                        } else {
+                            self.pc = self.pc +% 1;
+                            self.clock.t_cycles += 4;
                         }
                     },
                     LoadType.Word => |word| {
