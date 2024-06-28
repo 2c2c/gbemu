@@ -680,9 +680,13 @@ pub const CPU = struct {
                     // self.halt_state = HaltState.Bugged;
                     // break :blk self.pc + 1;
                     // FIXME:
+                    self.pc = self.pc +% 1;
+                    self.clock.t_cycles += 4;
                     self.is_halted = true;
                     self.halt_state = HaltState.Enabled;
                 } else {
+                    self.pc = self.pc +% 1;
+                    self.clock.t_cycles += 4;
                     self.is_halted = true;
                     self.halt_state = HaltState.Enabled;
                 }
@@ -714,28 +718,38 @@ pub const CPU = struct {
                 };
                 const next_pc = self.pc +% 3;
                 self.pc = self.call(next_pc, jump_condition);
+                self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 24 else self.clock.t_cycles + 12;
             },
             Instruction.RET => |jt| {
                 const jump_condition = jmpBlk: {
                     switch (jt) {
                         JumpTest.NotZero => {
                             // std.debug.print("RET NZ\n", .{});
-                            break :jmpBlk !self.registers.F.zero;
+                            const jump_condition = !self.registers.F.zero;
+                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
+                            break :jmpBlk jump_condition;
                         },
                         JumpTest.NotCarry => {
                             // std.debug.print("RET NC\n", .{});
-                            break :jmpBlk !self.registers.F.carry;
+                            const jump_condition = !self.registers.F.carry;
+                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
+                            break :jmpBlk jump_condition;
                         },
                         JumpTest.Zero => {
                             // std.debug.print("RET Z\n", .{});
-                            break :jmpBlk self.registers.F.zero;
+                            const jump_condition = self.registers.F.zero;
+                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
+                            break :jmpBlk jump_condition;
                         },
                         JumpTest.Carry => {
                             // std.debug.print("RET C\n", .{});
-                            break :jmpBlk self.registers.F.carry;
+                            const jump_condition = self.registers.F.carry;
+                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
+                            break :jmpBlk jump_condition;
                         },
                         JumpTest.Always => {
                             // std.debug.print("RET\n", .{});
+                            self.clock.t_cycles += 16;
                             break :jmpBlk true;
                         },
                     }
@@ -745,18 +759,22 @@ pub const CPU = struct {
             Instruction.RETI => {
                 // std.debug.print("RETI\n", .{});
                 self.pc = self.reti();
+                self.clock.t_cycles += 16;
             },
             Instruction.DI => {
                 // std.debug.print("DI\n", .{});
                 self.pc = self.di();
+                self.clock.t_cycles += 4;
             },
             Instruction.EI => {
                 // std.debug.print("EI\n", .{});
                 self.pc = self.ei();
+                self.clock.t_cycles += 4;
             },
             Instruction.RST => |location| {
                 // std.debug.print("RST 0x{x}\n", .{@intFromEnum(location)});
                 self.pc = self.rst(location);
+                self.clock.t_cycles += 16;
             },
             Instruction.POP => |target| {
                 const result = self.pop();
@@ -779,6 +797,7 @@ pub const CPU = struct {
                     },
                 }
                 self.pc = self.pc +% 1;
+                self.clock.t_cycles += 12;
             },
             Instruction.PUSH => |target| {
                 const value = pushBlk: {
@@ -803,6 +822,7 @@ pub const CPU = struct {
                 };
                 self.push(value);
                 self.pc = self.pc +% 1;
+                self.clock.t_cycles += 16;
             },
             Instruction.LD => |load| {
                 switch (load) {
@@ -885,12 +905,24 @@ pub const CPU = struct {
                             },
                         }
                         switch (byte.source) {
+                            LoadByteSource.HLI => {
+                                self.pc +%= 1;
+                                self.clock.t_cycles += 4;
+                            },
                             LoadByteSource.D8 => {
                                 self.pc +%= 2;
+                                self.clock.t_cycles += 4;
                             },
                             else => {
                                 self.pc +%= 1;
                             },
+                        }
+                        switch (byte.target) {
+                            LoadByteSource.HLI => {
+                                self.pc +%= 1;
+                                self.clock.t_cycles += 4;
+                            },
+                            else => {},
                         }
                     },
                     LoadType.Word => |word| {
@@ -915,6 +947,7 @@ pub const CPU = struct {
                             },
                         }
                         self.pc = self.pc +% 3;
+                        self.clock.t_cycles += 12;
                     },
                     LoadType.AFromIndirect => |indirect| {
                         const value = sourceBlk: {
@@ -957,9 +990,11 @@ pub const CPU = struct {
                         switch (indirect) {
                             Indirect.WordIndirect => {
                                 self.pc = self.pc +% 3;
+                                self.clock.t_cycles += 16;
                             },
                             else => {
                                 self.pc = self.pc +% 1;
+                                self.clock.t_cycles += 8;
                             },
                         }
                     },
@@ -1000,9 +1035,11 @@ pub const CPU = struct {
                         switch (indirect) {
                             Indirect.WordIndirect => {
                                 self.pc = self.pc +% 3;
+                                self.clock.t_cycles += 16;
                             },
                             else => {
                                 self.pc = self.pc +% 1;
+                                self.clock.t_cycles += 8;
                             },
                         }
                     },
@@ -1015,15 +1052,18 @@ pub const CPU = struct {
                         const offset = @as(u16, self.read_next_byte());
                         self.registers.A = self.bus.read_byte(0xFF00 +% offset);
                         self.pc = self.pc +% 2;
+                        self.clock.t_cycles += 12;
                     },
                     LoadType.ByteAddressFromA => {
                         const offset = @as(u16, self.read_next_byte());
                         self.bus.write_byte(0xFF00 + offset, self.registers.A);
                         self.pc = self.pc +% 2;
+                        self.clock.t_cycles += 12;
                     },
                     LoadType.SPFromHL => {
                         self.sp = self.registers.get_HL();
                         self.pc = self.pc +% 1;
+                        self.clock.t_cycles += 8;
                     },
                     LoadType.HLFromSPN => {
                         const n = self.read_next_byte();
@@ -1039,11 +1079,13 @@ pub const CPU = struct {
                         self.registers.F.half_carry = (self.sp & 0xF) + (n & 0xF) > 0xF;
                         self.registers.F.carry = (self.sp & 0xFF) + n > 0xFF;
                         self.pc = self.pc +% 2;
+                        self.clock.t_cycles += 12;
                     },
                     LoadType.IndirectFromSP => {
                         const address = self.read_next_word();
                         self.bus.write_word(address, self.sp);
                         self.pc = self.pc +% 3;
+                        self.clock.t_cycles += 20;
                     },
                 }
             },
