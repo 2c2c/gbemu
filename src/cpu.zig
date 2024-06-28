@@ -587,7 +587,16 @@ pub const CPU = struct {
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
-    fn execute(self: *CPU, instruction: Instruction) u16 {
+    pending_t_cycles: u8,
+    clock: packed union {
+        t_cycles: u64,
+        bits: packed struct {
+            _padding: u8,
+            div: u8,
+            _padding2: u48,
+        },
+    },
+    fn execute(self: *CPU, instruction: Instruction) void {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
 
         var mutable_instruction = instruction;
@@ -653,1311 +662,1247 @@ pub const CPU = struct {
             self.ime = IME.Enabled;
         }
 
-        const res = blk: {
-            switch (mutable_instruction) {
-                Instruction.NOP => {
-                    const next_pc = self.pc +% 1;
-                    break :blk next_pc;
-                },
-                Instruction.STOP => {
-                    self.is_stopped = true;
-                    const next_pc = self.pc +% 1;
-                    break :blk next_pc;
-                },
-                Instruction.HALT => {
-                    if (self.ime != IME.Enabled and self.bus.has_interrupt()) {
-                        // fix halt bug sometime
-                        // self.halt_state = HaltState.Bugged;
-                        // break :blk self.pc + 1;
-                        self.is_halted = true;
-                        self.halt_state = HaltState.Enabled;
-                        break :blk self.pc;
-                    } else {
-                        self.is_halted = true;
-                        self.halt_state = HaltState.Enabled;
-                        break :blk self.pc;
+        switch (mutable_instruction) {
+            Instruction.NOP => {
+                self.pc +%= 1;
+            },
+            Instruction.STOP => {
+                self.is_stopped = true;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.HALT => {
+                if (self.ime != IME.Enabled and self.bus.has_interrupt()) {
+                    // fix halt bug sometime
+                    // self.halt_state = HaltState.Bugged;
+                    // break :blk self.pc + 1;
+                    self.is_halted = true;
+                    self.halt_state = HaltState.Enabled;
+                } else {
+                    self.is_halted = true;
+                    self.halt_state = HaltState.Enabled;
+                }
+            },
+            Instruction.CALL => |jt| {
+                const jump_condition = jmpBlk: {
+                    switch (jt) {
+                        JumpTest.NotZero => {
+                            // std.debug.print("CALL NZ\n", .{});
+                            break :jmpBlk !self.registers.F.zero;
+                        },
+                        JumpTest.NotCarry => {
+                            // std.debug.print("CALL NC\n", .{});
+                            break :jmpBlk !self.registers.F.carry;
+                        },
+                        JumpTest.Zero => {
+                            // std.debug.print("CALL Z\n", .{});
+                            break :jmpBlk self.registers.F.zero;
+                        },
+                        JumpTest.Carry => {
+                            // std.debug.print("CALL C\n", .{});
+                            break :jmpBlk self.registers.F.carry;
+                        },
+                        JumpTest.Always => {
+                            // std.debug.print("CALL\n", .{});
+                            break :jmpBlk true;
+                        },
                     }
-                },
-                Instruction.CALL => |jt| {
-                    const jump_condition = jmpBlk: {
-                        switch (jt) {
-                            JumpTest.NotZero => {
-                                // std.debug.print("CALL NZ\n", .{});
-                                break :jmpBlk !self.registers.F.zero;
-                            },
-                            JumpTest.NotCarry => {
-                                // std.debug.print("CALL NC\n", .{});
-                                break :jmpBlk !self.registers.F.carry;
-                            },
-                            JumpTest.Zero => {
-                                // std.debug.print("CALL Z\n", .{});
-                                break :jmpBlk self.registers.F.zero;
-                            },
-                            JumpTest.Carry => {
-                                // std.debug.print("CALL C\n", .{});
-                                break :jmpBlk self.registers.F.carry;
-                            },
-                            JumpTest.Always => {
-                                // std.debug.print("CALL\n", .{});
-                                break :jmpBlk true;
-                            },
-                        }
-                    };
-                    var next_pc = self.pc +% 3;
-                    next_pc = self.call(next_pc, jump_condition);
-                    break :blk next_pc;
-                },
-                Instruction.RET => |jt| {
-                    const jump_condition = jmpBlk: {
-                        switch (jt) {
-                            JumpTest.NotZero => {
-                                // std.debug.print("RET NZ\n", .{});
-                                break :jmpBlk !self.registers.F.zero;
-                            },
-                            JumpTest.NotCarry => {
-                                // std.debug.print("RET NC\n", .{});
-                                break :jmpBlk !self.registers.F.carry;
-                            },
-                            JumpTest.Zero => {
-                                // std.debug.print("RET Z\n", .{});
-                                break :jmpBlk self.registers.F.zero;
-                            },
-                            JumpTest.Carry => {
-                                // std.debug.print("RET C\n", .{});
-                                break :jmpBlk self.registers.F.carry;
-                            },
-                            JumpTest.Always => {
-                                // std.debug.print("RET\n", .{});
-                                break :jmpBlk true;
-                            },
-                        }
-                    };
-                    const next_pc = self.ret(jump_condition);
-                    break :blk next_pc;
-                },
-                Instruction.RETI => {
-                    // std.debug.print("RETI\n", .{});
-                    const next_pc = self.reti();
-                    break :blk next_pc;
-                },
-                Instruction.DI => {
-                    // std.debug.print("DI\n", .{});
-                    const next_pc = self.di();
-                    break :blk next_pc;
-                },
-                Instruction.EI => {
-                    // std.debug.print("EI\n", .{});
-                    const next_pc = self.ei();
-                    break :blk next_pc;
-                },
-                Instruction.RST => |location| {
-                    // std.debug.print("RST 0x{x}\n", .{@intFromEnum(location)});
-                    const next_pc = self.rst(location);
-                    break :blk next_pc;
-                },
-                Instruction.POP => |target| {
-                    const result = self.pop();
+                };
+                const next_pc = self.pc +% 3;
+                self.pc = self.call(next_pc, jump_condition);
+            },
+            Instruction.RET => |jt| {
+                const jump_condition = jmpBlk: {
+                    switch (jt) {
+                        JumpTest.NotZero => {
+                            // std.debug.print("RET NZ\n", .{});
+                            break :jmpBlk !self.registers.F.zero;
+                        },
+                        JumpTest.NotCarry => {
+                            // std.debug.print("RET NC\n", .{});
+                            break :jmpBlk !self.registers.F.carry;
+                        },
+                        JumpTest.Zero => {
+                            // std.debug.print("RET Z\n", .{});
+                            break :jmpBlk self.registers.F.zero;
+                        },
+                        JumpTest.Carry => {
+                            // std.debug.print("RET C\n", .{});
+                            break :jmpBlk self.registers.F.carry;
+                        },
+                        JumpTest.Always => {
+                            // std.debug.print("RET\n", .{});
+                            break :jmpBlk true;
+                        },
+                    }
+                };
+                self.pc = self.ret(jump_condition);
+            },
+            Instruction.RETI => {
+                // std.debug.print("RETI\n", .{});
+                self.pc = self.reti();
+            },
+            Instruction.DI => {
+                // std.debug.print("DI\n", .{});
+                self.pc = self.di();
+            },
+            Instruction.EI => {
+                // std.debug.print("EI\n", .{});
+                self.pc = self.ei();
+            },
+            Instruction.RST => |location| {
+                // std.debug.print("RST 0x{x}\n", .{@intFromEnum(location)});
+                self.pc = self.rst(location);
+            },
+            Instruction.POP => |target| {
+                const result = self.pop();
+                switch (target) {
+                    StackTarget.BC => {
+                        // std.debug.print("POP BC\n", .{});
+                        self.registers.set_BC(result);
+                    },
+                    StackTarget.DE => {
+                        // std.debug.print("POP DE\n", .{});
+                        self.registers.set_DE(result);
+                    },
+                    StackTarget.HL => {
+                        // std.debug.print("POP HL\n", .{});
+                        self.registers.set_HL(result);
+                    },
+                    StackTarget.AF => {
+                        // std.debug.print("POP AF\n", .{});
+                        self.registers.set_AF(result);
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.PUSH => |target| {
+                const value = pushBlk: {
                     switch (target) {
                         StackTarget.BC => {
-                            // std.debug.print("POP BC\n", .{});
-                            self.registers.set_BC(result);
+                            // std.debug.print("PUSH BC\n", .{});
+                            break :pushBlk self.registers.get_BC();
                         },
                         StackTarget.DE => {
-                            // std.debug.print("POP DE\n", .{});
-                            self.registers.set_DE(result);
+                            // std.debug.print("PUSH DE\n", .{});
+                            break :pushBlk self.registers.get_DE();
                         },
                         StackTarget.HL => {
-                            // std.debug.print("POP HL\n", .{});
-                            self.registers.set_HL(result);
+                            // std.debug.print("PUSH HL\n", .{});
+                            break :pushBlk self.registers.get_HL();
                         },
                         StackTarget.AF => {
-                            // std.debug.print("POP AF\n", .{});
-                            self.registers.set_AF(result);
+                            // std.debug.print("PUSH.AF\n", .{});
+                            break :pushBlk self.registers.get_AF();
                         },
                     }
-                    const next_pc = self.pc +% 1;
-                    break :blk next_pc;
-                },
-                Instruction.PUSH => |target| {
-                    const value = pushBlk: {
-                        switch (target) {
-                            StackTarget.BC => {
-                                // std.debug.print("PUSH BC\n", .{});
-                                break :pushBlk self.registers.get_BC();
+                };
+                self.push(value);
+                self.pc = self.pc +% 1;
+            },
+            Instruction.LD => |load| {
+                switch (load) {
+                    LoadType.Byte => |byte| {
+                        // std.debug.print("LD target {} source {}\n", .{ byte.target, byte.source });
+                        const source_value = sourceBlk: {
+                            switch (byte.source) {
+                                LoadByteSource.A => {
+                                    // std.debug.print("LD A\n", .{});
+                                    break :sourceBlk self.registers.A;
+                                },
+                                LoadByteSource.B => {
+                                    // std.debug.print("LD B\n", .{});
+                                    break :sourceBlk self.registers.B;
+                                },
+                                LoadByteSource.C => {
+                                    // std.debug.print("LD C\n", .{});
+                                    break :sourceBlk self.registers.C;
+                                },
+                                LoadByteSource.D => {
+                                    // std.debug.print("LD D\n", .{});
+                                    break :sourceBlk self.registers.D;
+                                },
+                                LoadByteSource.E => {
+                                    // std.debug.print("LD E\n", .{});
+                                    break :sourceBlk self.registers.E;
+                                },
+                                LoadByteSource.H => {
+                                    // std.debug.print("LD H\n", .{});
+                                    break :sourceBlk self.registers.H;
+                                },
+                                LoadByteSource.L => {
+                                    // std.debug.print("LD L\n", .{});
+                                    break :sourceBlk self.registers.L;
+                                },
+                                LoadByteSource.D8 => {
+                                    // std.debug.print("LD D8\n", .{});
+                                    const next_byte = self.read_next_byte();
+                                    break :sourceBlk next_byte;
+                                },
+                                LoadByteSource.HLI => {
+                                    // std.debug.print("LD HLI\n", .{});
+                                    const hl_byte = self.bus.read_byte(self.registers.get_HL());
+                                    break :sourceBlk hl_byte;
+                                },
+                            }
+                        };
+                        switch (byte.target) {
+                            LoadByteTarget.A => {
+                                // std.debug.print("LD A\n", .{});
+                                self.registers.A = source_value;
                             },
-                            StackTarget.DE => {
-                                // std.debug.print("PUSH DE\n", .{});
-                                break :pushBlk self.registers.get_DE();
+                            LoadByteTarget.B => {
+                                // std.debug.print("LD B\n", .{});
+                                self.registers.B = source_value;
                             },
-                            StackTarget.HL => {
-                                // std.debug.print("PUSH HL\n", .{});
-                                break :pushBlk self.registers.get_HL();
+                            LoadByteTarget.C => {
+                                // std.debug.print("LD C\n", .{});
+                                self.registers.C = source_value;
                             },
-                            StackTarget.AF => {
-                                // std.debug.print("PUSH.AF\n", .{});
-                                break :pushBlk self.registers.get_AF();
+                            LoadByteTarget.D => {
+                                // std.debug.print("LD D\n", .{});
+                                self.registers.D = source_value;
+                            },
+                            LoadByteTarget.E => {
+                                // std.debug.print("LD E\n", .{});
+                                self.registers.E = source_value;
+                            },
+                            LoadByteTarget.H => {
+                                // std.debug.print("LD H\n", .{});
+                                self.registers.H = source_value;
+                            },
+                            LoadByteTarget.L => {
+                                // std.debug.print("LD L\n", .{});
+                                self.registers.L = source_value;
+                            },
+                            LoadByteTarget.HLI => {
+                                // std.debug.print("LD HLI\n", .{});
+                                self.bus.write_byte(self.registers.get_HL(), source_value);
                             },
                         }
-                    };
-                    self.push(value);
-                    const next_pc = self.pc +% 1;
-                    break :blk next_pc;
-                },
-                Instruction.LD => |load| {
-                    switch (load) {
-                        LoadType.Byte => |byte| {
-                            // std.debug.print("LD target {} source {}\n", .{ byte.target, byte.source });
-                            const source_value = sourceBlk: {
-                                switch (byte.source) {
-                                    LoadByteSource.A => {
-                                        // std.debug.print("LD A\n", .{});
-                                        break :sourceBlk self.registers.A;
-                                    },
-                                    LoadByteSource.B => {
-                                        // std.debug.print("LD B\n", .{});
-                                        break :sourceBlk self.registers.B;
-                                    },
-                                    LoadByteSource.C => {
-                                        // std.debug.print("LD C\n", .{});
-                                        break :sourceBlk self.registers.C;
-                                    },
-                                    LoadByteSource.D => {
-                                        // std.debug.print("LD D\n", .{});
-                                        break :sourceBlk self.registers.D;
-                                    },
-                                    LoadByteSource.E => {
-                                        // std.debug.print("LD E\n", .{});
-                                        break :sourceBlk self.registers.E;
-                                    },
-                                    LoadByteSource.H => {
-                                        // std.debug.print("LD H\n", .{});
-                                        break :sourceBlk self.registers.H;
-                                    },
-                                    LoadByteSource.L => {
-                                        // std.debug.print("LD L\n", .{});
-                                        break :sourceBlk self.registers.L;
-                                    },
-                                    LoadByteSource.D8 => {
-                                        // std.debug.print("LD D8\n", .{});
-                                        const next_byte = self.read_next_byte();
-                                        break :sourceBlk next_byte;
-                                    },
-                                    LoadByteSource.HLI => {
-                                        // std.debug.print("LD HLI\n", .{});
-                                        const hl_byte = self.bus.read_byte(self.registers.get_HL());
-                                        break :sourceBlk hl_byte;
-                                    },
-                                }
-                            };
-                            switch (byte.target) {
-                                LoadByteTarget.A => {
-                                    // std.debug.print("LD A\n", .{});
-                                    self.registers.A = source_value;
-                                },
-                                LoadByteTarget.B => {
-                                    // std.debug.print("LD B\n", .{});
-                                    self.registers.B = source_value;
-                                },
-                                LoadByteTarget.C => {
-                                    // std.debug.print("LD C\n", .{});
-                                    self.registers.C = source_value;
-                                },
-                                LoadByteTarget.D => {
-                                    // std.debug.print("LD D\n", .{});
-                                    self.registers.D = source_value;
-                                },
-                                LoadByteTarget.E => {
-                                    // std.debug.print("LD E\n", .{});
-                                    self.registers.E = source_value;
-                                },
-                                LoadByteTarget.H => {
-                                    // std.debug.print("LD H\n", .{});
-                                    self.registers.H = source_value;
-                                },
-                                LoadByteTarget.L => {
-                                    // std.debug.print("LD L\n", .{});
-                                    self.registers.L = source_value;
-                                },
-                                LoadByteTarget.HLI => {
-                                    // std.debug.print("LD HLI\n", .{});
-                                    self.bus.write_byte(self.registers.get_HL(), source_value);
-                                },
-                            }
-                            const next_pc = pcBlk: {
-                                switch (byte.source) {
-                                    LoadByteSource.D8 => {
-                                        break :pcBlk self.pc +% 2;
-                                    },
-                                    else => {
-                                        break :pcBlk self.pc +% 1;
-                                    },
-                                }
-                            };
-                            break :blk next_pc;
-                        },
-                        LoadType.Word => |word| {
-                            // std.debug.print("LD Word {} source \n", .{word});
-                            const source_value = self.read_next_word();
-                            switch (word) {
-                                LoadWordTarget.BC => {
-                                    // std.debug.print("LD BC\n", .{});
-                                    self.registers.set_BC(source_value);
-                                },
-                                LoadWordTarget.DE => {
-                                    // std.debug.print("LD DE\n", .{});
-                                    self.registers.set_DE(source_value);
-                                },
-                                LoadWordTarget.HL => {
-                                    // std.debug.print("LD HL\n", .{});
-                                    self.registers.set_HL(source_value);
-                                },
-                                LoadWordTarget.SP => {
-                                    // std.debug.print("LD SP\n", .{});
-                                    self.sp = source_value;
-                                },
-                            }
-                            const next_pc = self.pc +% 3;
-                            break :blk next_pc;
-                        },
-                        LoadType.AFromIndirect => |indirect| {
-                            const value = sourceBlk: {
-                                switch (indirect) {
-                                    Indirect.BCIndirect => {
-                                        // std.debug.print("LD A (BC)\n", .{});
-                                        break :sourceBlk self.bus.read_byte(self.registers.get_BC());
-                                    },
-                                    Indirect.DEIndirect => {
-                                        // std.debug.print("LD A (DE)\n", .{});
-                                        break :sourceBlk self.bus.read_byte(self.registers.get_DE());
-                                    },
-                                    Indirect.HLIndirectPlus => {
-                                        // std.debug.print("LD A (HL+)\n", .{});
-                                        const hl = self.registers.get_HL();
-                                        const value = self.bus.read_byte(hl);
-                                        self.registers.set_HL(hl +% 1);
-                                        break :sourceBlk value;
-                                    },
-                                    Indirect.HLIndirectMinus => {
-                                        // std.debug.print("LD A (HL-)\n", .{});
-                                        const hl = self.registers.get_HL();
-                                        const value = self.bus.read_byte(hl);
-                                        self.registers.set_HL(hl -% 1);
-                                        break :sourceBlk value;
-                                    },
-                                    Indirect.WordIndirect => {
-                                        // std.debug.print("LD A (nn)\n", .{});
-                                        const address = self.read_next_word();
-                                        break :sourceBlk self.bus.read_byte(address);
-                                    },
-                                    Indirect.LastByteIndirect => {
-                                        // std.debug.print("LD A (FF00 + C)\n", .{});
-                                        const address = 0xFF00 +% @as(u16, self.registers.C);
-                                        break :sourceBlk self.bus.read_byte(address);
-                                    },
-                                }
-                            };
-                            self.registers.A = value;
-                            switch (indirect) {
-                                Indirect.WordIndirect => {
-                                    const next_pc = self.pc +% 3;
-                                    break :blk next_pc;
-                                },
-                                else => {
-                                    const next_pc = self.pc +% 1;
-                                    break :blk next_pc;
-                                },
-                            }
-                        },
-                        LoadType.IndirectFromA => |indirect| {
-                            const value = self.registers.A;
+                        switch (byte.source) {
+                            LoadByteSource.D8 => {
+                                self.pc +%= 2;
+                            },
+                            else => {
+                                self.pc +%= 1;
+                            },
+                        }
+                    },
+                    LoadType.Word => |word| {
+                        // std.debug.print("LD Word {} source \n", .{word});
+                        const source_value = self.read_next_word();
+                        switch (word) {
+                            LoadWordTarget.BC => {
+                                // std.debug.print("LD BC\n", .{});
+                                self.registers.set_BC(source_value);
+                            },
+                            LoadWordTarget.DE => {
+                                // std.debug.print("LD DE\n", .{});
+                                self.registers.set_DE(source_value);
+                            },
+                            LoadWordTarget.HL => {
+                                // std.debug.print("LD HL\n", .{});
+                                self.registers.set_HL(source_value);
+                            },
+                            LoadWordTarget.SP => {
+                                // std.debug.print("LD SP\n", .{});
+                                self.sp = source_value;
+                            },
+                        }
+                        self.pc = self.pc +% 3;
+                    },
+                    LoadType.AFromIndirect => |indirect| {
+                        const value = sourceBlk: {
                             switch (indirect) {
                                 Indirect.BCIndirect => {
-                                    // std.debug.print("LD (BC) A\n", .{});
-                                    self.bus.write_byte(self.registers.get_BC(), value);
+                                    // std.debug.print("LD A (BC)\n", .{});
+                                    break :sourceBlk self.bus.read_byte(self.registers.get_BC());
                                 },
                                 Indirect.DEIndirect => {
-                                    // std.debug.print("LD (DE) A\n", .{});
-                                    self.bus.write_byte(self.registers.get_DE(), value);
+                                    // std.debug.print("LD A (DE)\n", .{});
+                                    break :sourceBlk self.bus.read_byte(self.registers.get_DE());
                                 },
                                 Indirect.HLIndirectPlus => {
-                                    // std.debug.print("LD (HL+) A\n", .{});
+                                    // std.debug.print("LD A (HL+)\n", .{});
                                     const hl = self.registers.get_HL();
-                                    self.bus.write_byte(hl, value);
+                                    const value = self.bus.read_byte(hl);
                                     self.registers.set_HL(hl +% 1);
+                                    break :sourceBlk value;
                                 },
                                 Indirect.HLIndirectMinus => {
-                                    // std.debug.print("LD (HL-) A\n", .{});
+                                    // std.debug.print("LD A (HL-)\n", .{});
                                     const hl = self.registers.get_HL();
-                                    self.bus.write_byte(hl, value);
+                                    const value = self.bus.read_byte(hl);
                                     self.registers.set_HL(hl -% 1);
+                                    break :sourceBlk value;
                                 },
                                 Indirect.WordIndirect => {
-                                    // std.debug.print("LD (nn) A\n", .{});
+                                    // std.debug.print("LD A (nn)\n", .{});
                                     const address = self.read_next_word();
-                                    self.bus.write_byte(address, value);
+                                    break :sourceBlk self.bus.read_byte(address);
                                 },
                                 Indirect.LastByteIndirect => {
-                                    // std.debug.print("LD (FF00 + C) A\n", .{});
+                                    // std.debug.print("LD A (FF00 + C)\n", .{});
                                     const address = 0xFF00 +% @as(u16, self.registers.C);
-                                    self.bus.write_byte(address, value);
+                                    break :sourceBlk self.bus.read_byte(address);
                                 },
                             }
-                            switch (indirect) {
-                                Indirect.WordIndirect => {
-                                    const next_pc = self.pc +% 3;
-                                    break :blk next_pc;
-                                },
-                                else => {
-                                    const next_pc = self.pc +% 1;
-                                    break :blk next_pc;
-                                },
-                            }
+                        };
+                        self.registers.A = value;
+                        switch (indirect) {
+                            Indirect.WordIndirect => {
+                                self.pc = self.pc +% 3;
+                            },
+                            else => {
+                                self.pc = self.pc +% 1;
+                            },
+                        }
+                    },
+                    LoadType.IndirectFromA => |indirect| {
+                        const value = self.registers.A;
+                        switch (indirect) {
+                            Indirect.BCIndirect => {
+                                // std.debug.print("LD (BC) A\n", .{});
+                                self.bus.write_byte(self.registers.get_BC(), value);
+                            },
+                            Indirect.DEIndirect => {
+                                // std.debug.print("LD (DE) A\n", .{});
+                                self.bus.write_byte(self.registers.get_DE(), value);
+                            },
+                            Indirect.HLIndirectPlus => {
+                                // std.debug.print("LD (HL+) A\n", .{});
+                                const hl = self.registers.get_HL();
+                                self.bus.write_byte(hl, value);
+                                self.registers.set_HL(hl +% 1);
+                            },
+                            Indirect.HLIndirectMinus => {
+                                // std.debug.print("LD (HL-) A\n", .{});
+                                const hl = self.registers.get_HL();
+                                self.bus.write_byte(hl, value);
+                                self.registers.set_HL(hl -% 1);
+                            },
+                            Indirect.WordIndirect => {
+                                // std.debug.print("LD (nn) A\n", .{});
+                                const address = self.read_next_word();
+                                self.bus.write_byte(address, value);
+                            },
+                            Indirect.LastByteIndirect => {
+                                // std.debug.print("LD (FF00 + C) A\n", .{});
+                                const address = 0xFF00 +% @as(u16, self.registers.C);
+                                self.bus.write_byte(address, value);
+                            },
+                        }
+                        switch (indirect) {
+                            Indirect.WordIndirect => {
+                                self.pc = self.pc +% 3;
+                            },
+                            else => {
+                                self.pc = self.pc +% 1;
+                            },
+                        }
+                    },
+                    LoadType.AFromByteAddress => {
+                        if (self.pc == 0xC34E) {
+                            // FIXME: in instr2, an IF bit is getting 0x04 -> 0x00 incorrectly before reaching here on this PC
+                            // causing A to return 0 instead of 4
+                            std.debug.print("LD A (FF00 + a8)\n", .{});
+                        }
+                        const offset = @as(u16, self.read_next_byte());
+                        self.registers.A = self.bus.read_byte(0xFF00 +% offset);
+                        self.pc = self.pc +% 2;
+                    },
+                    LoadType.ByteAddressFromA => {
+                        const offset = @as(u16, self.read_next_byte());
+                        self.bus.write_byte(0xFF00 + offset, self.registers.A);
+                        self.pc = self.pc +% 2;
+                    },
+                    LoadType.SPFromHL => {
+                        self.sp = self.registers.get_HL();
+                        self.pc = self.pc +% 1;
+                    },
+                    LoadType.HLFromSPN => {
+                        const n = self.read_next_byte();
+                        const signed: i8 = @bitCast(n);
+                        if (signed >= 0) {
+                            self.registers.set_HL(self.sp +% @abs(signed));
+                        } else {
+                            self.registers.set_HL(self.sp -% @abs(signed));
+                        }
+                        self.registers.F.zero = false;
+                        self.registers.F.subtract = false;
+                        // i passed instr3 rom, but should still review these flags
+                        self.registers.F.half_carry = (self.sp & 0xF) + (n & 0xF) > 0xF;
+                        self.registers.F.carry = (self.sp & 0xFF) + n > 0xFF;
+                        self.pc = self.pc +% 2;
+                    },
+                    LoadType.IndirectFromSP => {
+                        const address = self.read_next_word();
+                        self.bus.write_word(address, self.sp);
+                        self.pc = self.pc +% 3;
+                    },
+                }
+            },
+            Instruction.JP => |jt| {
+                const jump_condition = jpblk: {
+                    switch (jt) {
+                        JumpTest.NotZero => {
+                            // std.debug.print("JP NZ\n", .{});
+                            break :jpblk !self.registers.F.zero;
                         },
-                        LoadType.AFromByteAddress => {
-                            if (self.pc == 0xC34E) {
-                                // FIXME: in instr2, an IF bit is getting 0x04 -> 0x00 incorrectly before reaching here on this PC
-                                // causing A to return 0 instead of 4
-                                std.debug.print("LD A (FF00 + a8)\n", .{});
-                            }
-                            const offset = @as(u16, self.read_next_byte());
-                            self.registers.A = self.bus.read_byte(0xFF00 +% offset);
-                            const next_pc = self.pc +% 2;
-                            break :blk next_pc;
+                        JumpTest.NotCarry => {
+                            // std.debug.print("JP NC\n", .{});
+                            break :jpblk !self.registers.F.carry;
                         },
-                        LoadType.ByteAddressFromA => {
-                            const offset = @as(u16, self.read_next_byte());
-                            self.bus.write_byte(0xFF00 + offset, self.registers.A);
-                            const next_pc = self.pc +% 2;
-                            break :blk next_pc;
+                        JumpTest.Zero => {
+                            // std.debug.print("JP Z\n", .{});
+                            break :jpblk self.registers.F.zero;
                         },
-                        LoadType.SPFromHL => {
-                            self.sp = self.registers.get_HL();
-                            const next_pc = self.pc +% 1;
-                            break :blk next_pc;
+                        JumpTest.Carry => {
+                            // std.debug.print("JP C\n", .{});
+                            break :jpblk self.registers.F.carry;
                         },
-                        LoadType.HLFromSPN => {
-                            const n = self.read_next_byte();
-                            const signed: i8 = @bitCast(n);
-                            if (signed >= 0) {
-                                self.registers.set_HL(self.sp +% @abs(signed));
-                            } else {
-                                self.registers.set_HL(self.sp -% @abs(signed));
-                            }
-                            self.registers.F.zero = false;
-                            self.registers.F.subtract = false;
-                            // i passed instr3 rom, but should still review these flags
-                            self.registers.F.half_carry = (self.sp & 0xF) + (n & 0xF) > 0xF;
-                            self.registers.F.carry = (self.sp & 0xFF) + n > 0xFF;
-                            const next_pc = self.pc +% 2;
-                            break :blk next_pc;
-                        },
-                        LoadType.IndirectFromSP => {
-                            const address = self.read_next_word();
-                            self.bus.write_word(address, self.sp);
-                            const next_pc = self.pc +% 3;
-                            break :blk next_pc;
+                        JumpTest.Always => {
+                            // std.debug.print("JP\n", .{});
+                            break :jpblk true;
                         },
                     }
-                },
-                Instruction.JP => |jt| {
-                    const jump_condition = jpblk: {
-                        switch (jt) {
-                            JumpTest.NotZero => {
-                                // std.debug.print("JP NZ\n", .{});
-                                break :jpblk !self.registers.F.zero;
-                            },
-                            JumpTest.NotCarry => {
-                                // std.debug.print("JP NC\n", .{});
-                                break :jpblk !self.registers.F.carry;
-                            },
-                            JumpTest.Zero => {
-                                // std.debug.print("JP Z\n", .{});
-                                break :jpblk self.registers.F.zero;
-                            },
-                            JumpTest.Carry => {
-                                // std.debug.print("JP C\n", .{});
-                                break :jpblk self.registers.F.carry;
-                            },
-                            JumpTest.Always => {
-                                // std.debug.print("JP\n", .{});
-                                break :jpblk true;
-                            },
-                        }
-                    };
-                    const new_pc = self.jump(jump_condition);
-                    break :blk new_pc;
-                },
-                Instruction.JPI => {
-                    // std.debug.print("JP HL\n", .{});
-                    const new_pc = self.registers.get_HL();
-                    break :blk new_pc;
-                },
-                Instruction.JR => |jt| {
-                    const jump_condition = jpblk: {
-                        switch (jt) {
-                            JumpTest.NotZero => {
-                                // std.debug.print("JP NZ\n", .{});
-                                break :jpblk !self.registers.F.zero;
-                            },
-                            JumpTest.NotCarry => {
-                                // std.debug.print("JP NC\n", .{});
-                                break :jpblk !self.registers.F.carry;
-                            },
-                            JumpTest.Zero => {
-                                // std.debug.print("JP Z\n", .{});
-                                break :jpblk self.registers.F.zero;
-                            },
-                            JumpTest.Carry => {
-                                // std.debug.print("JP C\n", .{});
-                                break :jpblk self.registers.F.carry;
-                            },
-                            JumpTest.Always => {
-                                // std.debug.print("JP\n", .{});
-                                break :jpblk true;
-                            },
-                        }
-                    };
-                    const new_pc = self.jump_relative(jump_condition);
-                    break :blk new_pc;
-                },
-                Instruction.ADD => |target| {
-                    const value = addBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("ADD A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("ADD B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("ADD C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("ADD D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("ADD E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("ADD H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("ADD L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("ADD HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.add(value);
-                                break :addBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("ADD D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.add(value);
-                                self.pc = self.pc +% 1;
-                                break :addBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.ADC => |target| {
-                    const value = adcBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("adc A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("adc B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("adc C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("adc D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("adc E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("adc H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("adc L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("ADC HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.adc(value);
-                                break :adcBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("ADC D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.adc(value);
-                                self.pc = self.pc +% 1;
-                                break :adcBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.SUB => |target| {
-                    const value = subBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("sub A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("sub B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("sub C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("sub D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("sub E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("sub H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("sub L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("SUB HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.sub(value);
-                                break :subBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("SUB D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.sub(value);
-                                self.pc = self.pc +% 1;
-                                break :subBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.SBC => |target| {
-                    const value = sbcBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("sbc A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("sbc B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("sbc C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("sbc D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("sbc E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("sbc H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("sbc L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("sbc HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.sbc(value);
-                                break :sbcBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("sbc D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.sbc(value);
-                                self.pc = self.pc +% 1;
-                                break :sbcBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.AND => |target| {
-                    const value = andBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("and A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("and B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("and C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("and D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("and E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("and H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("and L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("and HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.and_(value);
-                                break :andBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("and D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.and_(value);
-                                self.pc = self.pc +% 1;
-                                break :andBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.XOR => |target| {
-                    const value = xorBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("xor A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("xor B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("xor C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("xor D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("xor E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("xor H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("xor L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("xor HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.xor(value);
-                                break :xorBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("xor D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.xor(value);
-                                self.pc = self.pc +% 1;
-                                break :xorBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.OR => |target| {
-                    const value = orBlk: {
-                        switch (target) {
-                            ArithmeticTarget.A => {
-                                // std.debug.print("or A\n", .{});
-                                const value = self.registers.A;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.B => {
-                                // std.debug.print("or B\n", .{});
-                                const value = self.registers.B;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.C => {
-                                // std.debug.print("or C\n", .{});
-                                const value = self.registers.C;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.D => {
-                                // std.debug.print("or D\n", .{});
-                                const value = self.registers.D;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.E => {
-                                // std.debug.print("or E\n", .{});
-                                const value = self.registers.E;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.H => {
-                                // std.debug.print("or H\n", .{});
-                                const value = self.registers.H;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.L => {
-                                // std.debug.print("or L\n", .{});
-                                const value = self.registers.L;
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.HL => {
-                                // std.debug.print("or HL\n", .{});
-                                const value = self.bus.read_byte(self.registers.get_HL());
-                                const new_value = self.or_(value);
-                                break :orBlk new_value;
-                            },
-                            ArithmeticTarget.D8 => {
-                                // std.debug.print("or D8\n", .{});
-                                const value = self.read_next_byte();
-                                const new_value = self.or_(value);
-                                self.pc = self.pc +% 1;
-                                break :orBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.A = value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.CP => |target| {
+                };
+                self.pc = self.jump(jump_condition);
+            },
+            Instruction.JPI => {
+                // std.debug.print("JP HL\n", .{});
+                self.pc = self.registers.get_HL();
+            },
+            Instruction.JR => |jt| {
+                const jump_condition = jpblk: {
+                    switch (jt) {
+                        JumpTest.NotZero => {
+                            // std.debug.print("JP NZ\n", .{});
+                            break :jpblk !self.registers.F.zero;
+                        },
+                        JumpTest.NotCarry => {
+                            // std.debug.print("JP NC\n", .{});
+                            break :jpblk !self.registers.F.carry;
+                        },
+                        JumpTest.Zero => {
+                            // std.debug.print("JP Z\n", .{});
+                            break :jpblk self.registers.F.zero;
+                        },
+                        JumpTest.Carry => {
+                            // std.debug.print("JP C\n", .{});
+                            break :jpblk self.registers.F.carry;
+                        },
+                        JumpTest.Always => {
+                            // std.debug.print("JP\n", .{});
+                            break :jpblk true;
+                        },
+                    }
+                };
+                self.pc = self.jump_relative(jump_condition);
+            },
+            Instruction.ADD => |target| {
+                const value = addBlk: {
                     switch (target) {
                         ArithmeticTarget.A => {
-                            // std.debug.print("cp A\n", .{});
+                            // std.debug.print("ADD A\n", .{});
                             const value = self.registers.A;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.B => {
-                            // std.debug.print("cp B\n", .{});
+                            // std.debug.print("ADD B\n", .{});
                             const value = self.registers.B;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.C => {
-                            // std.debug.print("cp C\n", .{});
+                            // std.debug.print("ADD C\n", .{});
                             const value = self.registers.C;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.D => {
-                            // std.debug.print("cp D\n", .{});
+                            // std.debug.print("ADD D\n", .{});
                             const value = self.registers.D;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.E => {
-                            // std.debug.print("cp E\n", .{});
+                            // std.debug.print("ADD E\n", .{});
                             const value = self.registers.E;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.H => {
-                            // std.debug.print("cp H\n", .{});
+                            // std.debug.print("ADD H\n", .{});
                             const value = self.registers.H;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.L => {
-                            // std.debug.print("cp L\n", .{});
+                            // std.debug.print("ADD L\n", .{});
                             const value = self.registers.L;
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.HL => {
-                            // std.debug.print("cp HL\n", .{});
+                            // std.debug.print("ADD HL\n", .{});
                             const value = self.bus.read_byte(self.registers.get_HL());
-                            self.cp(value);
+                            const new_value = self.add(value);
+                            break :addBlk new_value;
                         },
                         ArithmeticTarget.D8 => {
-                            // std.debug.print("cp D8\n", .{});
+                            // std.debug.print("ADD D8\n", .{});
                             const value = self.read_next_byte();
+                            const new_value = self.add(value);
                             self.pc = self.pc +% 1;
-                            self.cp(value);
+                            break :addBlk new_value;
                         },
                     }
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.INC => |target| {
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.ADC => |target| {
+                const value = adcBlk: {
                     switch (target) {
                         ArithmeticTarget.A => {
-                            // std.debug.print("inc A\n", .{});
+                            // std.debug.print("adc A\n", .{});
                             const value = self.registers.A;
-                            const res = self.inc(value);
-                            self.registers.A = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.B => {
-                            // std.debug.print("inc B\n", .{});
+                            // std.debug.print("adc B\n", .{});
                             const value = self.registers.B;
-                            const res = self.inc(value);
-                            self.registers.B = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.C => {
-                            // std.debug.print("inc C\n", .{});
+                            // std.debug.print("adc C\n", .{});
                             const value = self.registers.C;
-                            const res = self.inc(value);
-                            self.registers.C = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.D => {
-                            // std.debug.print("inc D\n", .{});
+                            // std.debug.print("adc D\n", .{});
                             const value = self.registers.D;
-                            const res = self.inc(value);
-                            self.registers.D = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.E => {
-                            // std.debug.print("inc E\n", .{});
+                            // std.debug.print("adc E\n", .{});
                             const value = self.registers.E;
-                            const res = self.inc(value);
-                            self.registers.E = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.H => {
-                            // std.debug.print("inc H\n", .{});
+                            // std.debug.print("adc H\n", .{});
                             const value = self.registers.H;
-                            const res = self.inc(value);
-                            self.registers.H = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.L => {
-                            // std.debug.print("inc L\n", .{});
+                            // std.debug.print("adc L\n", .{});
                             const value = self.registers.L;
-                            const res = self.inc(value);
-                            self.registers.L = res;
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
                         ArithmeticTarget.HL => {
-                            // std.debug.print("inc HL\n", .{});
-                            const HL = self.registers.get_HL();
-                            const value = self.bus.read_byte(HL);
-                            const res = self.inc(value);
-                            self.bus.write_byte(HL, res);
+                            // std.debug.print("ADC HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.adc(value);
+                            break :adcBlk new_value;
                         },
-                        else => {
-                            // std.debug.print("Unknown INC target\n", .{});
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("ADC D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.adc(value);
+                            self.pc = self.pc +% 1;
+                            break :adcBlk new_value;
                         },
                     }
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.DEC => |target| {
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.SUB => |target| {
+                const value = subBlk: {
                     switch (target) {
                         ArithmeticTarget.A => {
-                            // std.debug.print("dec A\n", .{});
+                            // std.debug.print("sub A\n", .{});
                             const value = self.registers.A;
-                            const res = self.dec(value);
-                            self.registers.A = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.B => {
-                            // std.debug.print("dec B\n", .{});
+                            // std.debug.print("sub B\n", .{});
                             const value = self.registers.B;
-                            const res = self.dec(value);
-                            self.registers.B = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.C => {
-                            // std.debug.print("dec C\n", .{});
+                            // std.debug.print("sub C\n", .{});
                             const value = self.registers.C;
-                            const res = self.dec(value);
-                            self.registers.C = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.D => {
-                            // std.debug.print("dec D\n", .{});
+                            // std.debug.print("sub D\n", .{});
                             const value = self.registers.D;
-                            const res = self.dec(value);
-                            self.registers.D = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.E => {
-                            // std.debug.print("dec E\n", .{});
+                            // std.debug.print("sub E\n", .{});
                             const value = self.registers.E;
-                            const res = self.dec(value);
-                            self.registers.E = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.H => {
-                            // std.debug.print("dec H\n", .{});
+                            // std.debug.print("sub H\n", .{});
                             const value = self.registers.H;
-                            const res = self.dec(value);
-                            self.registers.H = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.L => {
-                            // std.debug.print("dec L\n", .{});
+                            // std.debug.print("sub L\n", .{});
                             const value = self.registers.L;
-                            const res = self.dec(value);
-                            self.registers.L = res;
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
                         ArithmeticTarget.HL => {
-                            // std.debug.print("dec HL\n", .{});
-                            const HL = self.registers.get_HL();
-                            const value = self.bus.read_byte(HL);
-                            const res = self.dec(value);
-                            self.bus.write_byte(HL, res);
+                            // std.debug.print("SUB HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.sub(value);
+                            break :subBlk new_value;
                         },
-                        else => {
-                            // std.debug.print("Unknown DEC target\n", .{});
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("SUB D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.sub(value);
+                            self.pc = self.pc +% 1;
+                            break :subBlk new_value;
                         },
                     }
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.WADD => |target| {
-                    const value = waddBlk: {
-                        switch (target) {
-                            WideArithmeticTarget.HL => {
-                                // std.debug.print("wadd HL\n", .{});
-                                const value = self.registers.get_HL();
-                                const new_value = self.wadd(value);
-                                break :waddBlk new_value;
-                            },
-                            WideArithmeticTarget.BC => {
-                                // std.debug.print("wadd BC\n", .{});
-                                const value = self.registers.get_BC();
-                                const new_value = self.wadd(value);
-                                break :waddBlk new_value;
-                            },
-                            WideArithmeticTarget.DE => {
-                                // std.debug.print("wadd DE\n", .{});
-                                const value = self.registers.get_DE();
-                                const new_value = self.wadd(value);
-                                break :waddBlk new_value;
-                            },
-                            WideArithmeticTarget.SP => {
-                                // std.debug.print("wadd SP\n", .{});
-                                const value = self.sp;
-                                const new_value = self.wadd(value);
-                                break :waddBlk new_value;
-                            },
-                        }
-                    };
-                    self.registers.set_HL(value);
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.WINC => |target| {
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.SBC => |target| {
+                const value = sbcBlk: {
+                    switch (target) {
+                        ArithmeticTarget.A => {
+                            // std.debug.print("sbc A\n", .{});
+                            const value = self.registers.A;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.B => {
+                            // std.debug.print("sbc B\n", .{});
+                            const value = self.registers.B;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.C => {
+                            // std.debug.print("sbc C\n", .{});
+                            const value = self.registers.C;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.D => {
+                            // std.debug.print("sbc D\n", .{});
+                            const value = self.registers.D;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.E => {
+                            // std.debug.print("sbc E\n", .{});
+                            const value = self.registers.E;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.H => {
+                            // std.debug.print("sbc H\n", .{});
+                            const value = self.registers.H;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.L => {
+                            // std.debug.print("sbc L\n", .{});
+                            const value = self.registers.L;
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.HL => {
+                            // std.debug.print("sbc HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.sbc(value);
+                            break :sbcBlk new_value;
+                        },
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("sbc D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.sbc(value);
+                            self.pc = self.pc +% 1;
+                            break :sbcBlk new_value;
+                        },
+                    }
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.AND => |target| {
+                const value = andBlk: {
+                    switch (target) {
+                        ArithmeticTarget.A => {
+                            // std.debug.print("and A\n", .{});
+                            const value = self.registers.A;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.B => {
+                            // std.debug.print("and B\n", .{});
+                            const value = self.registers.B;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.C => {
+                            // std.debug.print("and C\n", .{});
+                            const value = self.registers.C;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.D => {
+                            // std.debug.print("and D\n", .{});
+                            const value = self.registers.D;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.E => {
+                            // std.debug.print("and E\n", .{});
+                            const value = self.registers.E;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.H => {
+                            // std.debug.print("and H\n", .{});
+                            const value = self.registers.H;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.L => {
+                            // std.debug.print("and L\n", .{});
+                            const value = self.registers.L;
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.HL => {
+                            // std.debug.print("and HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.and_(value);
+                            break :andBlk new_value;
+                        },
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("and D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.and_(value);
+                            self.pc = self.pc +% 1;
+                            break :andBlk new_value;
+                        },
+                    }
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.XOR => |target| {
+                const value = xorBlk: {
+                    switch (target) {
+                        ArithmeticTarget.A => {
+                            // std.debug.print("xor A\n", .{});
+                            const value = self.registers.A;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.B => {
+                            // std.debug.print("xor B\n", .{});
+                            const value = self.registers.B;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.C => {
+                            // std.debug.print("xor C\n", .{});
+                            const value = self.registers.C;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.D => {
+                            // std.debug.print("xor D\n", .{});
+                            const value = self.registers.D;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.E => {
+                            // std.debug.print("xor E\n", .{});
+                            const value = self.registers.E;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.H => {
+                            // std.debug.print("xor H\n", .{});
+                            const value = self.registers.H;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.L => {
+                            // std.debug.print("xor L\n", .{});
+                            const value = self.registers.L;
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.HL => {
+                            // std.debug.print("xor HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.xor(value);
+                            break :xorBlk new_value;
+                        },
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("xor D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.xor(value);
+                            self.pc = self.pc +% 1;
+                            break :xorBlk new_value;
+                        },
+                    }
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.OR => |target| {
+                const value = orBlk: {
+                    switch (target) {
+                        ArithmeticTarget.A => {
+                            // std.debug.print("or A\n", .{});
+                            const value = self.registers.A;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.B => {
+                            // std.debug.print("or B\n", .{});
+                            const value = self.registers.B;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.C => {
+                            // std.debug.print("or C\n", .{});
+                            const value = self.registers.C;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.D => {
+                            // std.debug.print("or D\n", .{});
+                            const value = self.registers.D;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.E => {
+                            // std.debug.print("or E\n", .{});
+                            const value = self.registers.E;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.H => {
+                            // std.debug.print("or H\n", .{});
+                            const value = self.registers.H;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.L => {
+                            // std.debug.print("or L\n", .{});
+                            const value = self.registers.L;
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.HL => {
+                            // std.debug.print("or HL\n", .{});
+                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const new_value = self.or_(value);
+                            break :orBlk new_value;
+                        },
+                        ArithmeticTarget.D8 => {
+                            // std.debug.print("or D8\n", .{});
+                            const value = self.read_next_byte();
+                            const new_value = self.or_(value);
+                            self.pc = self.pc +% 1;
+                            break :orBlk new_value;
+                        },
+                    }
+                };
+                self.registers.A = value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.CP => |target| {
+                switch (target) {
+                    ArithmeticTarget.A => {
+                        // std.debug.print("cp A\n", .{});
+                        const value = self.registers.A;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.B => {
+                        // std.debug.print("cp B\n", .{});
+                        const value = self.registers.B;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.C => {
+                        // std.debug.print("cp C\n", .{});
+                        const value = self.registers.C;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.D => {
+                        // std.debug.print("cp D\n", .{});
+                        const value = self.registers.D;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.E => {
+                        // std.debug.print("cp E\n", .{});
+                        const value = self.registers.E;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.H => {
+                        // std.debug.print("cp H\n", .{});
+                        const value = self.registers.H;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.L => {
+                        // std.debug.print("cp L\n", .{});
+                        const value = self.registers.L;
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.HL => {
+                        // std.debug.print("cp HL\n", .{});
+                        const value = self.bus.read_byte(self.registers.get_HL());
+                        self.cp(value);
+                    },
+                    ArithmeticTarget.D8 => {
+                        // std.debug.print("cp D8\n", .{});
+                        const value = self.read_next_byte();
+                        self.pc = self.pc +% 1;
+                        self.cp(value);
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.INC => |target| {
+                switch (target) {
+                    ArithmeticTarget.A => {
+                        // std.debug.print("inc A\n", .{});
+                        const value = self.registers.A;
+                        const res = self.inc(value);
+                        self.registers.A = res;
+                    },
+                    ArithmeticTarget.B => {
+                        // std.debug.print("inc B\n", .{});
+                        const value = self.registers.B;
+                        const res = self.inc(value);
+                        self.registers.B = res;
+                    },
+                    ArithmeticTarget.C => {
+                        // std.debug.print("inc C\n", .{});
+                        const value = self.registers.C;
+                        const res = self.inc(value);
+                        self.registers.C = res;
+                    },
+                    ArithmeticTarget.D => {
+                        // std.debug.print("inc D\n", .{});
+                        const value = self.registers.D;
+                        const res = self.inc(value);
+                        self.registers.D = res;
+                    },
+                    ArithmeticTarget.E => {
+                        // std.debug.print("inc E\n", .{});
+                        const value = self.registers.E;
+                        const res = self.inc(value);
+                        self.registers.E = res;
+                    },
+                    ArithmeticTarget.H => {
+                        // std.debug.print("inc H\n", .{});
+                        const value = self.registers.H;
+                        const res = self.inc(value);
+                        self.registers.H = res;
+                    },
+                    ArithmeticTarget.L => {
+                        // std.debug.print("inc L\n", .{});
+                        const value = self.registers.L;
+                        const res = self.inc(value);
+                        self.registers.L = res;
+                    },
+                    ArithmeticTarget.HL => {
+                        // std.debug.print("inc HL\n", .{});
+                        const HL = self.registers.get_HL();
+                        const value = self.bus.read_byte(HL);
+                        const res = self.inc(value);
+                        self.bus.write_byte(HL, res);
+                    },
+                    else => {
+                        // std.debug.print("Unknown INC target\n", .{});
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.DEC => |target| {
+                switch (target) {
+                    ArithmeticTarget.A => {
+                        // std.debug.print("dec A\n", .{});
+                        const value = self.registers.A;
+                        const res = self.dec(value);
+                        self.registers.A = res;
+                    },
+                    ArithmeticTarget.B => {
+                        // std.debug.print("dec B\n", .{});
+                        const value = self.registers.B;
+                        const res = self.dec(value);
+                        self.registers.B = res;
+                    },
+                    ArithmeticTarget.C => {
+                        // std.debug.print("dec C\n", .{});
+                        const value = self.registers.C;
+                        const res = self.dec(value);
+                        self.registers.C = res;
+                    },
+                    ArithmeticTarget.D => {
+                        // std.debug.print("dec D\n", .{});
+                        const value = self.registers.D;
+                        const res = self.dec(value);
+                        self.registers.D = res;
+                    },
+                    ArithmeticTarget.E => {
+                        // std.debug.print("dec E\n", .{});
+                        const value = self.registers.E;
+                        const res = self.dec(value);
+                        self.registers.E = res;
+                    },
+                    ArithmeticTarget.H => {
+                        // std.debug.print("dec H\n", .{});
+                        const value = self.registers.H;
+                        const res = self.dec(value);
+                        self.registers.H = res;
+                    },
+                    ArithmeticTarget.L => {
+                        // std.debug.print("dec L\n", .{});
+                        const value = self.registers.L;
+                        const res = self.dec(value);
+                        self.registers.L = res;
+                    },
+                    ArithmeticTarget.HL => {
+                        // std.debug.print("dec HL\n", .{});
+                        const HL = self.registers.get_HL();
+                        const value = self.bus.read_byte(HL);
+                        const res = self.dec(value);
+                        self.bus.write_byte(HL, res);
+                    },
+                    else => {
+                        // std.debug.print("Unknown DEC target\n", .{});
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.WADD => |target| {
+                const value = waddBlk: {
                     switch (target) {
                         WideArithmeticTarget.HL => {
-                            // std.debug.print("winc HL\n", .{});
+                            // std.debug.print("wadd HL\n", .{});
                             const value = self.registers.get_HL();
-                            const new_value = self.winc(value);
-                            self.registers.set_HL(new_value);
+                            const new_value = self.wadd(value);
+                            break :waddBlk new_value;
                         },
                         WideArithmeticTarget.BC => {
-                            // std.debug.print("winc BC\n", .{});
+                            // std.debug.print("wadd BC\n", .{});
                             const value = self.registers.get_BC();
-                            const new_value = self.winc(value);
-                            self.registers.set_BC(new_value);
+                            const new_value = self.wadd(value);
+                            break :waddBlk new_value;
                         },
                         WideArithmeticTarget.DE => {
-                            // std.debug.print("winc DE\n", .{});
+                            // std.debug.print("wadd DE\n", .{});
                             const value = self.registers.get_DE();
-                            const new_value = self.winc(value);
-                            self.registers.set_DE(new_value);
+                            const new_value = self.wadd(value);
+                            break :waddBlk new_value;
                         },
                         WideArithmeticTarget.SP => {
-                            // std.debug.print("winc SP\n", .{});
+                            // std.debug.print("wadd SP\n", .{});
                             const value = self.sp;
-                            const new_value = self.winc(value);
-                            self.sp = new_value;
+                            const new_value = self.wadd(value);
+                            break :waddBlk new_value;
                         },
                     }
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.WDEC => |target| {
-                    switch (target) {
-                        WideArithmeticTarget.HL => {
-                            // std.debug.print("wdec HL\n", .{});
-                            const value = self.registers.get_HL();
-                            const new_value = self.wdec(value);
-                            self.registers.set_HL(new_value);
-                        },
-                        WideArithmeticTarget.BC => {
-                            // std.debug.print("wdec BC\n", .{});
-                            const value = self.registers.get_BC();
-                            const new_value = self.wdec(value);
-                            self.registers.set_BC(new_value);
-                        },
-                        WideArithmeticTarget.DE => {
-                            // std.debug.print("wdec DE\n", .{});
-                            const value = self.registers.get_DE();
-                            const new_value = self.wdec(value);
-                            self.registers.set_DE(new_value);
-                        },
-                        WideArithmeticTarget.SP => {
-                            // std.debug.print("wdec SP\n", .{});
-                            const value = self.sp;
-                            const new_value = self.wdec(value);
-                            self.sp = new_value;
-                        },
-                    }
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.SPADD => |_| {
-                    const value = self.read_next_byte();
-                    const new_value = self.spadd(value);
-                    self.sp = new_value;
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.DAA => |_| {
-                    // std.debug.print("DAA\n", .{});
-                    const new_value = self.daa(self.registers.A);
-                    self.registers.A = new_value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.CPL => |_| {
-                    // std.debug.print("CPL\n", .{});
-                    _ = self.cpl();
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.CCF => |_| {
-                    // std.debug.print("CCF\n", .{});
-                    _ = self.ccf();
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.SCF => |_| {
-                    // std.debug.print("SCF\n", .{});
-                    _ = self.scf();
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.RLA => |_| {
-                    // std.debug.print("RLA\n", .{});
-                    const new_value = self.rla(self.registers.A);
-                    self.registers.A = new_value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.RLCA => |_| {
-                    // std.debug.print("RLCA\n", .{});
-                    const new_value = self.rlca(self.registers.A);
-                    self.registers.A = new_value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.RRA => |_| {
-                    // std.debug.print("RRA\n", .{});
-                    const new_value = self.rra(self.registers.A);
-                    self.registers.A = new_value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.RRCA => |_| {
-                    // std.debug.print("RRCA\n", .{});
-                    const new_value = self.rrca(self.registers.A);
-                    self.registers.A = new_value;
-                    const new_pc: u16 = self.pc +% 1;
-                    break :blk new_pc;
-                },
-                Instruction.RLC => |target| {
-                    // std.debug.print("RLC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rlc, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.RRC => |target| {
-                    // std.debug.print("RRC {}\n", .{target});
-                    handle_prefix_instruction(self, target, rrc, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.RL => |target| {
-                    // std.debug.print("RL {}\n", .{target});
-                    handle_prefix_instruction(self, target, rl, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.RR => |target| {
-                    // std.debug.print("RR {}\n", .{target});
-                    handle_prefix_instruction(self, target, rr, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.SLA => |target| {
-                    // std.debug.print("LRA {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_left_arithmetic, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.SRA => |target| {
-                    // std.debug.print("SRA {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_right_arithmetic, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.SRL => |target| {
-                    // std.debug.print("SRL {}\n", .{target});
-                    handle_prefix_instruction(self, target, shift_right_logical, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.SWAP => |target| {
-                    // std.debug.print("SWAP {}\n", .{target});
-                    handle_prefix_instruction(self, target, swap, .{});
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.BIT => |target| {
-                    // std.debug.print("BIT {}\n", .{target.target});
-                    handle_prefix_instruction(self, target.target, bit, .{ .bit = target.bit });
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.SET => |target| {
-                    // std.debug.print("SET {}\n", .{target});
-                    handle_prefix_instruction(self, target.target, set, .{ .bit = target.bit });
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-                Instruction.RES => |target| {
-                    // std.debug.print("RES {}\n", .{target});
-                    handle_prefix_instruction(self, target.target, reset, .{ .bit = target.bit });
-                    const new_pc: u16 = self.pc +% 2;
-                    break :blk new_pc;
-                },
-            }
-        };
-        return res;
+                };
+                self.registers.set_HL(value);
+                self.pc = self.pc +% 1;
+            },
+            Instruction.WINC => |target| {
+                switch (target) {
+                    WideArithmeticTarget.HL => {
+                        // std.debug.print("winc HL\n", .{});
+                        const value = self.registers.get_HL();
+                        const new_value = self.winc(value);
+                        self.registers.set_HL(new_value);
+                    },
+                    WideArithmeticTarget.BC => {
+                        // std.debug.print("winc BC\n", .{});
+                        const value = self.registers.get_BC();
+                        const new_value = self.winc(value);
+                        self.registers.set_BC(new_value);
+                    },
+                    WideArithmeticTarget.DE => {
+                        // std.debug.print("winc DE\n", .{});
+                        const value = self.registers.get_DE();
+                        const new_value = self.winc(value);
+                        self.registers.set_DE(new_value);
+                    },
+                    WideArithmeticTarget.SP => {
+                        // std.debug.print("winc SP\n", .{});
+                        const value = self.sp;
+                        const new_value = self.winc(value);
+                        self.sp = new_value;
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.WDEC => |target| {
+                switch (target) {
+                    WideArithmeticTarget.HL => {
+                        // std.debug.print("wdec HL\n", .{});
+                        const value = self.registers.get_HL();
+                        const new_value = self.wdec(value);
+                        self.registers.set_HL(new_value);
+                    },
+                    WideArithmeticTarget.BC => {
+                        // std.debug.print("wdec BC\n", .{});
+                        const value = self.registers.get_BC();
+                        const new_value = self.wdec(value);
+                        self.registers.set_BC(new_value);
+                    },
+                    WideArithmeticTarget.DE => {
+                        // std.debug.print("wdec DE\n", .{});
+                        const value = self.registers.get_DE();
+                        const new_value = self.wdec(value);
+                        self.registers.set_DE(new_value);
+                    },
+                    WideArithmeticTarget.SP => {
+                        // std.debug.print("wdec SP\n", .{});
+                        const value = self.sp;
+                        const new_value = self.wdec(value);
+                        self.sp = new_value;
+                    },
+                }
+                self.pc = self.pc +% 1;
+            },
+            Instruction.SPADD => |_| {
+                const value = self.read_next_byte();
+                const new_value = self.spadd(value);
+                self.sp = new_value;
+                self.pc = self.pc +% 2;
+            },
+            Instruction.DAA => |_| {
+                // std.debug.print("DAA\n", .{});
+                const new_value = self.daa(self.registers.A);
+                self.registers.A = new_value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.CPL => |_| {
+                // std.debug.print("CPL\n", .{});
+                _ = self.cpl();
+                self.pc = self.pc +% 1;
+            },
+            Instruction.CCF => |_| {
+                // std.debug.print("CCF\n", .{});
+                _ = self.ccf();
+                self.pc = self.pc +% 1;
+            },
+            Instruction.SCF => |_| {
+                // std.debug.print("SCF\n", .{});
+                _ = self.scf();
+                self.pc = self.pc +% 1;
+            },
+            Instruction.RLA => |_| {
+                // std.debug.print("RLA\n", .{});
+                const new_value = self.rla(self.registers.A);
+                self.registers.A = new_value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.RLCA => |_| {
+                // std.debug.print("RLCA\n", .{});
+                const new_value = self.rlca(self.registers.A);
+                self.registers.A = new_value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.RRA => |_| {
+                // std.debug.print("RRA\n", .{});
+                const new_value = self.rra(self.registers.A);
+                self.registers.A = new_value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.RRCA => |_| {
+                // std.debug.print("RRCA\n", .{});
+                const new_value = self.rrca(self.registers.A);
+                self.registers.A = new_value;
+                self.pc = self.pc +% 1;
+            },
+            Instruction.RLC => |target| {
+                // std.debug.print("RLC {}\n", .{target});
+                handle_prefix_instruction(self, target, rlc, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.RRC => |target| {
+                // std.debug.print("RRC {}\n", .{target});
+                handle_prefix_instruction(self, target, rrc, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.RL => |target| {
+                // std.debug.print("RL {}\n", .{target});
+                handle_prefix_instruction(self, target, rl, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.RR => |target| {
+                // std.debug.print("RR {}\n", .{target});
+                handle_prefix_instruction(self, target, rr, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.SLA => |target| {
+                // std.debug.print("LRA {}\n", .{target});
+                handle_prefix_instruction(self, target, shift_left_arithmetic, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.SRA => |target| {
+                // std.debug.print("SRA {}\n", .{target});
+                handle_prefix_instruction(self, target, shift_right_arithmetic, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.SRL => |target| {
+                // std.debug.print("SRL {}\n", .{target});
+                handle_prefix_instruction(self, target, shift_right_logical, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.SWAP => |target| {
+                // std.debug.print("SWAP {}\n", .{target});
+                handle_prefix_instruction(self, target, swap, .{});
+                self.pc = self.pc +% 2;
+            },
+            Instruction.BIT => |target| {
+                // std.debug.print("BIT {}\n", .{target.target});
+                handle_prefix_instruction(self, target.target, bit, .{ .bit = target.bit });
+                self.pc = self.pc +% 2;
+            },
+            Instruction.SET => |target| {
+                // std.debug.print("SET {}\n", .{target});
+                handle_prefix_instruction(self, target.target, set, .{ .bit = target.bit });
+                self.pc = self.pc +% 2;
+            },
+            Instruction.RES => |target| {
+                // std.debug.print("RES {}\n", .{target});
+                handle_prefix_instruction(self, target.target, reset, .{ .bit = target.bit });
+                self.pc = self.pc +% 2;
+            },
+        }
     }
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
@@ -1969,12 +1914,11 @@ pub const CPU = struct {
         if (prefixed) {
             instruction_byte = self.bus.read_byte(self.pc +% 1);
         }
-        const next_pc = if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
+        if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
             break :blk self.execute(instruction);
         } else {
             std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
-        };
-        self.pc = next_pc;
+        }
     }
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {
@@ -2561,6 +2505,8 @@ pub const CPU = struct {
         //     .halt_state = HaltState.Disabled,
         //     .is_stopped = false,
         //     .ime = IME.Disabled,
+        //      .pending_t_cycles = 0,
+        //     .clock = .{ .t_cycles = 0 },
         // };
         // //debug
         const cpu: CPU = CPU{
@@ -2587,6 +2533,8 @@ pub const CPU = struct {
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,
+            .pending_t_cycles = 0,
+            .clock = .{ .t_cycles = 0 },
         };
         return cpu;
     }
@@ -2696,8 +2644,8 @@ test "Jump" {
     cpu.pc = old_pos;
     // std.debug.print("PC: {x}\n", .{cpu.pc});
 
-    const jp_result = cpu.execute(jp_inst);
-    std.debug.assert(jp_result == new_pos);
+    cpu.execute(jp_inst);
+    std.debug.assert(cpu.pc == new_pos);
 }
 
 test "overflow" {
