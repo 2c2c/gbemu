@@ -151,9 +151,10 @@ const OBP = [2]Palette;
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
+const SCALE: usize = 1;
 
 pub const GPU = struct {
-    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * @as(usize, 4)]u8,
+    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * SCALE]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -188,7 +189,7 @@ pub const GPU = struct {
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
         return GPU{
-            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * @as(usize, 4)),
+            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * SCALE),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             .lcdc = @bitCast(@as(u8, 0)),
@@ -296,7 +297,7 @@ pub const GPU = struct {
                 // handle 0x8800-0x97FF
                 std.debug.panic("Implement 0x8800-0x97FF\n", .{});
             }
-            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * 1;
+            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * SCALE;
             for (0..SCREEN_WIDTH) |line_x| {
                 const tile_index = self.vram[tile_map_offset +% tile_x_index];
                 const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
@@ -337,9 +338,10 @@ pub const GPU = struct {
                     const tile_row = if (object.attributes.y_flip) tile[7 - (pixel_y_offset % 8)] else tile[pixel_y_offset % 8];
 
                     // why signed
-                    // const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * 1;
-                    const canvas_y_offset: u32 = @as(u32, self.ly) * @as(u32, SCREEN_WIDTH) * 1;
-                    var canvas_offset: usize = @intCast(@as(u32, canvas_y_offset + object.x) * 1);
+                    // const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * SCALE;
+                    const canvas_y_offset: usize = @as(usize, self.ly) * @as(usize, SCREEN_WIDTH) * SCALE;
+                    // var canvas_offset: usize = @intCast(@as(u32, canvas_y_offset + object.x) * SCALE);
+                    var canvas_offset: usize = (canvas_y_offset + object.x) * SCALE;
                     for (0..8) |x| {
                         const pixel_x_offset: usize = if (object.attributes.x_flip) 7 - x else x;
                         const x_offset = object.x + x;

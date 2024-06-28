@@ -2009,7 +2009,7 @@ pub const CPU = struct {
         }
     }
     pub fn step(self: *CPU) void {
-        // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
+        std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         gameboy_doctor_print(self);
         const before_cycles = self.clock.t_cycles;
 
@@ -2026,6 +2026,7 @@ pub const CPU = struct {
         }
 
         const after_cycles: u8 = @truncate(self.clock.t_cycles - before_cycles);
+        std.debug.print("CPU STEP PC: 0x{x} CYCLES: {d}\n", .{ self.pc, after_cycles });
         // change to just return cycles per instr or overflow risk :FIXME
         self.bus.step(after_cycles, self.clock.bits.div);
     }
@@ -2622,10 +2623,10 @@ pub const CPU = struct {
         //     .halt_state = HaltState.Disabled,
         //     .is_stopped = false,
         //     .ime = IME.Disabled,
-        //      .pending_t_cycles = 0,
+        //     .pending_t_cycles = 0,
         //     .clock = .{ .t_cycles = 0 },
         // };
-        // //debug
+        //debug
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x01,
