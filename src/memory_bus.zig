@@ -111,13 +111,13 @@ pub const MemoryBus = struct {
         };
     }
 
-    pub fn step(self: *MemoryBus, cycles: u8) void {
-        if (self.timer.step(cycles)) {
+    pub fn step(self: *MemoryBus, cycles: u8, div: u8) void {
+        if (self.timer.step(cycles, div)) {
             self.interrupt_flag.enable_timer = true;
         }
-        self.divider.step(cycles);
-
+        self.divider.step(cycles, div);
         const res = self.gpu.step(cycles);
+
         self.interrupt_flag.enable_lcd_stat |= res.enable_lcd_stat;
         self.interrupt_flag.enable_vblank |= res.enable_vblank;
     }

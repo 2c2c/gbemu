@@ -2011,6 +2011,7 @@ pub const CPU = struct {
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         gameboy_doctor_print(self);
+        const before_cycles = self.clock.t_cycles;
 
         var instruction_byte = self.bus.read_byte(self.pc);
 
@@ -2023,6 +2024,10 @@ pub const CPU = struct {
         } else {
             std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
         }
+
+        const after_cycles: u8 = @truncate(self.clock.t_cycles - before_cycles);
+        // change to just return cycles per instr or overflow risk :FIXME
+        self.bus.step(after_cycles, self.clock.bits.div);
     }
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {

@@ -38,6 +38,7 @@ pub const Timer = struct {
     div: u8,
     tima: u8,
     tma: u8,
+    total_cycles: u64,
 
     // frequency: Frequency,
     // cycles: usize,
@@ -58,12 +59,13 @@ pub const Timer = struct {
             // .enabled = false,
         };
     }
-    fn step(self: *Timer, cycles: u8) bool {
+    pub fn step(self: *Timer, cycles: u8, div: u8) bool {
+        _ = cycles; // autofix
         if (!self.tac.enabled) {
             return false;
         }
-        self.div += @as(usize, cycles);
-        const freq = Frequency(self.tac.frequency);
+        self.div = div;
+        const freq: Frequency = @enumFromInt(self.tac.frequency);
         const cycles_per_tick = freq.cycles_per_tick();
         const did_overflow = blk: {
             if (self.div >= cycles_per_tick) {
