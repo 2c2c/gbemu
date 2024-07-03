@@ -110,7 +110,11 @@ pub fn setup_cpu() !CPU {
 //         SDL.SDL_RenderPresent(renderer);
 //         // std.time.sleep(16 * std.time.ns_per_ms);
 //     }
-// }
+//
+//
+//
+//
+
 pub fn main() !void {
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
         sdlPanic();
@@ -120,7 +124,6 @@ pub fn main() !void {
     const HEIGHT = 144;
     const SCALE = 1;
 
-    // _ = SDL.SDL_SetHint(SDL.SDL_HINT_RENDER_SCALE_QUALITY, "linear");
     const window = SDL.SDL_CreateWindow(
         "SDL2 Native Demo",
         SDL.SDL_WINDOWPOS_CENTERED,
@@ -129,15 +132,7 @@ pub fn main() !void {
         HEIGHT * SCALE,
         SDL.SDL_WINDOW_SHOWN | SDL.SDL_WINDOW_RESIZABLE,
     ) orelse sdlPanic();
-
     defer _ = SDL.SDL_DestroyWindow(window);
-    var prng = std.rand.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
-        break :blk seed;
-    });
-    const rand = prng.random();
-    _ = rand; // autofix
 
     const renderer = SDL.SDL_CreateRenderer(window, -1, SDL.SDL_RENDERER_ACCELERATED) orelse sdlPanic();
     defer _ = SDL.SDL_DestroyRenderer(renderer);
@@ -145,49 +140,54 @@ pub fn main() !void {
     const texture = SDL.SDL_CreateTexture(
         renderer,
         SDL.SDL_PIXELFORMAT_RGB888,
-        SDL.SDL_TEXTUREACCESS_TARGET,
+        SDL.SDL_TEXTUREACCESS_STREAMING,
         WIDTH * SCALE,
         HEIGHT * SCALE,
     ) orelse sdlPanic();
     defer SDL.SDL_DestroyTexture(texture);
 
     var cpu = try setup_cpu();
+
+    var pixels: [WIDTH * HEIGHT * 3]u8 = undefined; // Adjusted the size to match the RGB format
+
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) != 0) {
             if (ev.type == SDL.SDL_QUIT)
                 break :mainLoop;
-            // if (ev.type == SDL.SDL_WINDOWEVENT and ev.window.event == SDL.SDL_WINDOWEVENT_RESIZED) {
-            //     const width = ev.window.data1;
-            //     const height = ev.window.data2;
-            //     _ = SDL.SDL_RenderSetLogicalSize(renderer, width, height);
-            // }
         }
 
-        _ = SDL.SDL_SetRenderTarget(renderer, texture);
         cpu.step();
-        // Render the array of pixels
-        for (0..HEIGHT * SCALE) |y| {
-            for (0..WIDTH * SCALE) |x| {
-                const index = y * WIDTH + x;
-                const r = cpu.bus.gpu.canvas[index];
-                const g = cpu.bus.gpu.canvas[index];
-                const b = cpu.bus.gpu.canvas[index];
-                // std.debug.print("rgb: 0x{x:0>2}{x:0>2}{x:0>2}\n", .{ r, g, b });
 
-                // SDL.SDL_GetRGB(pixels[index], SDL.SDL_AllocFormat(SDL.SDL_PIXELFORMAT_RGB888), &r, &g, &b);
-                _ = SDL.SDL_SetRenderDrawColor(renderer, r, g, b, 0xFF);
-                _ = SDL.SDL_RenderDrawPoint(renderer, @intCast(x), @intCast(y));
+        for (0..HEIGHT) |y| {
+            for (0..WIDTH) |x| {
+                const index = (y * WIDTH + x) * 3;
+                const color = cpu.bus.gpu.canvas[y * WIDTH + x];
+                pixels[index + 0] = color; // r
+                pixels[index + 1] = color; // g
+                pixels[index + 2] = color; // b
             }
         }
 
-        _ = SDL.SDL_SetRenderTarget(renderer, null);
+        var pitch: i32 = 0;
+        var locked_pixels: ?[*c]u8 = null;
+        if (SDL.SDL_LockTexture(texture, null, @ptrCast(&locked_pixels), &pitch) < 0) {
+            sdlPanic();
+        }
+
+        if (locked_pixels) |lp| {
+            std.debug.print("locked\n", .{});
+            @memcpy(lp[0..(WIDTH * HEIGHT * 3)], pixels[0..(WIDTH * HEIGHT * 3)]);
+            SDL.SDL_UnlockTexture(texture);
+        } else {
+            std.debug.print("not locked\n", .{});
+        }
+
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
-
-        // Update screen
         SDL.SDL_RenderPresent(renderer);
-        std.time.sleep(0 * std.time.ns_per_ms);
+
+        std.time.sleep(16 * std.time.ns_per_ms); // 60 FPS
     }
 }
 
