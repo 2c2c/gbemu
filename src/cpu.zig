@@ -2009,8 +2009,8 @@ pub const CPU = struct {
         }
     }
     pub fn step(self: *CPU) void {
-        std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        gameboy_doctor_print(self);
+        // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
+        // gameboy_doctor_print(self);
         const before_cycles = self.clock.t_cycles;
 
         var instruction_byte = self.bus.read_byte(self.pc);
@@ -2026,7 +2026,7 @@ pub const CPU = struct {
         }
 
         const after_cycles: u8 = @truncate(self.clock.t_cycles - before_cycles);
-        std.debug.print("CPU STEP PC: 0x{x} CYCLES: {d}\n", .{ self.pc, after_cycles });
+        // std.debug.print("CPU STEP PC: 0x{x} CYCLES: {d}\n", .{ self.pc, after_cycles });
         // change to just return cycles per instr or overflow risk :FIXME
         self.bus.step(after_cycles, self.clock.bits.div);
     }

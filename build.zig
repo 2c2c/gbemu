@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
 
     const sdk = sdl.init(b, null);
 
+    // link build main exe
     const exe = b.addExecutable(.{
         .name = "GBEMU",
         .root_source_file = b.path("src/main.zig"),
@@ -41,6 +42,19 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // partial buildfor zls
+    const exe_check = b.addExecutable(.{
+        .name = "GBEMU",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sdk.link(exe_check, .dynamic);
+    exe_check.root_module.addImport("sdl2", sdk.getNativeModule());
+    const check = b.step("check", "Check the app");
+    check.dependOn(&exe_check.step);
+
+    // unit tests
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,

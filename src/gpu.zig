@@ -192,7 +192,8 @@ pub const GPU = struct {
             .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * SCALE),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
-            .lcdc = @bitCast(@as(u8, 0)),
+            // ai says htis is default value
+            .lcdc = @bitCast(@as(u8, 0x91)),
             .stat = @bitCast(@as(u8, 0)),
             .background_viewport = .{ .scy = 0, .scx = 1 },
             .ly = 0,
@@ -205,6 +206,7 @@ pub const GPU = struct {
         };
     }
 
+    // do you see anything wrong with this gb emulator gpu step function?
     pub fn step(self: *GPU, cycles: u8) IERegister {
         var request: IERegister = @bitCast(@as(u8, 0));
         if (!self.lcdc.lcd_enable) {
@@ -213,42 +215,43 @@ pub const GPU = struct {
 
         self.cycles += cycles;
 
+        // std.debug.print("GPU STEP cycles: {}, ly: {}, mode: {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
         switch (self.stat.ppu_mode) {
             // Horizontal blank
             0b00 => {
                 if (self.cycles >= 204) {
                     self.cycles = self.cycles % 204;
                     self.ly += 1;
-                }
 
-                if (self.ly >= 144) {
-                    self.stat.ppu_mode = 0b01;
-                    request.enable_vblank = true;
-                    if (self.stat.mode_1_interrupt_enabled) {
-                        request.enable_lcd_stat = true;
+                    if (self.ly >= 144) {
+                        self.stat.ppu_mode = 0b01;
+                        request.enable_vblank = true;
+                        if (self.stat.mode_1_interrupt_enabled) {
+                            request.enable_lcd_stat = true;
+                        }
+                    } else {
+                        self.stat.ppu_mode = 0b10;
+                        if (self.stat.mode_2_interrupt_enabled) {
+                            request.enable_lcd_stat = true;
+                        }
                     }
-                } else {
-                    self.stat.ppu_mode = 0b10;
-                    if (self.stat.mode_2_interrupt_enabled) {
-                        request.enable_lcd_stat = true;
-                    }
+                    self.lyc_ly_check(&request);
                 }
-                self.lyc_ly_check(&request);
             },
             // Vertical blank
             0b01 => {
                 if (self.cycles >= 456) {
                     self.cycles = self.cycles % 456;
                     self.ly += 1;
-                }
-                if (self.ly >= 154) {
-                    self.ly = 0;
-                    self.stat.ppu_mode = 0b10;
-                    if (self.stat.mode_2_interrupt_enabled) {
-                        request.enable_lcd_stat = true;
+                    if (self.ly >= 154) {
+                        self.ly = 0;
+                        self.stat.ppu_mode = 0b10;
+                        if (self.stat.mode_2_interrupt_enabled) {
+                            request.enable_lcd_stat = true;
+                        }
                     }
+                    self.lyc_ly_check(&request);
                 }
-                self.lyc_ly_check(&request);
             },
             // OAM read
             0b10 => {
@@ -303,11 +306,13 @@ pub const GPU = struct {
                 const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
                 const color = tile_value.to_color();
                 self.canvas[canvas_offset] = color;
-                self.canvas[canvas_offset +% 1] = color;
-                self.canvas[canvas_offset +% 2] = color;
+                // self.canvas[canvas_offset +% 1] = color;
+                // self.canvas[canvas_offset +% 2] = color;
                 // why
-                self.canvas[canvas_offset +% 3] = 0xFF;
-                canvas_offset += 4;
+                // alpha
+                // self.canvas[canvas_offset +% 3] = 0xFF;
+                // canvas_offset += 4;
+                canvas_offset += 1;
 
                 scan_line[line_x] = tile_value;
                 pixel_x_index = (pixel_x_index + 1) % 8;
@@ -353,10 +358,10 @@ pub const GPU = struct {
                         {
                             const color = pixel.to_color();
                             self.canvas[canvas_offset] = color;
-                            self.canvas[canvas_offset +% 1] = color;
-                            self.canvas[canvas_offset +% 2] = color;
-                            self.canvas[canvas_offset +% 3] = 0xFF;
-                            canvas_offset += 4;
+                            // self.canvas[canvas_offset +% 1] = color;
+                            // self.canvas[canvas_offset +% 2] = color;
+                            // self.canvas[canvas_offset +% 3] = 0xFF;
+                            canvas_offset += 1;
                         }
                     }
                 }
