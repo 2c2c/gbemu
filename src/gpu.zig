@@ -299,7 +299,7 @@ pub const GPU = struct {
                 // handle 0x8800-0x97FF
                 std.debug.panic("Implement 0x8800-0x97FF\n", .{});
             }
-            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * SCALE;
+            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * SCALE * 3;
             for (0..SCREEN_WIDTH) |line_x| {
                 const tile_index = self.vram[tile_map_offset +% tile_x_index];
                 const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
@@ -345,7 +345,7 @@ pub const GPU = struct {
                     // const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * SCALE;
                     const canvas_y_offset: usize = @as(usize, self.ly) * @as(usize, SCREEN_WIDTH) * SCALE;
                     // var canvas_offset: usize = @intCast(@as(u32, canvas_y_offset + object.x) * SCALE);
-                    var canvas_offset: usize = (canvas_y_offset + object.x) * SCALE;
+                    var canvas_offset: usize = (canvas_y_offset + object.x) * SCALE * 3;
                     for (0..8) |x| {
                         const pixel_x_offset: usize = if (object.attributes.x_flip) 7 - x else x;
                         const x_offset = object.x + x;

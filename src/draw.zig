@@ -149,9 +149,6 @@ pub fn main() !void {
 
     var cpu = try setup_cpu();
 
-    // var pixels: [WIDTH * HEIGHT * 3]u8 = undefined; // Adjusted the size to match the RGB format
-    // _ = pixels; // autofix
-
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) != 0) {
@@ -160,33 +157,8 @@ pub fn main() !void {
         }
 
         cpu.step();
+        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * SCALE * 3);
 
-        // for (0..HEIGHT) |y| {
-        //     for (0..WIDTH) |x| {
-        //         const index = (y * WIDTH + x) * 3;
-        //         const color = cpu.bus.gpu.canvas[y * WIDTH + x];
-        //         pixels[index + 0] = color; // r
-        //         pixels[index + 1] = color; // g
-        //         pixels[index + 2] = color; // b
-        //     }
-        // }
-
-        var pitch: i32 = 0;
-        var locked_pixels: [*c]?*u8 = null;
-        if (SDL.SDL_LockTexture(texture, null, @ptrCast(&locked_pixels), &pitch) < 0) {
-            sdlPanic();
-        }
-
-        if (locked_pixels) |lp| {
-            const nonnull: [*c]u8 = @ptrCast(lp);
-            const row_size = WIDTH * 3;
-            for (0..HEIGHT) |y| {
-                const src_index = y * row_size;
-                const dst_index: usize = @as(usize, y) * @as(usize, @intCast(pitch));
-                @memcpy(nonnull[dst_index .. dst_index + row_size], cpu.bus.gpu.canvas[src_index .. src_index + row_size]);
-            }
-            SDL.SDL_UnlockTexture(texture);
-        }
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
