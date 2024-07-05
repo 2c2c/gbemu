@@ -206,7 +206,6 @@ pub const GPU = struct {
         };
     }
 
-    // do you see anything wrong with this gb emulator gpu step function?
     pub fn step(self: *GPU, cycles: u8) IERegister {
         var request: IERegister = @bitCast(@as(u8, 0));
         if (!self.lcdc.lcd_enable) {

@@ -170,24 +170,26 @@ pub fn main() !void {
         }
 
         var pitch: i32 = 0;
-        var locked_pixels: ?[*c]u8 = null;
+        var locked_pixels: [*c]?*u8 = null;
         if (SDL.SDL_LockTexture(texture, null, @ptrCast(&locked_pixels), &pitch) < 0) {
             sdlPanic();
         }
 
         if (locked_pixels) |lp| {
-            std.debug.print("locked\n", .{});
-            @memcpy(lp[0..(WIDTH * HEIGHT * 3)], pixels[0..(WIDTH * HEIGHT * 3)]);
+            const nonnull: [*c]u8 = @ptrCast(lp);
+            const row_size = WIDTH * 3;
+            for (0..HEIGHT) |y| {
+                const src_index = y * row_size;
+                const dst_index: usize = @as(usize, y) * @as(usize, @intCast(pitch));
+                @memcpy(nonnull[dst_index .. dst_index + row_size], pixels[src_index .. src_index + row_size]);
+            }
             SDL.SDL_UnlockTexture(texture);
-        } else {
-            std.debug.print("not locked\n", .{});
         }
-
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
 
-        std.time.sleep(16 * std.time.ns_per_ms); // 60 FPS
+        std.time.sleep(0 * std.time.ns_per_ms); // 60 FPS
     }
 }
 
