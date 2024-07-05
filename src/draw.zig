@@ -10,6 +10,7 @@ const test_allocator = std.testing.allocator;
 pub fn setup_cpu() !CPU {
     const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
+    // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     defer file.close();
 
     const size = try file.getEndPos();
@@ -148,7 +149,8 @@ pub fn main() !void {
 
     var cpu = try setup_cpu();
 
-    var pixels: [WIDTH * HEIGHT * 3]u8 = undefined; // Adjusted the size to match the RGB format
+    // var pixels: [WIDTH * HEIGHT * 3]u8 = undefined; // Adjusted the size to match the RGB format
+    // _ = pixels; // autofix
 
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
@@ -159,15 +161,15 @@ pub fn main() !void {
 
         cpu.step();
 
-        for (0..HEIGHT) |y| {
-            for (0..WIDTH) |x| {
-                const index = (y * WIDTH + x) * 3;
-                const color = cpu.bus.gpu.canvas[y * WIDTH + x];
-                pixels[index + 0] = color; // r
-                pixels[index + 1] = color; // g
-                pixels[index + 2] = color; // b
-            }
-        }
+        // for (0..HEIGHT) |y| {
+        //     for (0..WIDTH) |x| {
+        //         const index = (y * WIDTH + x) * 3;
+        //         const color = cpu.bus.gpu.canvas[y * WIDTH + x];
+        //         pixels[index + 0] = color; // r
+        //         pixels[index + 1] = color; // g
+        //         pixels[index + 2] = color; // b
+        //     }
+        // }
 
         var pitch: i32 = 0;
         var locked_pixels: [*c]?*u8 = null;
@@ -181,7 +183,7 @@ pub fn main() !void {
             for (0..HEIGHT) |y| {
                 const src_index = y * row_size;
                 const dst_index: usize = @as(usize, y) * @as(usize, @intCast(pitch));
-                @memcpy(nonnull[dst_index .. dst_index + row_size], pixels[src_index .. src_index + row_size]);
+                @memcpy(nonnull[dst_index .. dst_index + row_size], cpu.bus.gpu.canvas[src_index .. src_index + row_size]);
             }
             SDL.SDL_UnlockTexture(texture);
         }

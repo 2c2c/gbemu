@@ -154,7 +154,7 @@ const SCREEN_HEIGHT: usize = 144;
 const SCALE: usize = 1;
 
 pub const GPU = struct {
-    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * SCALE]u8,
+    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * SCALE * 3]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -189,16 +189,16 @@ pub const GPU = struct {
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
         return GPU{
-            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * SCALE),
+            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * SCALE * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
             .lcdc = @bitCast(@as(u8, 0x91)),
-            .stat = @bitCast(@as(u8, 0)),
+            .stat = @bitCast(@as(u8, 0x05)),
             .background_viewport = .{ .scy = 0, .scx = 1 },
             .ly = 0,
             .lyc = 0,
-            .bgp = @bitCast(@as(u8, 0)),
+            .bgp = @bitCast(@as(u8, 0xFC)),
             .obp = obp,
             .objects = objects,
             .window_position = .{ .wy = 0, .wx = 0 },
@@ -305,13 +305,13 @@ pub const GPU = struct {
                 const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
                 const color = tile_value.to_color();
                 self.canvas[canvas_offset] = color;
-                // self.canvas[canvas_offset +% 1] = color;
-                // self.canvas[canvas_offset +% 2] = color;
+                self.canvas[canvas_offset +% 1] = color;
+                self.canvas[canvas_offset +% 2] = color;
                 // why
                 // alpha
                 // self.canvas[canvas_offset +% 3] = 0xFF;
                 // canvas_offset += 4;
-                canvas_offset += 1;
+                canvas_offset += 3;
 
                 scan_line[line_x] = tile_value;
                 pixel_x_index = (pixel_x_index + 1) % 8;
@@ -357,10 +357,10 @@ pub const GPU = struct {
                         {
                             const color = pixel.to_color();
                             self.canvas[canvas_offset] = color;
-                            // self.canvas[canvas_offset +% 1] = color;
-                            // self.canvas[canvas_offset +% 2] = color;
+                            self.canvas[canvas_offset +% 1] = color;
+                            self.canvas[canvas_offset +% 2] = color;
                             // self.canvas[canvas_offset +% 3] = 0xFF;
-                            canvas_offset += 1;
+                            canvas_offset += 3;
                         }
                     }
                 }
