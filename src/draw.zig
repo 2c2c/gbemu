@@ -11,6 +11,7 @@ pub fn setup_cpu() !CPU {
     const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
+    // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     defer file.close();
 
     const size = try file.getEndPos();
@@ -115,15 +116,14 @@ pub fn setup_cpu() !CPU {
 //
 //
 //
+const WIDTH = 160;
+const HEIGHT = 144;
+const SCALE = 1;
 
 pub fn main() !void {
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
         sdlPanic();
     defer SDL.SDL_Quit();
-
-    const WIDTH = 160;
-    const HEIGHT = 144;
-    const SCALE = 1;
 
     const window = SDL.SDL_CreateWindow(
         "SDL2 Native Demo",
@@ -140,7 +140,9 @@ pub fn main() !void {
 
     const texture = SDL.SDL_CreateTexture(
         renderer,
-        SDL.SDL_PIXELFORMAT_RGB888,
+        SDL.SDL_PIXELFORMAT_RGB24,
+        // trap format that includes alphachannel width but its ignored
+        // SDL.SDL_PIXELFORMAT_RGB888,
         SDL.SDL_TEXTUREACCESS_STREAMING,
         WIDTH * SCALE,
         HEIGHT * SCALE,
@@ -149,6 +151,7 @@ pub fn main() !void {
 
     var cpu = try setup_cpu();
 
+    var frame: usize = 0;
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) != 0) {
@@ -157,6 +160,11 @@ pub fn main() !void {
         }
 
         cpu.step();
+        frame += 1;
+        if (frame % 70224 == 0) {
+            print_canvas(&cpu);
+            frame = 0;
+        }
         _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * SCALE * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
@@ -170,6 +178,21 @@ pub fn main() !void {
 fn sdlPanic() noreturn {
     const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
     @panic(std.mem.sliceTo(str, 0));
+}
+
+fn print_canvas(cpu: *CPU) void {
+    // print the canvas to scale as hex bytes as 2d grid
+    //
+    for (0..HEIGHT) |y| {
+        for (0..WIDTH) |x| {
+            std.debug.print("0x{x:0>2}{x:0>2}{x:0>2}", .{
+                cpu.bus.gpu.canvas[y * x + 0],
+                cpu.bus.gpu.canvas[y * x + 1],
+                cpu.bus.gpu.canvas[y * x + 2],
+            });
+        }
+        std.debug.print("\n", .{});
+    }
 }
 
 test "random numbers" {

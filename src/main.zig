@@ -7,8 +7,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
-    try draw.main();
-    // try cpumain();
+    // try draw.main();
+    try cpumain();
 }
 
 pub fn cpumain() !void {
@@ -16,9 +16,9 @@ pub fn cpumain() !void {
     // pass
     // const file = try std.fs.cwd().openFile("./01-special.gb", .{});
     // fail
-    // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
+    const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // pass
-    const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
+    // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     // const file = try std.fs.cwd().openFile("./04-op r,imm.gb", .{});
     // const file = try std.fs.cwd().openFile("./05-op rp.gb", .{});
     // const file = try std.fs.cwd().openFile("./06-ld r,r.gb", .{});

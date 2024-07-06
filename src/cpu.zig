@@ -2010,7 +2010,7 @@ pub const CPU = struct {
     }
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        // gameboy_doctor_print(self);
+        gameboy_doctor_print(self);
         const before_cycles = self.clock.t_cycles;
 
         var instruction_byte = self.bus.read_byte(self.pc);
