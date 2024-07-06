@@ -599,10 +599,9 @@ pub const CPU = struct {
             _padding2: u48,
         },
     },
-    fn execute(self: *CPU, instruction: Instruction) void {
+    fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
 
-        var mutable_instruction = instruction;
         if (self.pc == 0xC2C0) {
             std.debug.print("Instruction {}\n", .{mutable_instruction});
         }
@@ -614,75 +613,6 @@ pub const CPU = struct {
         // }
         // IE IF checks run before cpu's IME is even checked. halts are ended regardless of if any interrupts
         // actually run
-        if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
-            self.halt_state = HaltState.Enabled;
-            self.pc -%= 1;
-            mutable_instruction = Instruction.HALT;
-        }
-        if (self.bus.has_interrupt()) {
-            if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
-                self.is_halted = false;
-                self.halt_state = HaltState.Disabled;
-                self.pc +%= 2;
-                // var byte = self.bus.read_byte(self.pc);
-                // if (byte == 0xCB) {
-                //     byte = self.bus.read_byte(self.pc +% 1);
-                //     mutable_instruction = Instruction.from_byte(byte, true).?;
-                // } else {
-                //     mutable_instruction = Instruction.from_byte(byte, false).?;
-                // }
-            }
-
-            if (self.ime == IME.Enabled) {
-                std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
-                std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
-                std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
-                self.ime = IME.Disabled;
-                self.push(self.pc);
-
-                // when handling an interrupt,
-                // 1 cycle for interrupt check
-                // 1 cycle for ack
-                // 8 cycles for push
-                // 4 cycles for jump
-                // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
-                if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
-                    std.debug.print("HANDLING VBLANK\n", .{});
-                    self.bus.interrupt_flag.enable_vblank = false;
-                    self.pc = @intFromEnum(ISR.VBlank);
-                    self.clock.t_cycles += 14;
-                } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
-                    std.debug.print("HANDLING LCDSTAT\n", .{});
-                    self.bus.interrupt_flag.enable_lcd_stat = false;
-                    self.pc = @intFromEnum(ISR.LCDStat);
-                    self.clock.t_cycles += 14;
-                } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
-                    std.debug.print("HANDLING TIMER\n", .{});
-                    self.bus.interrupt_flag.enable_timer = false;
-                    self.pc = @intFromEnum(ISR.Timer);
-                    self.clock.t_cycles += 14;
-                } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
-                    std.debug.print("HANDLING SERIAL\n", .{});
-                    self.bus.interrupt_flag.enable_serial = false;
-                    self.pc = @intFromEnum(ISR.Serial);
-                    self.clock.t_cycles += 14;
-                } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    std.debug.print("HANDLING JOYPAD\n", .{});
-                    self.bus.interrupt_flag.enable_joypad = false;
-                    self.pc = @intFromEnum(ISR.Joypad);
-                    self.clock.t_cycles += 14;
-                }
-                // return self.pc;
-                var byte = self.bus.read_byte(self.pc);
-                if (byte == 0xCB) {
-                    byte = self.bus.read_byte(self.pc +% 1);
-                    mutable_instruction = Instruction.from_byte(byte, true).?;
-                } else {
-                    mutable_instruction = Instruction.from_byte(byte, false).?;
-                }
-                std.debug.print("FOLLOW UP INSTR PC=0x{x}, INSTR={}\n", .{ self.pc, mutable_instruction });
-            }
-        }
 
         if (self.ime == IME.EILagCycle) {
             self.ime = IME.Enabled;
@@ -2041,6 +1971,64 @@ pub const CPU = struct {
             },
         }
     }
+    pub fn frame_walk(self: *CPU) void {
+        if (self.bus.has_interrupt()) {
+            if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
+                self.is_halted = false;
+                self.halt_state = HaltState.Disabled;
+                self.pc +%= 2;
+            }
+
+            if (self.ime == IME.Enabled) {
+                std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
+                std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
+                std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
+                self.ime = IME.Disabled;
+                self.push(self.pc);
+
+                // when handling an interrupt,
+                // 1 cycle for interrupt check
+                // 1 cycle for ack
+                // 8 cycles for push
+                // 4 cycles for jump
+                // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
+                if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
+                    std.debug.print("HANDLING VBLANK\n", .{});
+                    self.bus.interrupt_flag.enable_vblank = false;
+                    self.pc = @intFromEnum(ISR.VBlank);
+                    self.clock.t_cycles += 14;
+                } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
+                    std.debug.print("HANDLING LCDSTAT\n", .{});
+                    self.bus.interrupt_flag.enable_lcd_stat = false;
+                    self.pc = @intFromEnum(ISR.LCDStat);
+                    self.clock.t_cycles += 14;
+                } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
+                    std.debug.print("HANDLING TIMER\n", .{});
+                    self.bus.interrupt_flag.enable_timer = false;
+                    self.pc = @intFromEnum(ISR.Timer);
+                    self.clock.t_cycles += 14;
+                } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
+                    std.debug.print("HANDLING SERIAL\n", .{});
+                    self.bus.interrupt_flag.enable_serial = false;
+                    self.pc = @intFromEnum(ISR.Serial);
+                    self.clock.t_cycles += 14;
+                } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
+                    std.debug.print("HANDLING JOYPAD\n", .{});
+                    self.bus.interrupt_flag.enable_joypad = false;
+                    self.pc = @intFromEnum(ISR.Joypad);
+                    self.clock.t_cycles += 14;
+                }
+                std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
+            }
+        }
+        if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
+            self.halt_state = HaltState.Enabled;
+            self.clock.t_cycles += 4;
+        } else {
+            self.step();
+        }
+    }
+
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         if (self.halt_state != HaltState.Enabled) {
