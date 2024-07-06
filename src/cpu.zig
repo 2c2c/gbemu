@@ -590,7 +590,7 @@ pub const CPU = struct {
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
-    pending_t_cycles: u8,
+    pending_t_cycles: u64,
     clock: packed union {
         t_cycles: u64,
         bits: packed struct {
@@ -613,10 +613,6 @@ pub const CPU = struct {
         // }
         // IE IF checks run before cpu's IME is even checked. halts are ended regardless of if any interrupts
         // actually run
-
-        if (self.ime == IME.EILagCycle) {
-            self.ime = IME.Enabled;
-        }
 
         switch (mutable_instruction) {
             Instruction.NOP => {
@@ -1972,19 +1968,26 @@ pub const CPU = struct {
         }
     }
     pub fn frame_walk(self: *CPU) void {
+        self.pending_t_cycles = 0;
+        var current_cycles = self.clock.t_cycles;
         if (self.bus.has_interrupt()) {
-            if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
-                self.is_halted = false;
-                self.halt_state = HaltState.Disabled;
-                self.pc +%= 2;
-            }
+            std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
+
+            // if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
+            //     self.is_halted = false;
+            //     self.halt_state = HaltState.Disabled;
+            //     self.pc +%= 2;
+            // }
 
             if (self.ime == IME.Enabled) {
+                std.debug.print("IME.Enabled PC=0x{x}\n", .{self.pc});
                 std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
                 std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
                 std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
                 self.ime = IME.Disabled;
                 self.push(self.pc);
+                self.is_halted = false;
+                self.halt_state = HaltState.Disabled;
 
                 // when handling an interrupt,
                 // 1 cycle for interrupt check
@@ -1996,49 +1999,60 @@ pub const CPU = struct {
                     std.debug.print("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
-                    self.clock.t_cycles += 14;
+                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
                     std.debug.print("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
-                    self.clock.t_cycles += 14;
+                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
                     std.debug.print("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
-                    self.clock.t_cycles += 14;
+                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
                     std.debug.print("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
-                    self.clock.t_cycles += 14;
+                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
                     std.debug.print("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
-                    self.clock.t_cycles += 14;
+                    self.clock.t_cycles += 20;
                 }
                 std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
+                // gameboy_doctor_print(self);
             }
         }
+        if (self.ime == IME.EILagCycle) {
+            std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
+            self.ime = IME.Enabled;
+        }
+        self.pending_t_cycles = self.clock.t_cycles - current_cycles;
+        // consume
+        self.bus.step(self.pending_t_cycles, self.clock.bits.div);
+
+        self.pending_t_cycles = 0;
+        current_cycles = self.clock.t_cycles;
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             self.clock.t_cycles += 4;
         } else {
             self.step();
         }
+        self.pending_t_cycles = self.clock.t_cycles - current_cycles;
+        // consume
+        self.bus.step(self.pending_t_cycles, self.clock.bits.div);
     }
 
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         if (self.halt_state != HaltState.Enabled) {
-            // gameboy_doctor_print(self);
-            _ = self.halt_state;
+            gameboy_doctor_print(self);
+            // _ = self.halt_state;
         }
-        const before_cycles = self.clock.t_cycles;
-
         var instruction_byte = self.bus.read_byte(self.pc);
-
         const prefixed = instruction_byte == 0xCB;
         if (prefixed) {
             instruction_byte = self.bus.read_byte(self.pc +% 1);
@@ -2048,11 +2062,6 @@ pub const CPU = struct {
         } else {
             std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
         }
-
-        const after_cycles: u8 = @truncate(self.clock.t_cycles - before_cycles);
-        // std.debug.print("CPU STEP PC: 0x{x} CYCLES: {d}\n", .{ self.pc, after_cycles });
-        // change to just return cycles per instr or overflow risk :FIXME
-        self.bus.step(after_cycles, self.clock.bits.div);
     }
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {

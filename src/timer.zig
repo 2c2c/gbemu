@@ -27,8 +27,8 @@ pub const Frequency = enum(u3) {
         return switch (self) {
             Frequency.Hz4096 => 1024,
             Frequency.Hz262144 => 16,
-            Frequency.Hz16384 => 256,
             Frequency.Hz65536 => 64,
+            Frequency.Hz16384 => 256,
         };
     }
 };
@@ -60,7 +60,7 @@ pub const Timer = struct {
             // .enabled = false,
         };
     }
-    pub fn step(self: *Timer, cycles: u8, div: u8) bool {
+    pub fn step(self: *Timer, cycles: u64, div: u8) bool {
         self.total_cycles += cycles;
         if (!self.tac.enabled) {
             return false;

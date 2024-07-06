@@ -72,7 +72,6 @@ pub const MemoryBus = struct {
     boot_rom: [0x100]u8,
     memory: [0x10000]u8,
     joypad: joypad.Joypad,
-    divider: timer.Timer,
     timer: timer.Timer,
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
@@ -91,96 +90,92 @@ pub const MemoryBus = struct {
         for (0x0000..0x8000) |i| {
             memory[i] = game_rom[i];
         }
-        // memory[0x07] = 0x00;
-        // memory[0x10] = 0x80;
-        // memory[0x11] = 0xBF;
-        // memory[0x12] = 0xF3;
-        // memory[0x14] = 0xBF;
-        // memory[0x16] = 0x3F;
-        // memory[0x17] = 0x00;
-        // memory[0x19] = 0xBF;
-        // memory[0x1A] = 0x7F;
-        // memory[0x1B] = 0xFF;
-        // memory[0x1C] = 0x9F;
-        // memory[0x1E] = 0xBF;
-        // memory[0x20] = 0xFF;
-        // memory[0x21] = 0x00;
-        // memory[0x22] = 0x00;
-        // memory[0x23] = 0xBF;
-        // memory[0x24] = 0x77;
-        // memory[0x25] = 0xF3;
-        // memory[0x26] = 0xF1;
-        // memory[0x40] = 0x91;
-        // memory[0x42] = 0x00;
-        // memory[0x43] = 0x00;
-        // memory[0x45] = 0x00;
-        // memory[0x47] = 0xFC;
-        // memory[0x48] = 0xFF;
-        // memory[0x49] = 0xFF;
-        // memory[0x4A] = 0x00;
-        // memory[0x4B] = 0x00;
-        // memory[0xFF] = 0x00;
+        memory[0x07] = 0x00;
+        memory[0x10] = 0x80;
+        memory[0x11] = 0xBF;
+        memory[0x12] = 0xF3;
+        memory[0x14] = 0xBF;
+        memory[0x16] = 0x3F;
+        memory[0x17] = 0x00;
+        memory[0x19] = 0xBF;
+        memory[0x1A] = 0x7F;
+        memory[0x1B] = 0xFF;
+        memory[0x1C] = 0x9F;
+        memory[0x1E] = 0xBF;
+        memory[0x20] = 0xFF;
+        memory[0x21] = 0x00;
+        memory[0x22] = 0x00;
+        memory[0x23] = 0xBF;
+        memory[0x24] = 0x77;
+        memory[0x25] = 0xF3;
+        memory[0x26] = 0xF1;
+        memory[0x40] = 0x91;
+        memory[0x42] = 0x00;
+        memory[0x43] = 0x00;
+        memory[0x45] = 0x00;
+        memory[0x47] = 0xFC;
+        memory[0x48] = 0xFF;
+        memory[0x49] = 0xFF;
+        memory[0x4A] = 0x00;
+        memory[0x4B] = 0x00;
+        memory[0xFF] = 0x00;
 
         // pandocs
-        memory[0xFF00] = 0xCF;
-        memory[0xFF01] = 0x00;
-        memory[0xFF02] = 0x7E;
-        memory[0xFF04] = 0xAB;
-        memory[0xFF05] = 0x00;
-        memory[0xFF06] = 0x00;
-        memory[0xFF07] = 0xF8;
-        memory[0xFF0F] = 0xE1;
-        memory[0xFF10] = 0x80;
-        memory[0xFF11] = 0xBF;
-        memory[0xFF12] = 0xF3;
-        memory[0xFF13] = 0xFF;
-        memory[0xFF14] = 0xBF;
-        memory[0xFF16] = 0x3F;
-        memory[0xFF17] = 0x00;
-        memory[0xFF18] = 0xFF;
-        memory[0xFF19] = 0xBF;
-        memory[0xFF1A] = 0x7F;
-        memory[0xFF1B] = 0xFF;
-        memory[0xFF1C] = 0x9F;
-        memory[0xFF1D] = 0xFF;
-        memory[0xFF1E] = 0xBF;
-        memory[0xFF20] = 0xFF;
-        memory[0xFF21] = 0x00;
-        memory[0xFF22] = 0x00;
-        memory[0xFF23] = 0xBF;
-        memory[0xFF24] = 0x77;
-        memory[0xFF25] = 0xF3;
-        memory[0xFF26] = 0xF1;
-        memory[0xFF40] = 0x91;
-        memory[0xFF41] = 0x85;
-        memory[0xFF42] = 0x00;
-        memory[0xFF43] = 0x00;
-        memory[0xFF44] = 0x00;
-        memory[0xFF45] = 0x00;
-        memory[0xFF46] = 0xFF;
-        memory[0xFF47] = 0xFC;
-        // memory[0xFF48] = 0x?7 ;
-        // memory[0xFF49] = 0x?7 ;
-        memory[0xFF4A] = 0x00;
-        memory[0xFF4B] = 0x00;
-        // memory[0xFF4D] = --   ;
-        // memory[0xFF4F] = --   ;
-        // memory[0xFF51] = --   ;
-        // memory[0xFF52] = --   ;
-        // memory[0xFF53] = --   ;
-        // memory[0xFF54] = --   ;
-        // memory[0xFF55] = --   ;
-        // memory[0xFF56] = --   ;
-        // memory[0xFF68] = --   ;
-        // memory[0xFF69] = --   ;
-        // memory[0xFF6A] = --   ;
-        // memory[0xFF6B] = --   ;
-        // memory[0xFF70] = --   ;
-        memory[0xFFFF] = 0x00;
-
-        var divider = timer.Timer.new();
-        divider.tac.enabled = true;
-        divider.tac.frequency = @intFromEnum(timer.Frequency.Hz16384);
+        // memory[0xFF00] = 0xCF;
+        // memory[0xFF01] = 0x00;
+        // memory[0xFF02] = 0x7E;
+        // memory[0xFF04] = 0xAB;
+        // memory[0xFF05] = 0x00;
+        // memory[0xFF06] = 0x00;
+        // memory[0xFF07] = 0xF8;
+        // memory[0xFF0F] = 0xE1;
+        // memory[0xFF10] = 0x80;
+        // memory[0xFF11] = 0xBF;
+        // memory[0xFF12] = 0xF3;
+        // memory[0xFF13] = 0xFF;
+        // memory[0xFF14] = 0xBF;
+        // memory[0xFF16] = 0x3F;
+        // memory[0xFF17] = 0x00;
+        // memory[0xFF18] = 0xFF;
+        // memory[0xFF19] = 0xBF;
+        // memory[0xFF1A] = 0x7F;
+        // memory[0xFF1B] = 0xFF;
+        // memory[0xFF1C] = 0x9F;
+        // memory[0xFF1D] = 0xFF;
+        // memory[0xFF1E] = 0xBF;
+        // memory[0xFF20] = 0xFF;
+        // memory[0xFF21] = 0x00;
+        // memory[0xFF22] = 0x00;
+        // memory[0xFF23] = 0xBF;
+        // memory[0xFF24] = 0x77;
+        // memory[0xFF25] = 0xF3;
+        // memory[0xFF26] = 0xF1;
+        // memory[0xFF40] = 0x91;
+        // memory[0xFF41] = 0x85;
+        // memory[0xFF42] = 0x00;
+        // memory[0xFF43] = 0x00;
+        // memory[0xFF44] = 0x00;
+        // memory[0xFF45] = 0x00;
+        // memory[0xFF46] = 0xFF;
+        // memory[0xFF47] = 0xFC;
+        // // memory[0xFF48] = 0x?7 ;
+        // // memory[0xFF49] = 0x?7 ;
+        // memory[0xFF4A] = 0x00;
+        // memory[0xFF4B] = 0x00;
+        // // memory[0xFF4D] = --   ;
+        // // memory[0xFF4F] = --   ;
+        // // memory[0xFF51] = --   ;
+        // // memory[0xFF52] = --   ;
+        // // memory[0xFF53] = --   ;
+        // // memory[0xFF54] = --   ;
+        // // memory[0xFF55] = --   ;
+        // // memory[0xFF56] = --   ;
+        // // memory[0xFF68] = --   ;
+        // // memory[0xFF69] = --   ;
+        // // memory[0xFF6A] = --   ;
+        // // memory[0xFF6B] = --   ;
+        // // memory[0xFF70] = --   ;
+        // memory[0xFFFF] = 0x00;
 
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
@@ -190,19 +185,17 @@ pub const MemoryBus = struct {
             .memory = memory,
             .gpu = GPU.new(),
             .joypad = joypad.Joypad.new(),
-            .divider = divider,
             .timer = timer_,
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
         };
     }
 
-    pub fn step(self: *MemoryBus, cycles: u8, div: u8) void {
+    pub fn step(self: *MemoryBus, cycles: u64, div: u8) void {
         if (self.timer.step(cycles, div)) {
             std.debug.print("timer interrupt flag turned on\n", .{});
             self.interrupt_flag.enable_timer = true;
         }
-        // _ = self.divider.step(cycles, div);
         // TODO: should gpu control memory bus? gpu having direct oam write access?
         // seems like delegating memory control to bus makes more sense
         // would need to hand off the enabled interrupts to the bus from cpu
@@ -278,14 +271,14 @@ pub const MemoryBus = struct {
                 0xFF00 => break :blk self.joypad.to_bytes(),
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
-                0xFF04 => break :blk self.divider.tima,
+                0xFF04 => break :blk self.timer.div,
                 0xFF0F => break :blk @bitCast(self.interrupt_flag),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
-                0xFF44 => break :blk self.gpu.ly,
+                // 0xFF44 => break :blk self.gpu.ly,
                 // debug
-                // 0xFF44 => break :blk 0x90,
+                0xFF44 => break :blk 0x90,
                 0xFF45 => break :blk self.gpu.lyc,
                 else => break :blk 0xFF,
             }
@@ -305,7 +298,7 @@ pub const MemoryBus = struct {
                 0xFF01 => break :blk,
                 0xFF02 => break :blk,
                 0xFF04 => {
-                    self.divider.tima = 0;
+                    self.timer.div = 0;
                 },
                 0xFF05 => self.timer.tima = byte,
                 0xFF06 => self.timer.tma = byte,

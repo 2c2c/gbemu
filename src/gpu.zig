@@ -206,7 +206,7 @@ pub const GPU = struct {
         };
     }
 
-    pub fn step(self: *GPU, cycles: u8) IERegister {
+    pub fn step(self: *GPU, cycles: u64) IERegister {
         var request: IERegister = @bitCast(@as(u8, 0));
         if (!self.lcdc.lcd_enable) {
             return request;

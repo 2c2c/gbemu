@@ -7,8 +7,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
-    try draw.main();
-    // try cpumain();
+    // try draw.main();
+    try cpumain();
 }
 
 pub fn cpumain() !void {
@@ -46,7 +46,7 @@ pub fn cpumain() !void {
 
     var cpu = try CPU.new(game_rom);
     while (true) {
-        cpu.step();
+        cpu.frame_walk();
     }
 }
 
