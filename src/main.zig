@@ -7,8 +7,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
-    // try draw.main();
-    try cpumain();
+    try draw.main();
+    // try cpumain();
 }
 
 pub fn cpumain() !void {

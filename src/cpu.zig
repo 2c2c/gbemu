@@ -2044,7 +2044,8 @@ pub const CPU = struct {
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
         if (self.halt_state != HaltState.Enabled) {
-            gameboy_doctor_print(self);
+            // gameboy_doctor_print(self);
+            _ = self.halt_state;
         }
         const before_cycles = self.clock.t_cycles;
 
