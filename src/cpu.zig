@@ -12,6 +12,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const log = std.io.getStdOut().writer();
 
 const HaltState = enum {
+    SwitchedOn,
     Enabled,
     Bugged,
     Disabled,
@@ -613,11 +614,23 @@ pub const CPU = struct {
         // }
         // IE IF checks run before cpu's IME is even checked. halts are ended regardless of if any interrupts
         // actually run
+        if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
+            self.halt_state = HaltState.Enabled;
+            self.pc -%= 1;
+            mutable_instruction = Instruction.HALT;
+        }
         if (self.bus.has_interrupt()) {
-            if (self.halt_state == HaltState.Enabled) {
-                self.is_halted = true;
+            if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
+                self.is_halted = false;
                 self.halt_state = HaltState.Disabled;
-                self.pc +%= 1;
+                self.pc +%= 2;
+                // var byte = self.bus.read_byte(self.pc);
+                // if (byte == 0xCB) {
+                //     byte = self.bus.read_byte(self.pc +% 1);
+                //     mutable_instruction = Instruction.from_byte(byte, true).?;
+                // } else {
+                //     mutable_instruction = Instruction.from_byte(byte, false).?;
+                // }
             }
 
             if (self.ime == IME.Enabled) {
@@ -627,26 +640,37 @@ pub const CPU = struct {
                 self.ime = IME.Disabled;
                 self.push(self.pc);
 
+                // when handling an interrupt,
+                // 1 cycle for interrupt check
+                // 1 cycle for ack
+                // 8 cycles for push
+                // 4 cycles for jump
+                // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
                     std.debug.print("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
+                    self.clock.t_cycles += 14;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
                     std.debug.print("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
+                    self.clock.t_cycles += 14;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
                     std.debug.print("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
+                    self.clock.t_cycles += 14;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
                     std.debug.print("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
+                    self.clock.t_cycles += 14;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
                     std.debug.print("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
+                    self.clock.t_cycles += 14;
                 }
                 // return self.pc;
                 var byte = self.bus.read_byte(self.pc);
@@ -675,20 +699,28 @@ pub const CPU = struct {
                 self.clock.t_cycles += 4;
             },
             Instruction.HALT => {
-                if (self.ime != IME.Enabled and self.bus.has_interrupt()) {
+                if (self.ime == IME.Disabled and self.bus.has_interrupt()) {
                     // fix halt bug sometime
                     // self.halt_state = HaltState.Bugged;
                     // break :blk self.pc + 1;
                     // FIXME:
-                    self.pc = self.pc +% 1;
+                    // self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
                     self.is_halted = true;
-                    self.halt_state = HaltState.Enabled;
+                    if (self.halt_state == HaltState.Enabled) {
+                        self.halt_state = HaltState.Enabled;
+                    } else {
+                        self.halt_state = HaltState.SwitchedOn;
+                    }
                 } else {
-                    self.pc = self.pc +% 1;
+                    // self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
                     self.is_halted = true;
-                    self.halt_state = HaltState.Enabled;
+                    if (self.halt_state == HaltState.Enabled) {
+                        self.halt_state = HaltState.Enabled;
+                    } else {
+                        self.halt_state = HaltState.SwitchedOn;
+                    }
                 }
             },
             Instruction.CALL => |jt| {
@@ -1063,6 +1095,7 @@ pub const CPU = struct {
                         }
                         const offset = @as(u16, self.read_next_byte());
                         self.registers.A = self.bus.read_byte(0xFF00 +% offset);
+                        // at this point A is 0x04, which is correct. why is it going to 0x00?
                         self.pc = self.pc +% 2;
                         self.clock.t_cycles += 12;
                     },
@@ -2010,7 +2043,9 @@ pub const CPU = struct {
     }
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        gameboy_doctor_print(self);
+        if (self.halt_state != HaltState.Enabled) {
+            gameboy_doctor_print(self);
+        }
         const before_cycles = self.clock.t_cycles;
 
         var instruction_byte = self.bus.read_byte(self.pc);
