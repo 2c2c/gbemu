@@ -63,7 +63,7 @@ pub const Joypad = struct {
         };
     }
 
-    pub fn update_joyp_keys(cpu: *CPU) u4 {
+    pub fn update_joyp_keys(cpu: *CPU) void {
         switch (cpu.bus.joypad.joyp.select) {
             .Both => cpu.bus.joypad.joyp.unpressed = ~(cpu.bus.joypad.button.bits | cpu.bus.joypad.dpad.bits),
             .Action => cpu.bus.joypad.joyp.unpressed = ~cpu.bus.joypad.button.bits,

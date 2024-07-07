@@ -1,7 +1,7 @@
 const std = @import("std");
 const MemoryBus = @import("memory_bus.zig").MemoryBus;
 
-const joypad = @import("joypad.zig");
+const Joypad = @import("joypad.zig").Joypad;
 const timer = @import("timer.zig");
 const IERegister = @import("ie_register.zig").IERegister;
 const gpu = @import("gpu.zig");
@@ -1970,6 +1970,10 @@ pub const CPU = struct {
     pub fn frame_walk(self: *CPU) void {
         self.pending_t_cycles = 0;
         var current_cycles = self.clock.t_cycles;
+
+        Joypad.update_joyp_keys(self);
+        // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
+
         if (self.bus.has_interrupt()) {
             std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
