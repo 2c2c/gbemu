@@ -221,6 +221,9 @@ pub const MemoryBus = struct {
             0xFF00...0xFF7F => {
                 return self.read_io(address);
             },
+            gpu.OAM_BEGIN...gpu.OAM_END => {
+                return self.memory[address];
+            },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
                 // std.debug.print("Vram byte read\n", .{});
                 return self.gpu.read_vram(address);
@@ -239,6 +242,10 @@ pub const MemoryBus = struct {
             },
             0xFF00...0xFF7F => {
                 self.write_io(address, byte);
+                return;
+            },
+            gpu.OAM_BEGIN...gpu.OAM_END => {
+                self.gpu.write_oam(address, byte);
                 return;
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {

@@ -4,6 +4,10 @@ const IERegister = @import("ie_register.zig").IERegister;
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
 // const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
+//
+pub const OAM_BEGIN: usize = 0xFE00;
+pub const OAM_END: usize = 0xFE9F;
+pub const OAM_SIZE: usize = OAM_END - OAM_BEGIN + 1;
 
 pub const TilePixelValue = enum {
     /// white
