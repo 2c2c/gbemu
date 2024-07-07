@@ -1,28 +1,9 @@
-/// FF04
-/// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
-const DIV = 0;
-
-/// FF05
-/// increases at rate of TAC frequency
-/// when overflows, resets to TMA + interrupt is called
-const TIMA: u8 = 0;
-/// FF06
-/// Timer Modulo
-///
-const TMA: u8 = 0;
-/// FF07
-const TAC = packed struct {
-    /// 4096, 262144, 65536, 16384
-    frequency: u2,
-    enabled: bool,
-    _padding: u5 = 0,
-};
-
 pub const Frequency = enum(u3) {
     Hz4096,
     Hz262144,
     Hz65536,
     Hz16384,
+    /// effective number of tcycles for a given clockrate
     fn cycles_per_tick(self: Frequency) usize {
         return switch (self) {
             Frequency.Hz4096 => 1024,
@@ -34,9 +15,26 @@ pub const Frequency = enum(u3) {
 };
 
 pub const Timer = struct {
-    tac: TAC,
+    /// FF07
+    /// 00: 4096Hz
+    /// 01: 262144Hz
+    /// 10: 65536Hz
+    /// 11: 16384Hz
+    /// 0b0000_0100 -> enabled
+    tac: packed struct {
+        frequency: u2,
+        enabled: bool,
+        _padding: u5 = 0,
+    },
+    /// FF04
+    /// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
     div: u8,
+    /// FF05
+    /// increases at rate of TAC frequency
+    /// when overflows, resets to TMA + interrupt is called
     tima: u8,
+    /// FF06
+    /// Timer Modulo. tima is set to this value when tima overflows
     tma: u8,
     total_cycles: usize,
 
