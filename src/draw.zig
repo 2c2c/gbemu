@@ -153,14 +153,14 @@ pub fn main() !void {
     var cpu = try setup_cpu();
 
     var frame: usize = 0;
-    // mainLoop: while (true) {
-    // var ev: SDL.SDL_Event = undefined;
-    // while (SDL.SDL_PollEvent(&ev) != 0) {
-    //     if (ev.type == SDL.SDL_QUIT)
-    //         break :mainLoop;
-    // }
+    mainLoop: while (true) {
+        var ev: SDL.SDL_Event = undefined;
+        while (SDL.SDL_PollEvent(&ev) != 0) {
+            if (ev.type == SDL.SDL_QUIT)
+                break :mainLoop;
+        }
 
-    while (true) {
+        // while (true) {
         cpu.frame_walk();
         frame += 1;
         // if (frame % 70224 == 0) {
