@@ -3,9 +3,7 @@ const sdl = @import("SDL.zig/build.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-
     const optimize = b.standardOptimizeOption(.{});
-
     const sdk = sdl.init(b, null);
 
     // link build main exe
