@@ -8,8 +8,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn setup_cpu() !CPU {
-    // const file = try std.fs.cwd().openFile("tetris.gb", .{});
-    const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
+    const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
@@ -156,8 +156,27 @@ pub fn main() !void {
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) != 0) {
-            if (ev.type == SDL.SDL_QUIT)
-                break :mainLoop;
+            switch (ev.type) {
+                SDL.SDL_QUIT => break :mainLoop,
+                SDL.SDL_MOUSEBUTTONUP => {},
+                SDL.SDL_KEYDOWN, SDL.SDL_KEYUP => {
+                    const key = ev.key.keysym.sym;
+                    const is_pressed = ev.key.state == SDL.SDL_KEYDOWN;
+                    switch (key) {
+                        SDL.SDLK_w => cpu.bus.joypad.dpad.pressed.UP = is_pressed,
+                        SDL.SDLK_a => cpu.bus.joypad.dpad.pressed.LEFT = is_pressed,
+                        SDL.SDLK_s => cpu.bus.joypad.dpad.pressed.DOWN = is_pressed,
+                        SDL.SDLK_d => cpu.bus.joypad.dpad.pressed.RIGHT = is_pressed,
+                        SDL.SDLK_j => cpu.bus.joypad.button.pressed.A = is_pressed,
+                        SDL.SDLK_k => cpu.bus.joypad.button.pressed.B = is_pressed,
+                        SDL.SDLK_RETURN => cpu.bus.joypad.button.pressed.START = is_pressed,
+                        SDL.SDLK_QUOTE => cpu.bus.joypad.button.pressed.SELECT = is_pressed,
+                        SDL.SDLK_ESCAPE => break,
+                        else => {},
+                    }
+                },
+                else => {},
+            }
         }
 
         // while (true) {

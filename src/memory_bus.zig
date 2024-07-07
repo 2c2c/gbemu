@@ -275,7 +275,7 @@ pub const MemoryBus = struct {
     pub fn read_io(self: *const MemoryBus, io_addr: u16) u8 {
         return blk: {
             switch (io_addr) {
-                0xFF00 => break :blk self.joypad.to_bytes(),
+                0xFF00 => break :blk self.joypad.joyp.unpressed | 0xF,
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
                 0xFF04 => break :blk self.timer.div,
@@ -296,11 +296,8 @@ pub const MemoryBus = struct {
         const res = blk: {
             switch (io_addr) {
                 0xFF00 => {
-                    if (self.joypad.is_action_row) {
-                        self.joypad.action = @bitCast(byte);
-                    } else {
-                        self.joypad.direction = @bitCast(byte);
-                    }
+                    // possibly need to not overwrite the lower 4 bits
+                    self.joypad.joyp = @bitCast(byte);
                 },
                 0xFF01 => break :blk,
                 0xFF02 => break :blk,
