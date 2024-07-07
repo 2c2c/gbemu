@@ -38,11 +38,6 @@ pub const Timer = struct {
     tma: u8,
     total_cycles: usize,
 
-    // frequency: Frequency,
-    // cycles: usize,
-    // value: u8,
-    // overflow: u8,
-    // enabled: bool,
     pub fn new() Timer {
         return Timer{
             .tac = @bitCast(@as(u8, 0)),
@@ -50,12 +45,6 @@ pub const Timer = struct {
             .tima = 0,
             .tma = 0,
             .total_cycles = 0,
-
-            // .frequency = Frequency.Hz4096,
-            // .cycles = 0,
-            // .value = 0,
-            // .overflow = 0,
-            // .enabled = false,
         };
     }
     pub fn step(self: *Timer, cycles: u64, div: u8) bool {
