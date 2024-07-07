@@ -8,7 +8,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn setup_cpu() !CPU {
-    const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    // const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
@@ -152,19 +153,20 @@ pub fn main() !void {
     var cpu = try setup_cpu();
 
     var frame: usize = 0;
-    mainLoop: while (true) {
-        var ev: SDL.SDL_Event = undefined;
-        while (SDL.SDL_PollEvent(&ev) != 0) {
-            if (ev.type == SDL.SDL_QUIT)
-                break :mainLoop;
-        }
+    // mainLoop: while (true) {
+    // var ev: SDL.SDL_Event = undefined;
+    // while (SDL.SDL_PollEvent(&ev) != 0) {
+    //     if (ev.type == SDL.SDL_QUIT)
+    //         break :mainLoop;
+    // }
 
-        cpu.step();
+    while (true) {
+        cpu.frame_walk();
         frame += 1;
-        if (frame % 70224 == 0) {
-            print_canvas(&cpu);
-            frame = 0;
-        }
+        // if (frame % 70224 == 0) {
+        //     print_canvas(&cpu);
+        //     frame = 0;
+        // }
         _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * SCALE * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
@@ -193,21 +195,4 @@ fn print_canvas(cpu: *CPU) void {
         }
         std.debug.print("\n", .{});
     }
-}
-
-test "random numbers" {
-    var prng = std.rand.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
-        break :blk seed;
-    });
-    const rand = prng.random();
-
-    const a = rand.float(f32);
-    const b = rand.boolean();
-    const c = rand.int(u8);
-    const d = rand.intRangeAtMost(u8, 0, 255);
-
-    //suppress unused constant compile error
-    _ = .{ a, b, c, d };
 }
