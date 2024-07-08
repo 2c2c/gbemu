@@ -2880,22 +2880,22 @@ fn gameboy_doctor_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 2),
         self.bus.read_byte(self.pc +% 3),
     }) catch unreachable;
-    //
-    // std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
-    //     self.registers.A,
-    //     @as(u8, @bitCast(self.registers.F)),
-    //     self.registers.B,
-    //     self.registers.C,
-    //     self.registers.D,
-    //     self.registers.E,
-    //     self.registers.H,
-    //     self.registers.L,
-    //     self.sp,
-    //     self.pc,
-    //     self.bus.read_byte(self.pc),
-    //     self.bus.read_byte(self.pc +% 1),
-    //     self.bus.read_byte(self.pc +% 2),
-    //     self.bus.read_byte(self.pc +% 3),
-    // });
+
+    std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
+        self.registers.A,
+        @as(u8, @bitCast(self.registers.F)),
+        self.registers.B,
+        self.registers.C,
+        self.registers.D,
+        self.registers.E,
+        self.registers.H,
+        self.registers.L,
+        self.sp,
+        self.pc,
+        self.bus.read_byte(self.pc),
+        self.bus.read_byte(self.pc +% 1),
+        self.bus.read_byte(self.pc +% 2),
+        self.bus.read_byte(self.pc +% 3),
+    });
     return;
 }
