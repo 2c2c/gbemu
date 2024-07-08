@@ -585,7 +585,6 @@ pub const CPU = struct {
     pc: u16,
     sp: u16,
     bus: MemoryBus,
-    is_halted: bool,
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
@@ -631,7 +630,6 @@ pub const CPU = struct {
                     // FIXME:
                     self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
-                    self.is_halted = true;
                     self.halt_state = HaltState.Enabled;
                     if (self.halt_state == HaltState.Enabled) {
                         self.halt_state = HaltState.Enabled;
@@ -639,7 +637,6 @@ pub const CPU = struct {
                 } else {
                     self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
-                    self.is_halted = true;
                     self.halt_state = HaltState.Enabled;
                     if (self.halt_state == HaltState.Enabled) {
                         self.halt_state = HaltState.Enabled;
@@ -1986,7 +1983,6 @@ pub const CPU = struct {
 
             if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
                 std.debug.print("IE/IF set while in halt, setting HaltState.Disabled\n", .{});
-                self.is_halted = false;
                 self.halt_state = HaltState.Disabled;
                 self.pc +%= 1;
             }
@@ -1998,7 +1994,6 @@ pub const CPU = struct {
                 std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
                 self.ime = IME.Disabled;
                 self.push(self.pc);
-                self.is_halted = false;
                 self.halt_state = HaltState.Disabled;
 
                 // when handling an interrupt,
@@ -2661,7 +2656,6 @@ pub const CPU = struct {
         //     .pc = 0x00,
         //     .sp = 0x00,
         //     .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
-        //     .is_halted = false,
         //     .halt_state = HaltState.Disabled,
         //     .is_stopped = false,
         //     .ime = IME.Disabled,
@@ -2689,7 +2683,6 @@ pub const CPU = struct {
             .pc = 0x0100,
             .sp = 0xFFFE,
             .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
-            .is_halted = false,
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,
