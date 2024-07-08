@@ -193,7 +193,7 @@ pub const MemoryBus = struct {
 
     pub fn step(self: *MemoryBus, cycles: u64, div: u8) void {
         if (self.timer.step(cycles, div)) {
-            std.debug.print("timer interrupt flag turned on\n", .{});
+            // std.debug.print("timer interrupt flag turned on\n", .{});
             self.interrupt_flag.enable_timer = true;
         }
         // TODO: should gpu control memory bus? gpu having direct oam write access?
@@ -279,14 +279,18 @@ pub const MemoryBus = struct {
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
                 0xFF04 => break :blk self.timer.div,
+                0xFF05 => break :blk self.timer.tima,
+                0xFF06 => break :blk self.timer.tma,
+                0xFF07 => break :blk @bitCast(self.timer.tac),
                 0xFF0F => break :blk @bitCast(self.interrupt_flag),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
-                0xFF44 => break :blk self.gpu.ly,
+                // 0xFF44 => break :blk self.gpu.ly,
                 // debug
-                // 0xFF44 => break :blk 0x90,
+                0xFF44 => break :blk 0x90,
                 0xFF45 => break :blk self.gpu.lyc,
+                0xFFFF => break :blk @bitCast(self.interrupt_enable),
                 else => break :blk 0xFF,
             }
         };
@@ -378,6 +382,9 @@ pub const MemoryBus = struct {
                     for (0x00..0x100) |i| {
                         self.memory[i] = 0;
                     }
+                },
+                0xFFFF => {
+                    self.interrupt_enable = @bitCast(byte);
                 },
 
                 else => break :blk,
