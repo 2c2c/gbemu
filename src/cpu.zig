@@ -630,22 +630,20 @@ pub const CPU = struct {
                     // self.halt_state = HaltState.Bugged;
                     // break :blk self.pc + 1;
                     // FIXME:
-                    // self.pc = self.pc +% 1;
+                    self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
                     self.is_halted = true;
+                    self.halt_state = HaltState.Enabled;
                     if (self.halt_state == HaltState.Enabled) {
                         self.halt_state = HaltState.Enabled;
-                    } else {
-                        self.halt_state = HaltState.SwitchedOn;
                     }
                 } else {
-                    // self.pc = self.pc +% 1;
+                    self.pc = self.pc +% 1;
                     self.clock.t_cycles += 4;
                     self.is_halted = true;
+                    self.halt_state = HaltState.Enabled;
                     if (self.halt_state == HaltState.Enabled) {
                         self.halt_state = HaltState.Enabled;
-                    } else {
-                        self.halt_state = HaltState.SwitchedOn;
                     }
                 }
             },
@@ -1971,21 +1969,29 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         var current_cycles = self.clock.t_cycles;
 
-        if (self.halt_state != HaltState.Enabled) {
-            gameboy_doctor_print(self);
-            // _ = self.halt_state;
+        gameboy_doctor_print(self);
+        const opcode = self.bus.read_byte(self.pc);
+        if (opcode == 0x76) {
+            // halt investigation
+            std.debug.print("halt opcode\n", .{});
         }
+        // if (self.halt_state != HaltState.Enabled) {
+        //     gameboy_doctor_print(self);
+        //     // _ = self.halt_state;
+        // }
+        //
         Joypad.update_joyp_keys(self);
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
         if (self.bus.has_interrupt()) {
             // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
-            // if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
-            //     self.is_halted = false;
-            //     self.halt_state = HaltState.Disabled;
-            //     self.pc +%= 2;
-            // }
+            if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
+                std.debug.print("IE/IF set while in halt, setting HaltState.Disabled\n", .{});
+                self.is_halted = false;
+                self.halt_state = HaltState.Disabled;
+                self.pc +%= 1;
+            }
 
             if (self.ime == IME.Enabled) {
                 std.debug.print("IME.Enabled PC=0x{x}\n", .{self.pc});
@@ -2044,6 +2050,7 @@ pub const CPU = struct {
         current_cycles = self.clock.t_cycles;
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
+            // self.pc -%= 1;
             self.clock.t_cycles += 4;
         } else {
             self.step();

@@ -58,11 +58,11 @@ pub const Timer = struct {
 
         const freq: Frequency = @enumFromInt(self.tac.frequency);
         const cycles_per_tick = freq.cycles_per_tick();
-        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
-        //     self.total_cycles,
-        //     cycles_per_tick,
-        //     self.tima,
-        // });
+        std.debug.print("tc {}, cpt {}, tima {}\n", .{
+            self.total_cycles,
+            cycles_per_tick,
+            self.tima,
+        });
         const tac_overflow = blk: {
             if (self.total_cycles >= cycles_per_tick) {
                 self.total_cycles = self.total_cycles % cycles_per_tick;
