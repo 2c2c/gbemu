@@ -237,7 +237,6 @@ const Instruction = union(enum) {
             0x04 => return Instruction{ .INC = ArithmeticTarget.B },
             0x05 => return Instruction{ .DEC = ArithmeticTarget.B },
             0x06 => return Instruction{ .LD = LoadType{ .Byte = .{ .target = LoadByteTarget.B, .source = LoadByteSource.D8 } } },
-
             0x07 => return Instruction.RLCA,
             0x08 => return Instruction{ .LD = .IndirectFromSP },
             0x09 => return Instruction{ .WADD = WideArithmeticTarget.BC },
@@ -1969,7 +1968,6 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         var current_cycles = self.clock.t_cycles;
 
-        gameboy_doctor_print(self);
         const opcode = self.bus.read_byte(self.pc);
         if (opcode == 0x76) {
             // halt investigation
@@ -2048,6 +2046,8 @@ pub const CPU = struct {
 
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
+
+        gameboy_doctor_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             // self.pc -%= 1;
