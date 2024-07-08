@@ -13,6 +13,7 @@ pub fn setup_cpu() !CPU {
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
+    // const file = try std.fs.cwd().openFile("flappy_boy.gb", .{});
     defer file.close();
 
     const size = try file.getEndPos();

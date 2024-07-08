@@ -50,25 +50,6 @@ const Object = packed struct {
     },
 };
 
-/// FF04
-/// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
-const DIV = 0;
-
-/// FF05
-/// when overflows, resets to TMA + interrupt is called
-const TIMA: u8 = 0;
-/// FF06
-/// Timer Modulo
-///
-const TMA: u8 = 0;
-/// FF07
-const TAC = packed struct {
-    /// 4096, 262144, 65536, 16384
-    frequency: u2,
-    enabled: bool,
-    _padding: u5 = 0,
-};
-
 /// FF40 LCD Control
 const LCDC = packed struct {
     bg_enable: bool,
@@ -226,7 +207,8 @@ pub const GPU = struct {
                     self.cycles = self.cycles % 204;
                     self.ly += 1;
 
-                    if (self.ly >= 144) {
+                    // if (self.ly >= 144) {
+                    if (self.ly >= 90) {
                         self.stat.ppu_mode = 0b01;
                         request.enable_vblank = true;
                         if (self.stat.mode_1_interrupt_enabled) {
