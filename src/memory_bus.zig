@@ -193,7 +193,7 @@ pub const MemoryBus = struct {
 
     pub fn step(self: *MemoryBus, cycles: u64, div: u8) void {
         if (self.timer.step(cycles, div)) {
-            std.debug.print("timer interrupt flag turned on\n", .{});
+            // std.debug.print("timer interrupt flag turned on\n", .{});
             self.interrupt_flag.enable_timer = true;
         }
 

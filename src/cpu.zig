@@ -1971,11 +1971,15 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         var current_cycles = self.clock.t_cycles;
 
+        if (self.halt_state != HaltState.Enabled) {
+            gameboy_doctor_print(self);
+            // _ = self.halt_state;
+        }
         Joypad.update_joyp_keys(self);
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
         if (self.bus.has_interrupt()) {
-            std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
+            // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
             // if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
             //     self.is_halted = false;
@@ -2050,10 +2054,6 @@ pub const CPU = struct {
 
     pub fn step(self: *CPU) void {
         // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        if (self.halt_state != HaltState.Enabled) {
-            gameboy_doctor_print(self);
-            // _ = self.halt_state;
-        }
         var instruction_byte = self.bus.read_byte(self.pc);
         const prefixed = instruction_byte == 0xCB;
         if (prefixed) {
