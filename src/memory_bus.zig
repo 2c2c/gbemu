@@ -193,9 +193,10 @@ pub const MemoryBus = struct {
 
     pub fn step(self: *MemoryBus, cycles: u64, div: u8) void {
         if (self.timer.step(cycles, div)) {
-            // std.debug.print("timer interrupt flag turned on\n", .{});
+            std.debug.print("timer interrupt flag turned on\n", .{});
             self.interrupt_flag.enable_timer = true;
         }
+
         // TODO: should gpu control memory bus? gpu having direct oam write access?
         // seems like delegating memory control to bus makes more sense
         // would need to hand off the enabled interrupts to the bus from cpu

@@ -1,8 +1,10 @@
-pub const Frequency = enum(u3) {
-    Hz4096,
-    Hz262144,
-    Hz65536,
-    Hz16384,
+const std = @import("std");
+
+pub const Frequency = enum(u2) {
+    Hz4096 = 0b00,
+    Hz262144 = 0b01,
+    Hz65536 = 0b10,
+    Hz16384 = 0b11,
     /// effective number of tcycles for a given clockrate
     fn cycles_per_tick(self: Frequency) usize {
         return switch (self) {
@@ -56,6 +58,11 @@ pub const Timer = struct {
 
         const freq: Frequency = @enumFromInt(self.tac.frequency);
         const cycles_per_tick = freq.cycles_per_tick();
+        std.debug.print("tc {}, cpt {}, tima {}\n", .{
+            self.total_cycles,
+            cycles_per_tick,
+            self.tima,
+        });
         const tac_overflow = blk: {
             if (self.total_cycles >= cycles_per_tick) {
                 self.total_cycles = self.total_cycles % cycles_per_tick;

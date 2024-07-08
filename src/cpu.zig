@@ -1975,7 +1975,7 @@ pub const CPU = struct {
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
         if (self.bus.has_interrupt()) {
-            // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
+            std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
             // if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
             //     self.is_halted = false;
@@ -2026,15 +2026,14 @@ pub const CPU = struct {
                     self.clock.t_cycles += 20;
                 }
                 std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
-                // gameboy_doctor_print(self);
             }
         }
         if (self.ime == IME.EILagCycle) {
             std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
             self.ime = IME.Enabled;
         }
+        // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-        // consume
         self.bus.step(self.pending_t_cycles, self.clock.bits.div);
 
         self.pending_t_cycles = 0;
@@ -2046,7 +2045,6 @@ pub const CPU = struct {
             self.step();
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-        // consume
         self.bus.step(self.pending_t_cycles, self.clock.bits.div);
     }
 
@@ -2882,22 +2880,22 @@ fn gameboy_doctor_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 2),
         self.bus.read_byte(self.pc +% 3),
     }) catch unreachable;
-
-    std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
-        self.registers.A,
-        @as(u8, @bitCast(self.registers.F)),
-        self.registers.B,
-        self.registers.C,
-        self.registers.D,
-        self.registers.E,
-        self.registers.H,
-        self.registers.L,
-        self.sp,
-        self.pc,
-        self.bus.read_byte(self.pc),
-        self.bus.read_byte(self.pc +% 1),
-        self.bus.read_byte(self.pc +% 2),
-        self.bus.read_byte(self.pc +% 3),
-    });
+    //
+    // std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
+    //     self.registers.A,
+    //     @as(u8, @bitCast(self.registers.F)),
+    //     self.registers.B,
+    //     self.registers.C,
+    //     self.registers.D,
+    //     self.registers.E,
+    //     self.registers.H,
+    //     self.registers.L,
+    //     self.sp,
+    //     self.pc,
+    //     self.bus.read_byte(self.pc),
+    //     self.bus.read_byte(self.pc +% 1),
+    //     self.bus.read_byte(self.pc +% 2),
+    //     self.bus.read_byte(self.pc +% 3),
+    // });
     return;
 }
