@@ -350,10 +350,10 @@ pub const MemoryBus = struct {
 
                         self.gpu.stat.ppu_mode = 0;
                         self.gpu.stat.lyc_ly_compare = false;
-                        self.gpu.stat.mode_0_interrupt_enabled = false;
-                        self.gpu.stat.mode_1_interrupt_enabled = false;
-                        self.gpu.stat.mode_2_interrupt_enabled = false;
-                        self.gpu.stat.lyc_int_interrupt_enabled = false;
+                        // self.gpu.stat.mode_0_interrupt_enabled = false;
+                        // self.gpu.stat.mode_1_interrupt_enabled = false;
+                        // self.gpu.stat.mode_2_interrupt_enabled = false;
+                        // self.gpu.stat.lyc_int_interrupt_enabled = false;
                     }
                 },
                 0xFF41 => {

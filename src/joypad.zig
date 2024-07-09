@@ -13,7 +13,7 @@ const Joyp = packed struct {
 
 pub const Joypad = struct {
     joyp: packed struct {
-        unpressed: u4 = 0x0,
+        unpressed: u4 = 0xF,
         select: enum(u2) {
             Both = 0b00,
             Action = 0b01,

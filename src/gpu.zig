@@ -357,9 +357,10 @@ pub const GPU = struct {
         defer arena_allocator.deinit();
         const allocator = arena_allocator.allocator();
         var renderable_objects = std.ArrayList(Object).init(allocator);
+        defer renderable_objects.deinit();
         // todo drop the static object storage, just cast and handle x/y offsets here
         for (self.objects) |object| {
-            const start_y = object.y - 0x10;
+            const start_y = object.y - 16;
             const end_y = start_y + object_height;
             if (start_y <= self.ly and end_y > self.ly) {
                 renderable_objects.append(object) catch unreachable;
@@ -377,6 +378,8 @@ pub const GPU = struct {
         for (renderable_objects.items) |object| {
             if (object.x - 0x08 >= 0 and object.x - 0x08 <= SCREEN_WIDTH) {
                 // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - object.y - 0x10) else ((self.ly - object.y - 0x10) & 7);
+                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
+                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
                 const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
 
                 const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
@@ -391,16 +394,19 @@ pub const GPU = struct {
                     const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
                     const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
 
-                    if (!object.attributes.priority) {
-                        continue;
-                    }
-
-                    if (color == TilePixelValue.Zero) {
+                    // goofy
+                    if (object.attributes.priority and
+                        self.canvas[buffer_index] == 0xFF and
+                        self.canvas[buffer_index +% 1] == 0xFF and
+                        self.canvas[buffer_index +% 2] == 0xFF)
+                    {
+                        std.debug.print("TileColorZero\n", .{});
                         continue;
                     }
                     // TODO: can sprites write on 00 bg palette? i saw code that suggested
 
                     if (object.x - 8 + x >= SCREEN_WIDTH) {
+                        std.debug.print("x dont fit\n", .{});
                         continue;
                     }
 
