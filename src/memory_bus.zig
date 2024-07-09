@@ -329,8 +329,8 @@ pub const MemoryBus = struct {
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
                 // debug
-                0xFF44 => break :blk 0x90,
-                // 0xFF44 => break :blk self.gpu.ly,
+                // 0xFF44 => break :blk 0x90,
+                0xFF44 => break :blk self.gpu.ly,
                 0xFF45 => break :blk self.gpu.lyc,
                 0xFF47 => break :blk @bitCast(self.gpu.bgp),
                 0xFF48 => break :blk @bitCast(self.gpu.obp[0]),

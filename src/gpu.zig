@@ -36,9 +36,9 @@ fn empty_tile() Tile {
 
 /// FE00-FE9F
 /// 40 objects at 4 bytes each
-const Object = packed struct {
-    y: u8,
-    x: u8,
+const Object = struct {
+    y: i16,
+    x: i16,
     tile_index: u8,
     attributes: packed struct {
         // gbc
@@ -209,8 +209,8 @@ pub const GPU = struct {
                     self.cycles = self.cycles % 204;
                     self.ly += 1;
 
-                    // if (self.ly >= 144) {
-                    if (self.ly >= 90) {
+                    if (self.ly >= 144) {
+                        // if (self.ly >= 90) {
                         self.stat.ppu_mode = 0b01;
                         request.enable_vblank = true;
                         if (self.stat.mode_1_interrupt_enabled) {
@@ -305,7 +305,8 @@ pub const GPU = struct {
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
-                    const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    // const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
                     var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
                     if (tile_index_signed < 0) {
                         addr -= @abs(tile_index_signed * 16);
@@ -318,14 +319,15 @@ pub const GPU = struct {
                 y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
                 const tile_y = y % 8;
 
-                const temp_x = x + self.background_viewport.scx;
+                const temp_x = x +% self.background_viewport.scx;
                 tile_x = @truncate(temp_x % 8);
 
                 const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
-                    const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    // const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
                     var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
                     if (tile_index_signed < 0) {
                         addr -= @abs(tile_index_signed * 16);
@@ -338,7 +340,7 @@ pub const GPU = struct {
 
             const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-            const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+            const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
             const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(self.bgp, color_id));
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
@@ -361,7 +363,8 @@ pub const GPU = struct {
         defer renderable_objects.deinit();
         // todo drop the static object storage, just cast and handle x/y offsets here
         for (self.objects) |object| {
-            const start_y = object.y - 16;
+            // std.debug.print("object.y {}\n", .{object.y});
+            const start_y = object.y;
             const end_y = start_y + object_height;
             if (start_y <= self.ly and end_y > self.ly) {
                 renderable_objects.append(object) catch unreachable;
@@ -377,22 +380,29 @@ pub const GPU = struct {
         // }
 
         for (renderable_objects.items) |object| {
-            if (object.x - 0x08 >= 0 and object.x - 0x08 <= SCREEN_WIDTH) {
+            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
                 // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - object.y - 0x10) else ((self.ly - object.y - 0x10) & 7);
                 // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
                 // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
-                const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
+                // std.debug.print("ly {}, object.y {} - height {}\n", .{ self.ly, object.y, object_height });
+                var tile_y: i16 = undefined;
+                if (self.lcdc.obj_size) {
+                    tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
+                } else {
+                    tile_y = if (object.attributes.y_flip) 7 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 7);
+                }
 
                 const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
 
-                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, (object.x - 8)) * 3;
+                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(u16, @bitCast(object.x)) * 3;
 
                 for (0..8) |x| {
-                    const tile_line = self.read_vram16(0x8000 + (@as(u16, object.tile_index) << 4) + (@as(u16, tile_y) << 1));
-                    const tile_x: u3 = if (object.attributes.x_flip) 7 - @as(u3, @truncate(x)) else @as(u3, @truncate(x));
+                    const tile_line = self.read_vram16(0x8000 + (@as(u16, object.tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
+                    const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
                     const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
                     const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                    const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+                    // const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+                    const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                     const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
 
                     // goofy
@@ -406,10 +416,10 @@ pub const GPU = struct {
                     }
                     // TODO: can sprites write on 00 bg palette? i saw code that suggested
 
-                    if (object.x - 8 + x >= SCREEN_WIDTH) {
-                        // std.debug.print("x dont fit\n", .{});
-                        continue;
-                    }
+                    // if (object.x - 8 + x >= SCREEN_WIDTH) {
+                    //     // std.debug.print("x dont fit\n", .{});
+                    //     continue;
+                    // }
 
                     self.canvas[buffer_index] = color.to_color();
                     self.canvas[buffer_index +% 1] = color.to_color();
@@ -471,8 +481,8 @@ pub const GPU = struct {
         // objects are 4 bytes, select the byte and switch on which part of the object to update
         const byte = (addr - OAM_BEGIN) % 4;
         switch (byte) {
-            0 => self.objects[object_index].y = value + 0x10,
-            1 => self.objects[object_index].x = value + 0x08,
+            0 => self.objects[object_index].y = value -% 0x10,
+            1 => self.objects[object_index].x = value -% 0x08,
             2 => self.objects[object_index].tile_index = value,
             3 => self.objects[object_index].attributes = @bitCast(value),
             else => {},
