@@ -216,48 +216,89 @@ pub const MemoryBus = struct {
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
         switch (address) {
+            0x0000...0x00FF => {
+                // return self.boot_rom[address];
+                return self.memory[address];
+            },
+            0x0100...0x7FFF => {
+                // std.debug.print("Attempted read from rom\n", .{});
+                return self.memory[address];
+            },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
                 // std.debug.print("Vram byte read\n", .{});
                 return self.gpu.read_vram(address);
             },
+            0xA000...0xBFFF => {
+                // eram
+                // std.debug.print("Attempted write to external ram\n", .{});
+                return self.memory[address];
+            },
+            0xC000...0xFDFF => {
+                // wram eram
+                // self.memory[address] = byte;
+                return self.memory[address];
+            },
             gpu.OAM_BEGIN...gpu.OAM_END => {
                 return self.memory[address];
+            },
+            0xFEA0...0xFEFF => {
+                // std.debug.print("Attempted read from unusable memory\n", .{});
             },
             0xFF00...0xFF7F => {
                 return self.read_io(address);
             },
+            0xFF80...0xFFFE => {
+                return self.memory[address];
+            },
             0xFFFF => {
                 return @bitCast(self.interrupt_enable);
             },
-            else => {
-                // std.debug.print("Non Vram byte read\n", .{});
-            },
         }
-        return self.memory[address];
+        return 0xFF;
     }
     pub fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
         switch (address) {
+            0x0000...0x7FFF => {
+                // std.debug.print("Attempted write to rom\n", .{});
+                self.memory[address] = byte;
+                return;
+            },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
                 self.gpu.write_vram(address, byte);
+                return;
+            },
+            0xA000...0xBFFF => {
+                // std.debug.print("Attempted write to external ram\n", .{});
+                self.memory[address] = byte;
+                return;
+            },
+            0xC000...0xFDFF => {
+                // self.memory[address] = byte;
+                self.memory[address] = byte;
                 return;
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
                 self.gpu.write_oam(address, byte);
                 return;
             },
+            0xFEA0...0xFEFF => {
+                // std.debug.print("Attempted write to unusable memory\n", .{});
+                // self.memory[address] = byte;
+                return;
+            },
             0xFF00...0xFF7F => {
                 self.write_io(address, byte);
+                return;
+            },
+            0xFF80...0xFFFE => {
+                self.memory[address] = byte;
                 return;
             },
             0xFFFF => {
                 self.interrupt_enable = @bitCast(byte);
                 return;
             },
-            else => {
-                // std.debug.print("Implement other writes\n", .{});
-            },
         }
-        self.memory[address] = byte;
     }
 
     pub fn read_word(self: *MemoryBus, address: u16) u16 {
