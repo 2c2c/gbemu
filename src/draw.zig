@@ -8,12 +8,12 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn setup_cpu() !CPU {
-    const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
+    // const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
     // const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
-    // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
+    const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("flappy_boy.gb", .{});
     defer file.close();
 

@@ -287,9 +287,9 @@ pub const MemoryBus = struct {
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
-                0xFF44 => break :blk self.gpu.ly,
                 // debug
-                // 0xFF44 => break :blk 0x90,
+                0xFF44 => break :blk 0x90,
+                // 0xFF44 => break :blk self.gpu.ly,
                 0xFF45 => break :blk self.gpu.lyc,
                 0xFF47 => break :blk @bitCast(self.gpu.bgp),
                 0xFF48 => break :blk @bitCast(self.gpu.obp[0]),
@@ -309,8 +309,10 @@ pub const MemoryBus = struct {
                     // possibly need to not overwrite the lower 4 bits
                     self.joypad.joyp = @bitCast(byte);
                 },
-                0xFF01 => break :blk,
-                0xFF02 => break :blk,
+                // 0xFF01 => break :blk,
+                // 0xFF02 => break :blk,
+                0xFF01 => std.debug.print("{c}", .{byte}),
+                0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.div = 0;
                 },

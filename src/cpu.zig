@@ -599,10 +599,6 @@ pub const CPU = struct {
     },
     fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
-
-        if (self.pc == 0xC2C0) {
-            std.debug.print("Instruction {}\n", .{mutable_instruction});
-        }
         // halt bug isnt needed to pass blargg fully i think
         //
         // if (self.halt_state == HaltState.Bugged) {
@@ -1008,11 +1004,6 @@ pub const CPU = struct {
                         }
                     },
                     LoadType.AFromByteAddress => {
-                        if (self.pc == 0xC34E) {
-                            // FIXME: in instr2, an IF bit is getting 0x04 -> 0x00 incorrectly before reaching here on this PC
-                            // causing A to return 0 instead of 4
-                            std.debug.print("LD A (FF00 + a8)\n", .{});
-                        }
                         const offset = @as(u16, self.read_next_byte());
                         self.registers.A = self.bus.read_byte(0xFF00 +% offset);
                         // at this point A is 0x04, which is correct. why is it going to 0x00?
@@ -1965,16 +1956,6 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         var current_cycles = self.clock.t_cycles;
 
-        const opcode = self.bus.read_byte(self.pc);
-        if (opcode == 0x76) {
-            // halt investigation
-            std.debug.print("halt opcode\n", .{});
-        }
-        // if (self.halt_state != HaltState.Enabled) {
-        //     gameboy_doctor_print(self);
-        //     // _ = self.halt_state;
-        // }
-        //
         Joypad.update_joyp_keys(self);
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
@@ -1982,16 +1963,16 @@ pub const CPU = struct {
             // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
             if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
-                std.debug.print("IE/IF set while in halt, setting HaltState.Disabled\n", .{});
+                // std.debug.print("IE/IF set while in halt, setting HaltState.Disabled\n", .{});
                 self.halt_state = HaltState.Disabled;
                 self.pc +%= 1;
             }
 
             if (self.ime == IME.Enabled) {
-                std.debug.print("IME.Enabled PC=0x{x}\n", .{self.pc});
-                std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
-                std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
-                std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
+                // std.debug.print("IME.Enabled PC=0x{x}\n", .{self.pc});
+                // std.debug.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
+                // std.debug.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
+                // std.debug.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
                 self.ime = IME.Disabled;
                 self.push(self.pc);
                 self.halt_state = HaltState.Disabled;
@@ -2003,36 +1984,36 @@ pub const CPU = struct {
                 // 4 cycles for jump
                 // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
-                    std.debug.print("HANDLING VBLANK\n", .{});
+                    // std.debug.print("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
-                    std.debug.print("HANDLING LCDSTAT\n", .{});
+                    // std.debug.print("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
-                    std.debug.print("HANDLING TIMER\n", .{});
+                    // std.debug.print("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
-                    std.debug.print("HANDLING SERIAL\n", .{});
+                    // std.debug.print("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    std.debug.print("HANDLING JOYPAD\n", .{});
+                    // std.debug.print("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
                     self.clock.t_cycles += 20;
                 }
-                std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
+                // std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
             }
         }
         if (self.ime == IME.EILagCycle) {
-            std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
+            // std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
             self.ime = IME.Enabled;
         }
         // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
@@ -2043,6 +2024,7 @@ pub const CPU = struct {
         current_cycles = self.clock.t_cycles;
 
         // gameboy_doctor_print(self);
+        beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             // self.pc -%= 1;
@@ -2180,7 +2162,8 @@ pub const CPU = struct {
             .zero = sum == 0,
             .subtract = true,
             .carry = overflow == 1,
-            .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - carry) < 0),
+            // .half_carry = (((@as(i16, self.registers.A) & 0xF) - (@as(i16, value) & 0xF) - carry) < 0),
+            .half_carry = (self.registers.A & 0xF) < (value & 0xF) + carry,
         };
 
         return sum;
@@ -2882,6 +2865,43 @@ fn gameboy_doctor_print(self: *CPU) void {
     }) catch unreachable;
 
     std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
+        self.registers.A,
+        @as(u8, @bitCast(self.registers.F)),
+        self.registers.B,
+        self.registers.C,
+        self.registers.D,
+        self.registers.E,
+        self.registers.H,
+        self.registers.L,
+        self.sp,
+        self.pc,
+        self.bus.read_byte(self.pc),
+        self.bus.read_byte(self.pc +% 1),
+        self.bus.read_byte(self.pc +% 2),
+        self.bus.read_byte(self.pc +% 3),
+    });
+    return;
+}
+
+fn beeg_print(self: *CPU) void {
+    log.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+        self.registers.A,
+        @as(u8, @bitCast(self.registers.F)),
+        self.registers.B,
+        self.registers.C,
+        self.registers.D,
+        self.registers.E,
+        self.registers.H,
+        self.registers.L,
+        self.sp,
+        self.pc,
+        self.bus.read_byte(self.pc),
+        self.bus.read_byte(self.pc +% 1),
+        self.bus.read_byte(self.pc +% 2),
+        self.bus.read_byte(self.pc +% 3),
+    }) catch unreachable;
+
+    std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         self.registers.A,
         @as(u8, @bitCast(self.registers.F)),
         self.registers.B,

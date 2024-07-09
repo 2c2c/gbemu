@@ -209,8 +209,8 @@ pub const GPU = struct {
                     self.cycles = self.cycles % 204;
                     self.ly += 1;
 
-                    if (self.ly >= 144) {
-                        // if (self.ly >= 90) {
+                    // if (self.ly >= 144) {
+                    if (self.ly >= 90) {
                         self.stat.ppu_mode = 0b01;
                         request.enable_vblank = true;
                         if (self.stat.mode_1_interrupt_enabled) {
@@ -279,7 +279,8 @@ pub const GPU = struct {
     fn render_bg(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
         var x: u8 = 0;
-        var y = self.ly + self.background_viewport.scy;
+        // std.debug.print("render_bg ly={x} scy={x}\n", .{ self.ly, self.background_viewport.scy });
+        var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
         // const win_x: i16 = @as(i16, @as(i8, @bitCast(self.window_position.wx))) - @as(u16, 7);
         const win_x: u8 = @max(self.window_position.wx, 7) - 7;
         // const win_x: u8 = @max(self.window_position.wx, 7);
@@ -314,7 +315,7 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
             } else if (self.lcdc.bg_enable) {
-                y = self.ly + self.background_viewport.scy;
+                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
                 const tile_y = y % 8;
 
                 const temp_x = x + self.background_viewport.scx;
@@ -369,7 +370,7 @@ pub const GPU = struct {
                 break;
             }
         }
-        std.debug.print("num objects {}\n", .{renderable_objects.items.len});
+        // std.debug.print("num objects {}\n", .{renderable_objects.items.len});
         // if (!self.lcdc.obj_size) {
         //     // ?
         //     return;
@@ -400,13 +401,13 @@ pub const GPU = struct {
                         self.canvas[buffer_index +% 1] == 0xFF and
                         self.canvas[buffer_index +% 2] == 0xFF)
                     {
-                        std.debug.print("TileColorZero\n", .{});
+                        // std.debug.print("TileColorZero\n", .{});
                         continue;
                     }
                     // TODO: can sprites write on 00 bg palette? i saw code that suggested
 
                     if (object.x - 8 + x >= SCREEN_WIDTH) {
-                        std.debug.print("x dont fit\n", .{});
+                        // std.debug.print("x dont fit\n", .{});
                         continue;
                     }
 
