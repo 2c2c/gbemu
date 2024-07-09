@@ -75,7 +75,7 @@ const LCDC = packed struct {
 };
 
 /// FF41 STAT LCD Status
-const Stat = packed struct {
+pub const Stat = packed struct {
     /// 0: HBlank, 1: VBlank, 2: OAM, 3: VRAM
     ppu_mode: u2,
     lyc_ly_compare: bool,
@@ -209,8 +209,8 @@ pub const GPU = struct {
                     self.cycles = self.cycles % 204;
                     self.ly += 1;
 
-                    // if (self.ly >= 144) {
-                    if (self.ly >= 90) {
+                    if (self.ly >= 144) {
+                        // if (self.ly >= 90) {
                         self.stat.ppu_mode = 0b01;
                         request.enable_vblank = true;
                         if (self.stat.mode_1_interrupt_enabled) {
@@ -282,6 +282,7 @@ pub const GPU = struct {
         var y = self.ly + self.background_viewport.scy;
         // const win_x: i16 = @as(i16, @as(i8, @bitCast(self.window_position.wx))) - @as(u16, 7);
         const win_x: u8 = @max(self.window_position.wx, 7) - 7;
+        // const win_x: u8 = @max(self.window_position.wx, 7);
         const win_y = self.window_position.wy;
 
         const render_window = self.lcdc.window_enable and win_y <= self.ly and win_x <= x;
@@ -293,7 +294,7 @@ pub const GPU = struct {
         while (x < 160) : (x += 1) {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
-            if (render_window and win_x <= x) {
+            if (render_window and win_x <= x and self.lcdc.bg_enable) {
                 y = self.ly - win_y;
                 const temp_x = x - win_x;
                 const tile_y = y & 7;
@@ -358,20 +359,28 @@ pub const GPU = struct {
         var renderable_objects = std.ArrayList(Object).init(allocator);
         // todo drop the static object storage, just cast and handle x/y offsets here
         for (self.objects) |object| {
-            if (object.y <= self.ly and object.y + object_height > self.ly) {
+            const start_y = object.y - 0x10;
+            const end_y = start_y + object_height;
+            if (start_y <= self.ly and end_y > self.ly) {
                 renderable_objects.append(object) catch unreachable;
             }
             if (renderable_objects.items.len == 10) {
                 break;
             }
         }
+        // if (!self.lcdc.obj_size) {
+        //     // ?
+        //     return;
+        // }
 
         for (renderable_objects.items) |object| {
-            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
-                const tile_y = if (object.attributes.y_flip) object.y - self.ly else (self.ly - object.y) & 7;
+            if (object.x - 0x08 >= 0 and object.x - 0x08 <= SCREEN_WIDTH) {
+                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - object.y - 0x10) else ((self.ly - object.y - 0x10) & 7);
+                const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
+
                 const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
 
-                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 4 + @as(usize, object.x) * 4;
+                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, (object.x - 8)) * 3;
 
                 for (0..8) |x| {
                     const tile_line = self.read_vram16(0x8000 + (@as(u16, object.tile_index) << 4) + (@as(u16, tile_y) << 1));
@@ -390,7 +399,7 @@ pub const GPU = struct {
                     }
                     // TODO: can sprites write on 00 bg palette? i saw code that suggested
 
-                    if (object.x + x >= SCREEN_WIDTH) {
+                    if (object.x - 8 + x >= SCREEN_WIDTH) {
                         continue;
                     }
 

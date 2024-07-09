@@ -340,9 +340,23 @@ pub const MemoryBus = struct {
                 0xFF30...0xFF3F => {},
                 0xFF40 => {
                     self.gpu.lcdc = @bitCast(byte);
+                    if (!self.gpu.lcdc.lcd_enable) {
+                        self.gpu.ly = 0;
+
+                        self.gpu.stat.ppu_mode = 0;
+                        self.gpu.stat.lyc_ly_compare = false;
+                        self.gpu.stat.mode_0_interrupt_enabled = false;
+                        self.gpu.stat.mode_1_interrupt_enabled = false;
+                        self.gpu.stat.mode_2_interrupt_enabled = false;
+                        self.gpu.stat.lyc_int_interrupt_enabled = false;
+                    }
                 },
                 0xFF41 => {
-                    self.gpu.stat = @bitCast(byte);
+                    var stat: gpu.Stat = @bitCast(byte);
+                    stat.ppu_mode = self.gpu.stat.ppu_mode;
+                    stat.lyc_ly_compare = self.gpu.stat.lyc_ly_compare;
+
+                    self.gpu.stat = stat;
                 },
                 0xFF42 => {
                     self.gpu.background_viewport.scy = byte;
