@@ -2042,7 +2042,7 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
 
-        gameboy_doctor_print(self);
+        // gameboy_doctor_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             // self.pc -%= 1;

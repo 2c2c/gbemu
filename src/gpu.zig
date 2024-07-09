@@ -9,7 +9,7 @@ pub const OAM_BEGIN: usize = 0xFE00;
 pub const OAM_END: usize = 0xFE9F;
 pub const OAM_SIZE: usize = OAM_END - OAM_BEGIN + 1;
 
-pub const TilePixelValue = enum {
+pub const TilePixelValue = enum(u2) {
     /// white
     Zero,
     /// light gray
@@ -34,6 +34,8 @@ fn empty_tile() Tile {
     return .{.{.Zero} ** 8} ** 8;
 }
 
+/// FE00-FE9F
+/// 40 objects at 4 bytes each
 const Object = packed struct {
     y: u8,
     x: u8,
@@ -270,94 +272,144 @@ pub const GPU = struct {
     }
 
     fn render_scanline(self: *GPU) void {
-        var scan_line: [SCREEN_WIDTH]TilePixelValue = [_]TilePixelValue{.Zero} ** SCREEN_WIDTH;
-        if (self.lcdc.bg_enable) {
-            var tile_x_index = self.background_viewport.scx / 8;
-            const tile_y_index = self.ly +% self.background_viewport.scy;
-            const tile_offset: u16 = (@as(u16, tile_y_index) / 8) * 32;
+        self.render_bg();
+        self.render_objects();
+    }
 
-            const background_tile_map: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
-            const tile_map_begin = background_tile_map;
-            const tile_map_offset = tile_map_begin +% tile_offset;
-            const row_y_offset = tile_y_index % 8;
-            var pixel_x_index = self.background_viewport.scx % 8;
-            if (!self.lcdc.bg_tile_set) {
-                // handle 0x8800-0x97FF
-                std.debug.panic("Implement 0x8800-0x97FF\n", .{});
-            }
-            var canvas_offset: usize = @as(usize, self.ly) * SCREEN_WIDTH * SCALE * 3;
-            for (0..SCREEN_WIDTH) |line_x| {
-                const tile_index = self.vram[tile_map_offset +% tile_x_index];
-                const tile_value = self.tile_set[tile_index][row_y_offset][pixel_x_index];
-                const color = tile_value.to_color();
-                self.canvas[canvas_offset] = color;
-                self.canvas[canvas_offset +% 1] = color;
-                self.canvas[canvas_offset +% 2] = color;
-                // why
-                // alpha
-                // self.canvas[canvas_offset +% 3] = 0xFF;
-                // canvas_offset += 4;
-                canvas_offset += 3;
+    fn render_bg(self: *GPU) void {
+        var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
+        var x: u8 = 0;
+        var y = self.ly + self.background_viewport.scy;
+        // const win_x: i16 = @as(i16, @as(i8, @bitCast(self.window_position.wx))) - @as(u16, 7);
+        const win_x: u8 = @max(self.window_position.wx, 7) - 7;
+        const win_y = self.window_position.wy;
 
-                scan_line[line_x] = tile_value;
-                pixel_x_index = (pixel_x_index + 1) % 8;
+        const render_window = self.lcdc.window_enable and win_y <= self.ly and win_x <= x;
+        const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+        const tile_base: u16 = if (self.lcdc.bg_tile_set) 0x8000 else 0x8800;
+        const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
+        const win_tile_base: u16 = if (self.lcdc.bg_tile_set) 0x8000 else 0x8800;
 
-                if (pixel_x_index == 0) {
-                    // tile_x_index = (tile_x_index + 1) % 32;
-                    // tile_map_offset = tile_map_begin +% tile_offset +% tile_x_index;
-                    tile_x_index += 1;
-                }
-                if (!self.lcdc.bg_tile_set) {
-                    // handle 0x8800-0x97FF
-                    std.debug.panic("Implement 0x8800-0x97FF\n", .{});
-                }
-            }
-        }
-        if (self.lcdc.obj_enable) {
-            const object_height: u8 = if (self.lcdc.obj_size) 16 else 8;
-            for (self.objects) |object| {
-                if (object.y <= self.ly and object.y + object_height > self.ly) {
-                    const pixel_y_offset = self.ly - object.y;
-                    const tile_index: u8 = if ((object_height == 16) and (!object.attributes.y_flip and pixel_y_offset > 7)) blk: {
-                        break :blk object.tile_index + 1;
-                    } else blk: {
-                        break :blk object.tile_index;
-                    };
+        while (x < 160) : (x += 1) {
+            var tile_line: u16 = 0;
+            var tile_x: u3 = 0;
+            if (render_window and win_x <= x) {
+                y = self.ly - win_y;
+                const temp_x = x - win_x;
+                const tile_y = y & 7;
+                tile_x = @truncate(temp_x & 7);
 
-                    const tile = self.tile_set[tile_index];
-                    const tile_row = if (object.attributes.y_flip) tile[7 - (pixel_y_offset % 8)] else tile[pixel_y_offset % 8];
-
-                    // why signed
-                    // const canvas_y_offset: i32 = @as(i32, self.ly) * @as(i32, SCREEN_WIDTH) * SCALE;
-                    const canvas_y_offset: usize = @as(usize, self.ly) * @as(usize, SCREEN_WIDTH) * SCALE;
-                    // var canvas_offset: usize = @intCast(@as(u32, canvas_y_offset + object.x) * SCALE);
-                    var canvas_offset: usize = (canvas_y_offset + object.x) * SCALE * 3;
-                    for (0..8) |x| {
-                        const pixel_x_offset: usize = if (object.attributes.x_flip) 7 - x else x;
-                        const x_offset = object.x + x;
-                        const pixel = tile_row[pixel_x_offset];
-                        if (x_offset >= 0 and
-                            x_offset < SCREEN_WIDTH and
-                            pixel != TilePixelValue.Zero and
-                            (object.attributes.priority or scan_line[x_offset] == TilePixelValue.Zero))
-                        {
-                            const color = pixel.to_color();
-                            self.canvas[canvas_offset] = color;
-                            self.canvas[canvas_offset +% 1] = color;
-                            self.canvas[canvas_offset +% 2] = color;
-                            // self.canvas[canvas_offset +% 3] = 0xFF;
-                            canvas_offset += 3;
-                        }
+                const tile_index = self.read_vram(win_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+                if (tile_base == 0x8000) {
+                    tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
+                } else {
+                    const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
+                    if (tile_index_signed < 0) {
+                        addr -= @abs(tile_index_signed * 16);
+                    } else {
+                        addr += @abs(tile_index_signed * 16);
                     }
+                    tile_line = self.read_vram16(addr);
+                }
+            } else if (self.lcdc.bg_enable) {
+                y = self.ly + self.background_viewport.scy;
+                const tile_y = y % 8;
+
+                const temp_x = x + self.background_viewport.scx;
+                tile_x = @truncate(temp_x % 8);
+
+                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+                if (tile_base == 0x8000) {
+                    tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
+                } else {
+                    const tile_index_signed = @as(i8, @bitCast(tile_index));
+                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
+                    if (tile_index_signed < 0) {
+                        addr -= @abs(tile_index_signed * 16);
+                    } else {
+                        addr += @abs(tile_index_signed * 16);
+                    }
+                    tile_line = self.read_vram16(addr);
+                }
+            }
+
+            const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+            const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+            const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+            const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(self.bgp, color_id));
+            self.canvas[buffer_index] = color.to_color();
+            self.canvas[buffer_index +% 1] = color.to_color();
+            self.canvas[buffer_index +% 2] = color.to_color();
+            buffer_index += 3;
+        }
+    }
+
+    pub fn render_objects(self: *GPU) void {
+        if (!self.lcdc.obj_enable) {
+            return;
+        }
+        const object_height: u8 = if (self.lcdc.obj_size) 16 else 8;
+
+        // limit of 10 objects per scanline
+        var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena_allocator.deinit();
+        const allocator = arena_allocator.allocator();
+        var renderable_objects = std.ArrayList(Object).init(allocator);
+        // todo drop the static object storage, just cast and handle x/y offsets here
+        for (self.objects) |object| {
+            if (object.y <= self.ly and object.y + object_height > self.ly) {
+                renderable_objects.append(object) catch unreachable;
+            }
+            if (renderable_objects.items.len == 10) {
+                break;
+            }
+        }
+
+        for (renderable_objects.items) |object| {
+            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
+                const tile_y = if (object.attributes.y_flip) object.y - self.ly else (self.ly - object.y) & 7;
+                const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
+
+                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 4 + @as(usize, object.x) * 4;
+
+                for (0..8) |x| {
+                    const tile_line = self.read_vram16(0x8000 + (@as(u16, object.tile_index) << 4) + (@as(u16, tile_y) << 1));
+                    const tile_x: u3 = if (object.attributes.x_flip) 7 - @as(u3, @truncate(x)) else @as(u3, @truncate(x));
+                    const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+                    const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+                    const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+                    const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
+
+                    if (!object.attributes.priority) {
+                        continue;
+                    }
+
+                    if (color == TilePixelValue.Zero) {
+                        continue;
+                    }
+                    // TODO: can sprites write on 00 bg palette? i saw code that suggested
+
+                    if (object.x + x >= SCREEN_WIDTH) {
+                        continue;
+                    }
+
+                    self.canvas[buffer_index] = color.to_color();
+                    self.canvas[buffer_index +% 1] = color.to_color();
+                    self.canvas[buffer_index +% 2] = color.to_color();
+
+                    buffer_index += 3;
                 }
             }
         }
-        if (self.lcdc.window_enable) {
-            // TODO:
-        }
+        std.debug.print("finished rendering obj\n", .{});
     }
     pub fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
+    }
+
+    pub fn read_vram16(self: *const GPU, address: usize) u16 {
+        return @as(u16, self.vram[address]) | (@as(u16, self.vram[address +% 1]) << 8);
     }
 
     pub fn write_vram(self: *GPU, addr: usize, byte: u8) void {
@@ -383,16 +435,25 @@ pub const GPU = struct {
             self.tile_set[tile_index][row_index][pixel_index] = @enumFromInt(pixel_value);
         }
     }
+    pub fn color_from_palette(palette: Palette, color: u2) u2 {
+        return switch (color) {
+            0b00 => return palette.color_0,
+            0b01 => return palette.color_1,
+            0b10 => return palette.color_2,
+            0b11 => return palette.color_3,
+        };
+    }
+
     pub fn write_oam(self: *GPU, addr: usize, value: u8) void {
-        std.debug.assert(addr >= 0xFE00 and addr < 0xFEA0);
+        std.debug.assert(addr >= OAM_BEGIN and addr <= OAM_END);
         self.vram[addr] = value;
-        const object_index = (addr - 0xFE00) / 4;
+        const object_index = (addr - OAM_BEGIN) / 4;
         if (object_index >= 40) {
             return;
         }
 
-        // could be cut, just lookup straight from memory instead
-        const byte = (addr - 0xFE00) % 4;
+        // objects are 4 bytes, select the byte and switch on which part of the object to update
+        const byte = (addr - OAM_BEGIN) % 4;
         switch (byte) {
             0 => self.objects[object_index].y = value + 0x10,
             1 => self.objects[object_index].x = value + 0x08,

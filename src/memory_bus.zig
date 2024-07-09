@@ -338,7 +338,6 @@ pub const MemoryBus = struct {
                 0xFF25 => {},
                 0xFF26 => {},
                 0xFF30...0xFF3F => {},
-                //
                 0xFF40 => {
                     self.gpu.lcdc = @bitCast(byte);
                 },
