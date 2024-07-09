@@ -368,6 +368,7 @@ pub const GPU = struct {
                 break;
             }
         }
+        std.debug.print("num objects {}\n", .{renderable_objects.items.len});
         // if (!self.lcdc.obj_size) {
         //     // ?
         //     return;
@@ -411,7 +412,6 @@ pub const GPU = struct {
                 }
             }
         }
-        std.debug.print("finished rendering obj\n", .{});
     }
     pub fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
