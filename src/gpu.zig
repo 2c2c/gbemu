@@ -481,13 +481,60 @@ pub const GPU = struct {
             }
         }
         // do a second pass on objects with exact same x pos, left to right
-        const identical_x_itr = object_hash.valueIterator();
+        var identical_x_itr = object_hash.valueIterator();
         while (identical_x_itr.next()) |identical_x_objects| {
             if (identical_x_objects.*.items.len <= 1) {
                 continue;
             }
         }
     }
+
+    pub fn render_objects_list(self: *GPU, renderable_objects: std.ArrayList(Object)) void {
+        for (renderable_objects.items) |object| {
+            // i -= 1;
+            // const object = renderable_objects.items[i];
+            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
+                var tile_y: i16 = undefined;
+                if (self.lcdc.obj_size) {
+                    tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
+                } else {
+                    tile_y = if (object.attributes.y_flip) 7 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 7);
+                }
+
+                const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
+
+                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(u16, @bitCast(object.x)) * 3;
+                const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
+
+                for (0..8) |x| {
+                    const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
+                    const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
+                    const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+                    const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+                    // const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
+                    const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
+                    const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
+
+                    // goofy
+                    if (object.attributes.priority and
+                        self.canvas[buffer_index] == 0xFF and
+                        self.canvas[buffer_index +% 1] == 0xFF and
+                        self.canvas[buffer_index +% 2] == 0xFF)
+                    {
+                        // std.debug.print("TileColorZero\n", .{});
+                        continue;
+                    }
+
+                    self.canvas[buffer_index] = color.to_color();
+                    self.canvas[buffer_index +% 1] = color.to_color();
+                    self.canvas[buffer_index +% 2] = color.to_color();
+
+                    buffer_index += 3;
+                }
+            }
+        }
+    }
+
     pub fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
     }
