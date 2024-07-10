@@ -392,13 +392,13 @@ pub const GPU = struct {
             index: usize,
         };
 
-        var object_hash = std.AutoHashMap(i16, std.ArrayList(ObjectIndexPair)).init(allocator);
+        var objectpair_hash = std.AutoHashMap(i16, std.ArrayList(ObjectIndexPair)).init(allocator);
         defer {
-            var itr = object_hash.valueIterator();
+            var itr = objectpair_hash.valueIterator();
             while (itr.next()) |objects| {
                 objects.deinit();
             }
-            object_hash.deinit();
+            objectpair_hash.deinit();
         }
 
         for (renderable_objects.items, 0..) |object, oam_index| {
@@ -408,7 +408,7 @@ pub const GPU = struct {
             //     const objects = object_hash.getPtr(object.x).?;
             //     objects.*.append(object) catch unreachable;
             // }
-            const gop = object_hash.getOrPut(object.x) catch unreachable;
+            const gop = objectpair_hash.getOrPut(object.x) catch unreachable;
             if (!gop.found_existing) {
                 gop.value_ptr.* = std.ArrayList(ObjectIndexPair).init(allocator);
 
@@ -417,75 +417,45 @@ pub const GPU = struct {
             }
         }
 
+        // std.debug.print("hash {} \n", .{objectpair_hash.count()});
+
         const comparator = struct {
             pub fn object_index(_: void, a: ObjectIndexPair, b: ObjectIndexPair) bool {
-                return a.index < b.index;
+                return a.index > b.index;
             }
             pub fn object_x(_: void, a: Object, b: Object) bool {
-                return a.x < b.x;
+                return a.x > b.x;
             }
         };
 
-        var keys = object_hash.keyIterator();
+        var keys = objectpair_hash.keyIterator();
         while (keys.next()) |key| {
-            const objects = object_hash.getPtr(key.*).?;
+            const objects = objectpair_hash.getPtr(key.*).?;
             std.mem.sort(ObjectIndexPair, objects.*.items, {}, comparator.object_index);
         }
 
         std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
 
-        //
-        // var i = renderable_objects.items.len;
-        // while (i > 0) {
-        for (renderable_objects.items) |object| {
-            // i -= 1;
-            // const object = renderable_objects.items[i];
-            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
-                var tile_y: i16 = undefined;
-                if (self.lcdc.obj_size) {
-                    tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
-                } else {
-                    tile_y = if (object.attributes.y_flip) 7 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 7);
-                }
+        self.render_objects_list(renderable_objects);
 
-                const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
-
-                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(u16, @bitCast(object.x)) * 3;
-                const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
-
-                for (0..8) |x| {
-                    const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
-                    const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
-                    const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
-                    const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                    // const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
-                    const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-                    const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
-
-                    // goofy
-                    if (object.attributes.priority and
-                        self.canvas[buffer_index] == 0xFF and
-                        self.canvas[buffer_index +% 1] == 0xFF and
-                        self.canvas[buffer_index +% 2] == 0xFF)
-                    {
-                        // std.debug.print("TileColorZero\n", .{});
-                        continue;
-                    }
-
-                    self.canvas[buffer_index] = color.to_color();
-                    self.canvas[buffer_index +% 1] = color.to_color();
-                    self.canvas[buffer_index +% 2] = color.to_color();
-
-                    buffer_index += 3;
-                }
-            }
-        }
         // do a second pass on objects with exact same x pos, left to right
-        var identical_x_itr = object_hash.valueIterator();
-        while (identical_x_itr.next()) |identical_x_objects| {
-            if (identical_x_objects.*.items.len <= 1) {
+        var objectpairs_itr = objectpair_hash.valueIterator();
+        while (objectpairs_itr.next()) |objectpairs| {
+            if (objectpairs.*.items.len <= 1) {
                 continue;
             }
+            std.debug.print("pair found\n", .{});
+            var identical_x_objects = std.ArrayList(Object).init(allocator);
+            defer identical_x_objects.deinit();
+            for (objectpairs.*.items) |objectpair| {
+                identical_x_objects.append(objectpair.object) catch unreachable;
+            }
+
+            // std.debug.print("before:\n", .{});
+            // for (identical_x_objects.items) |object| {
+            //     std.debug.print("x: {}\n", .{object.index});
+            // }
+            self.render_objects_list(identical_x_objects);
         }
     }
 
