@@ -295,12 +295,16 @@ pub const GPU = struct {
         const tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
         const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
         const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+
+        std.debug.print("ly {} win_y {} window_counter {} y {} win_x {}\n", .{ self.ly, win_y, self.internal_window_counter, y, win_x });
+        if (self.lcdc.window_enable and win_y <= self.ly and self.lcdc.bg_window_enable and win_x >= 0) {
+            self.internal_window_counter += 1;
+        }
         while (x < 160) : (x += 1) {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
-            std.debug.print("self.lcdc.window_enable {} \n", .{self.lcdc.window_enable});
-            if (self.lcdc.window_enable and win_y <= self.internal_window_counter and win_x <= x and self.lcdc.bg_window_enable) {
-                std.debug.print("in window\n", .{});
+            if (self.lcdc.window_enable and win_y <= self.ly and win_x <= x and self.lcdc.bg_window_enable) {
+                std.debug.print("in", .{});
                 y = self.internal_window_counter - win_y;
                 const temp_x = x - win_x;
                 const tile_y = y & 7;
@@ -319,9 +323,6 @@ pub const GPU = struct {
                         addr += @abs(tile_index_signed * 16);
                     }
                     tile_line = self.read_vram16(addr);
-                }
-                if (x == win_x) {
-                    self.internal_window_counter += 1;
                 }
             } else if (self.lcdc.bg_window_enable) {
                 y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
