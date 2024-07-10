@@ -138,10 +138,9 @@ const OBP = [2]Palette;
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
-const SCALE: usize = 1;
 
 pub const GPU = struct {
-    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * SCALE * 3]u8,
+    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * 3]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -176,7 +175,7 @@ pub const GPU = struct {
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
         return GPU{
-            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * SCALE * 3),
+            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
