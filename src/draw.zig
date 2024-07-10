@@ -51,7 +51,7 @@ pub fn setup_cpu() !CPU {
 
 const WIDTH = 160;
 const HEIGHT = 144;
-const SCALE = 1;
+const SCALE = 4;
 
 pub fn main() !void {
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
@@ -79,8 +79,8 @@ pub fn main() !void {
         // fuck u
         // SDL.SDL_PIXELFORMAT_RGB888,
         SDL.SDL_TEXTUREACCESS_STREAMING,
-        WIDTH * SCALE,
-        HEIGHT * SCALE,
+        WIDTH,
+        HEIGHT,
     ) orelse sdlPanic();
     defer SDL.SDL_DestroyTexture(texture);
     _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
@@ -131,7 +131,7 @@ pub fn main() !void {
         //     print_canvas(&cpu);
         //     frame = 0;
         // }
-        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * SCALE * 3);
+        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
