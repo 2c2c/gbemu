@@ -394,9 +394,10 @@ pub const GPU = struct {
                 const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
 
                 var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(u16, @bitCast(object.x)) * 3;
+                const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
 
                 for (0..8) |x| {
-                    const tile_line = self.read_vram16(0x8000 + (@as(u16, object.tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
+                    const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
                     const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
                     const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
                     const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
