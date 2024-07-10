@@ -120,6 +120,7 @@ pub fn main() !void {
         for (0..20000) |_| {
             cpu.frame_walk();
             frame += 1;
+            std.time.sleep(10000); // 60 FPS
         }
         frame = 0;
 
@@ -133,7 +134,7 @@ pub fn main() !void {
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
 
-        std.time.sleep(0 * std.time.ns_per_ms); // 60 FPS
+        std.time.sleep(4 * std.time.ns_per_ms); // 60 FPS
     }
 }
 

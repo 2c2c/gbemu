@@ -392,7 +392,7 @@ pub const MemoryBus = struct {
                     self.gpu.lcdc = @bitCast(byte);
                     if (!self.gpu.lcdc.lcd_enable) {
                         self.gpu.ly = 0;
-
+                        self.gpu.internal_window_counter = 0;
                         self.gpu.stat.ppu_mode = 0;
                         self.gpu.stat.lyc_ly_compare = false;
                         // self.gpu.stat.mode_0_interrupt_enabled = false;

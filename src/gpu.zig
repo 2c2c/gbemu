@@ -54,7 +54,7 @@ const Object = struct {
 
 /// FF40 LCD Control
 const LCDC = packed struct {
-    bg_enable: bool,
+    bg_window_enable: bool,
     obj_enable: bool,
 
     /// 8x8 8x16
@@ -64,7 +64,7 @@ const LCDC = packed struct {
     bg_tile_map: bool,
 
     /// 0x8800-0x97FF 0x8000-0x8FFF
-    bg_tile_set: bool,
+    bg_window_tiles: bool,
 
     window_enable: bool,
 
@@ -157,6 +157,10 @@ pub const GPU = struct {
     /// (readonly)
     ly: u8,
 
+    /// basically undocumented internal ppu counter that isn't exposed as an io register
+    /// increments when ly is incremented if and only if lcdc.window_enable is set
+    internal_window_counter: u8,
+
     /// FF45
     /// LY == LYC trigger STAT interrupt
     /// 0-153
@@ -179,10 +183,11 @@ pub const GPU = struct {
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
-            .lcdc = @bitCast(@as(u8, 0x91)),
-            .stat = @bitCast(@as(u8, 0x05)),
-            .background_viewport = .{ .scy = 0, .scx = 1 },
+            .lcdc = @bitCast(@as(u8, 0)),
+            .stat = @bitCast(@as(u8, 0)),
+            .background_viewport = .{ .scy = 0, .scx = 0 },
             .ly = 0,
+            .internal_window_counter = 0,
             .lyc = 0,
             .bgp = @bitCast(@as(u8, 0xFC)),
             .obp = obp,
@@ -231,6 +236,7 @@ pub const GPU = struct {
                     self.ly += 1;
                     if (self.ly >= 154) {
                         self.ly = 0;
+                        self.internal_window_counter = 0;
                         self.stat.ppu_mode = 0b10;
                         if (self.stat.mode_2_interrupt_enabled) {
                             request.enable_lcd_stat = true;
@@ -285,17 +291,17 @@ pub const GPU = struct {
         // const win_x: u8 = @max(self.window_position.wx, 7);
         const win_y = self.window_position.wy;
 
-        const render_window = self.lcdc.window_enable and win_y <= self.ly and win_x <= x;
         const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
-        const tile_base: u16 = if (self.lcdc.bg_tile_set) 0x8000 else 0x8800;
+        const tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
         const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
-        const win_tile_base: u16 = if (self.lcdc.bg_tile_set) 0x8000 else 0x8800;
-
+        const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
         while (x < 160) : (x += 1) {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
-            if (render_window and win_x <= x and self.lcdc.bg_enable) {
-                y = self.ly - win_y;
+            std.debug.print("self.lcdc.window_enable {} \n", .{self.lcdc.window_enable});
+            if (self.lcdc.window_enable and win_y <= self.internal_window_counter and win_x <= x and self.lcdc.bg_window_enable) {
+                std.debug.print("in window\n", .{});
+                y = self.internal_window_counter - win_y;
                 const temp_x = x - win_x;
                 const tile_y = y & 7;
                 tile_x = @truncate(temp_x & 7);
@@ -314,7 +320,10 @@ pub const GPU = struct {
                     }
                     tile_line = self.read_vram16(addr);
                 }
-            } else if (self.lcdc.bg_enable) {
+                if (x == win_x) {
+                    self.internal_window_counter += 1;
+                }
+            } else if (self.lcdc.bg_window_enable) {
                 y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
                 const tile_y = y % 8;
 
