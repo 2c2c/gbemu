@@ -169,8 +169,8 @@ pub const GPU = struct {
 
     pub fn new() GPU {
         const obp: [2]Palette = .{
-            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
-            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
+            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
         };
         const objects = [_]Object{.{
             .y = 0,
@@ -189,7 +189,7 @@ pub const GPU = struct {
             .ly = 0,
             .internal_window_counter = 0,
             .lyc = 0,
-            .bgp = @bitCast(@as(u8, 0xFC)),
+            .bgp = @bitCast(@as(u8, 0)),
             .obp = obp,
             .objects = objects,
             .window_position = .{ .wy = 0, .wx = 0 },
@@ -311,7 +311,6 @@ pub const GPU = struct {
 
             // Check if window should be rendered at this position
             if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
-                std.debug.print("in", .{});
                 const adjusted_y: u16 = self.internal_window_counter - 1;
                 const temp_x: i16 = x - win_x;
                 const tile_y: u8 = @truncate(adjusted_y & 7);
@@ -502,6 +501,9 @@ pub const GPU = struct {
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                     const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
 
+                    if (color == TilePixelValue.Zero) {
+                        continue;
+                    }
                     // goofy
                     if (object.attributes.priority and
                         self.canvas[buffer_index] == 0xFF and

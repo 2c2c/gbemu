@@ -71,16 +71,19 @@ pub fn main() !void {
     const renderer = SDL.SDL_CreateRenderer(window, -1, SDL.SDL_RENDERER_ACCELERATED) orelse sdlPanic();
     defer _ = SDL.SDL_DestroyRenderer(renderer);
 
+    _ = SDL.SDL_SetHint(SDL.SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
     const texture = SDL.SDL_CreateTexture(
         renderer,
         SDL.SDL_PIXELFORMAT_RGB24,
-        // trap format that includes alphachannel width but its ignored
+        // fuck u
         // SDL.SDL_PIXELFORMAT_RGB888,
         SDL.SDL_TEXTUREACCESS_STREAMING,
         WIDTH * SCALE,
         HEIGHT * SCALE,
     ) orelse sdlPanic();
     defer SDL.SDL_DestroyTexture(texture);
+    _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
 
     var cpu = try setup_cpu();
 
