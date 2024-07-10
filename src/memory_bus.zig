@@ -90,6 +90,7 @@ pub const MemoryBus = struct {
         for (0x0000..0x8000) |i| {
             memory[i] = game_rom[i];
         }
+
         // memory[0x07] = 0x00;
         // memory[0x10] = 0x80;
         // memory[0x11] = 0xBF;
@@ -119,7 +120,7 @@ pub const MemoryBus = struct {
         // memory[0x4A] = 0x00;
         // memory[0x4B] = 0x00;
         // memory[0xFF] = 0x00;
-
+        //
         // pandocs
         // memory[0xFF00] = 0xCF;
         // memory[0xFF01] = 0x00;
@@ -420,8 +421,8 @@ pub const MemoryBus = struct {
                     const dma_high: u16 = @as(u16, byte) << 8;
                     for (0x00..0x9F) |dma_low| {
                         const dma_low_u16 = @as(u16, @intCast(dma_low));
-                        const value = self.read_byte(dma_high +% dma_low_u16);
-                        self.write_byte(0xFE +% dma_low_u16, value);
+                        const value = self.read_byte(dma_high | dma_low_u16);
+                        self.write_byte(0xFE00 +% dma_low_u16, value);
                     }
                 },
                 0xFF47 => {

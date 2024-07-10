@@ -2,19 +2,23 @@ const std = @import("std");
 const SDL = @import("sdl2");
 const gpu = @import("gpu.zig");
 const CPU = @import("cpu.zig").CPU;
+const time = @import("std").time;
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
+const CPU_SPEED_HZ = 4194304;
+
 pub fn setup_cpu() !CPU {
-    const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
+    // const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
     // const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
     // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("flappy_boy.gb", .{});
+    const file = try std.fs.cwd().openFile("Pokemon Blue.gb", .{});
     defer file.close();
 
     const size = try file.getEndPos();
@@ -182,8 +186,17 @@ pub fn main() !void {
         }
 
         // while (true) {
-        cpu.frame_walk();
-        frame += 1;
+
+        // todo
+        // using cycles simulate 1/60th of a second of cycles, then sleep for the extra time
+        // left
+        // const start = time.nanoTimestamp();
+        for (0..20000) |_| {
+            cpu.frame_walk();
+            frame += 1;
+        }
+        frame = 0;
+
         // if (frame % 70224 == 0) {
         //     print_canvas(&cpu);
         //     frame = 0;
