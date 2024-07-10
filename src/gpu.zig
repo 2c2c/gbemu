@@ -157,7 +157,7 @@ pub const GPU = struct {
     /// (readonly)
     ly: u8,
 
-    /// basically undocumented internal ppu counter that isn't exposed as an io register
+    /// poorly undocumented internal ppu counter that isn't exposed as an io register
     /// increments when ly is incremented if and only if lcdc.window_enable is set
     internal_window_counter: u8,
 
@@ -284,11 +284,8 @@ pub const GPU = struct {
     fn render_bg(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
         var x: u8 = 0;
-        // std.debug.print("render_bg ly={x} scy={x}\n", .{ self.ly, self.background_viewport.scy });
         var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
-        // const win_x: i16 = @as(i16, @as(i8, @bitCast(self.window_position.wx))) - @as(u16, 7);
-        const win_x: u8 = @max(self.window_position.wx, 7) - 7;
-        // const win_x: u8 = @max(self.window_position.wx, 7);
+        const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
         const win_y = self.window_position.wy;
 
         const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
@@ -297,24 +294,34 @@ pub const GPU = struct {
         const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
 
         std.debug.print("ly {} win_y {} window_counter {} y {} win_x {}\n", .{ self.ly, win_y, self.internal_window_counter, y, win_x });
-        if (self.lcdc.window_enable and win_y <= self.ly and self.lcdc.bg_window_enable and win_x >= 0) {
+
+        // Reset the window counter at the start of the window
+        if (self.ly == win_y) {
+            self.internal_window_counter = 0;
+        }
+
+        // Check if the window is visible and increment the counter
+        if (self.lcdc.window_enable and self.ly >= win_y and self.lcdc.bg_window_enable and win_x < 160) {
             self.internal_window_counter += 1;
         }
+
         while (x < 160) : (x += 1) {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
-            if (self.lcdc.window_enable and win_y <= self.ly and win_x <= x and self.lcdc.bg_window_enable) {
-                std.debug.print("in", .{});
-                y = self.internal_window_counter - win_y;
-                const temp_x = x - win_x;
-                const tile_y = y & 7;
-                tile_x = @truncate(temp_x & 7);
 
-                const tile_index = self.read_vram(win_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+            // Check if window should be rendered at this position
+            if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
+                std.debug.print("in", .{});
+                const adjusted_y: u16 = self.internal_window_counter - 1;
+                const temp_x: i16 = x - win_x;
+                const tile_y: u8 = @truncate(adjusted_y & 7);
+                tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
+
+                // Fetch the appropriate tile for the window
+                const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
-                    // const tile_index_signed = @as(i8, @bitCast(tile_index));
                     const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
                     var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
                     if (tile_index_signed < 0) {
