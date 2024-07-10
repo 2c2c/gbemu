@@ -382,12 +382,17 @@ pub const GPU = struct {
         // * an object more leftward takes priority over something to its right
         // * two objects with the same x, the one with the lower oam index takes priority
         //
-        // iterating left to right in oam order coincidentally solves for objects with same x
-        // iterating right to left solves for rendering a more leftward object over a rightward object
         //
-        // hash objects by x position, then reverse iterate over the keys?
+        // sort objects by x position, gtl
+        // hash objects by x position, sort those by oam index
+        // do two passes against these
 
-        var object_hash = std.AutoHashMap(i16, std.ArrayList(Object)).init(allocator);
+        const ObjectIndexPair = struct {
+            object: Object,
+            index: usize,
+        };
+
+        var object_hash = std.AutoHashMap(i16, std.ArrayList(ObjectIndexPair)).init(allocator);
         defer {
             var itr = object_hash.valueIterator();
             while (itr.next()) |objects| {
@@ -396,7 +401,7 @@ pub const GPU = struct {
             object_hash.deinit();
         }
 
-        for (renderable_objects.items) |object| {
+        for (renderable_objects.items, 0..) |object, oam_index| {
             // if (!object_hash.contains(object.x)) {
             //     object_hash.put(object.x, std.ArrayList(Object).init(allocator)) catch unreachable;
             // } else {
@@ -405,25 +410,36 @@ pub const GPU = struct {
             // }
             const gop = object_hash.getOrPut(object.x) catch unreachable;
             if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayList(Object).init(allocator);
-                gop.value_ptr.*.append(object) catch unreachable;
+                gop.value_ptr.* = std.ArrayList(ObjectIndexPair).init(allocator);
+
+                const pair = ObjectIndexPair{ .object = object, .index = oam_index };
+                gop.value_ptr.*.append(pair) catch unreachable;
             }
         }
+
+        const comparator = struct {
+            pub fn object_index(_: void, a: ObjectIndexPair, b: ObjectIndexPair) bool {
+                return a.index < b.index;
+            }
+            pub fn object_x(_: void, a: Object, b: Object) bool {
+                return a.x < b.x;
+            }
+        };
 
         var keys = object_hash.keyIterator();
         while (keys.next()) |key| {
             const objects = object_hash.getPtr(key.*).?;
-            for (objects.items) |object| {
-                renderable_objects.append(object) catch unreachable;
-            }
+            std.mem.sort(ObjectIndexPair, objects.*.items, {}, comparator.object_index);
         }
 
+        std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
+
         //
-        // for (renderable_objects.items) |object| {
-        var i = renderable_objects.items.len;
-        while (i > 0) {
-            i -= 1;
-            const object = renderable_objects.items[i];
+        // var i = renderable_objects.items.len;
+        // while (i > 0) {
+        for (renderable_objects.items) |object| {
+            // i -= 1;
+            // const object = renderable_objects.items[i];
             if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
                 var tile_y: i16 = undefined;
                 if (self.lcdc.obj_size) {
@@ -455,12 +471,6 @@ pub const GPU = struct {
                         // std.debug.print("TileColorZero\n", .{});
                         continue;
                     }
-                    // TODO: can sprites write on 00 bg palette? i saw code that suggested
-
-                    // if (object.x - 8 + x >= SCREEN_WIDTH) {
-                    //     // std.debug.print("x dont fit\n", .{});
-                    //     continue;
-                    // }
 
                     self.canvas[buffer_index] = color.to_color();
                     self.canvas[buffer_index +% 1] = color.to_color();
@@ -468,6 +478,13 @@ pub const GPU = struct {
 
                     buffer_index += 3;
                 }
+            }
+        }
+        // do a second pass on objects with exact same x pos, left to right
+        const identical_x_itr = object_hash.valueIterator();
+        while (identical_x_itr.next()) |identical_x_objects| {
+            if (identical_x_objects.*.items.len <= 1) {
+                continue;
             }
         }
     }
