@@ -378,12 +378,53 @@ pub const GPU = struct {
         //     return;
         // }
 
+        // there are two difficult forms of priority
+        // * an object more leftward takes priority over something to its right
+        // * two objects with the same x, the one with the lower oam index takes priority
+        //
+        // iterating left to right in oam order coincidentally solves for objects with same x
+        // iterating right to left solves for rendering a more leftward object over a rightward object
+        //
+        // hash objects by x position, then reverse iterate over the keys?
+
+        var object_hash = std.AutoHashMap(i16, std.ArrayList(Object)).init(allocator);
+        defer {
+            var itr = object_hash.valueIterator();
+            while (itr.next()) |objects| {
+                objects.deinit();
+            }
+            object_hash.deinit();
+        }
+
         for (renderable_objects.items) |object| {
+            // if (!object_hash.contains(object.x)) {
+            //     object_hash.put(object.x, std.ArrayList(Object).init(allocator)) catch unreachable;
+            // } else {
+            //     const objects = object_hash.getPtr(object.x).?;
+            //     objects.*.append(object) catch unreachable;
+            // }
+            const gop = object_hash.getOrPut(object.x) catch unreachable;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = std.ArrayList(Object).init(allocator);
+                gop.value_ptr.*.append(object) catch unreachable;
+            }
+        }
+
+        var keys = object_hash.keyIterator();
+        while (keys.next()) |key| {
+            const objects = object_hash.getPtr(key.*).?;
+            for (objects.items) |object| {
+                renderable_objects.append(object) catch unreachable;
+            }
+        }
+
+        //
+        // for (renderable_objects.items) |object| {
+        var i = renderable_objects.items.len;
+        while (i > 0) {
+            i -= 1;
+            const object = renderable_objects.items[i];
             if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
-                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - object.y - 0x10) else ((self.ly - object.y - 0x10) & 7);
-                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
-                // const tile_y = if (object.attributes.y_flip) 7 - (self.ly - (object.y - 16)) else ((self.ly - (object.y - 16)) & 7);
-                // std.debug.print("ly {}, object.y {} - height {}\n", .{ self.ly, object.y, object_height });
                 var tile_y: i16 = undefined;
                 if (self.lcdc.obj_size) {
                     tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
