@@ -1,3 +1,4 @@
+const std = @import("std");
 const CPU = @import("cpu.zig").CPU;
 /// FF00 - P1/JOYP - Joypad (R/W)
 const Joyp = packed struct {
@@ -64,12 +65,14 @@ pub const Joypad = struct {
     }
 
     pub fn update_joyp_keys(cpu: *CPU) void {
+        // std.debug.print("Updating joypad keys\n", .{});
         switch (cpu.bus.joypad.joyp.select) {
             .Both => cpu.bus.joypad.joyp.unpressed = ~(cpu.bus.joypad.button.bits | cpu.bus.joypad.dpad.bits),
             .Action => cpu.bus.joypad.joyp.unpressed = ~cpu.bus.joypad.button.bits,
             .Direction => cpu.bus.joypad.joyp.unpressed = ~cpu.bus.joypad.dpad.bits,
             .None => cpu.bus.joypad.joyp.unpressed = 0xF,
         }
+        // std.debug.print("writing joypad keys to joyp: 0b{b:0>8}\n", .{@as(u8, @bitCast(cpu.bus.joypad.joyp))});
     }
     // not sure how id like to store joyp yet
     // pub fn joy_lower_nibble(cpu: *CPU) u4 {

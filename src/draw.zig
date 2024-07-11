@@ -12,11 +12,11 @@ const CPU_SPEED_HZ = 4194304;
 
 pub fn setup_cpu() !CPU {
     // const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
-    // const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    const file = try std.fs.cwd().openFile("tetris.gb", .{});
     // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
-    const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
+    // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
     // const file = try std.fs.cwd().openFile("flappy_boy.gb", .{});
     // const file = try std.fs.cwd().openFile("Pokemon Blue.gb", .{});
     // vid roms
@@ -76,7 +76,6 @@ pub fn main() !void {
     const texture = SDL.SDL_CreateTexture(
         renderer,
         SDL.SDL_PIXELFORMAT_RGB24,
-        // fuck u
         // SDL.SDL_PIXELFORMAT_RGB888,
         SDL.SDL_TEXTUREACCESS_STREAMING,
         WIDTH,
@@ -90,13 +89,14 @@ pub fn main() !void {
     var frame: usize = 0;
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
-        while (SDL.SDL_PollEvent(&ev) != 0) {
+        while (SDL.SDL_PollEvent(&ev) > 0) {
             switch (ev.type) {
                 SDL.SDL_QUIT => break :mainLoop,
                 SDL.SDL_MOUSEBUTTONUP => {},
-                SDL.SDL_KEYDOWN, SDL.SDL_KEYUP => {
+                SDL.SDL_KEYDOWN => {
                     const key = ev.key.keysym.sym;
-                    const is_pressed = ev.key.state == SDL.SDL_KEYDOWN;
+                    const is_pressed = ev.type == SDL.SDL_KEYDOWN;
+                    // std.debug.print("Key down event: {d} pressed\n", .{key});
                     switch (key) {
                         SDL.SDLK_w => cpu.bus.joypad.dpad.pressed.UP = is_pressed,
                         SDL.SDLK_a => cpu.bus.joypad.dpad.pressed.LEFT = is_pressed,
@@ -106,7 +106,24 @@ pub fn main() !void {
                         SDL.SDLK_k => cpu.bus.joypad.button.pressed.B = is_pressed,
                         SDL.SDLK_RETURN => cpu.bus.joypad.button.pressed.START = is_pressed,
                         SDL.SDLK_QUOTE => cpu.bus.joypad.button.pressed.SELECT = is_pressed,
-                        SDL.SDLK_ESCAPE => break,
+                        SDL.SDLK_ESCAPE => break :mainLoop,
+                        else => {},
+                    }
+                },
+                SDL.SDL_KEYUP => {
+                    const key = ev.key.keysym.sym;
+                    const is_pressed = ev.type == SDL.SDL_KEYDOWN;
+                    // std.debug.print("Key up event: {d} released\n", .{key});
+                    switch (key) {
+                        SDL.SDLK_w => cpu.bus.joypad.dpad.pressed.UP = is_pressed,
+                        SDL.SDLK_a => cpu.bus.joypad.dpad.pressed.LEFT = is_pressed,
+                        SDL.SDLK_s => cpu.bus.joypad.dpad.pressed.DOWN = is_pressed,
+                        SDL.SDLK_d => cpu.bus.joypad.dpad.pressed.RIGHT = is_pressed,
+                        SDL.SDLK_j => cpu.bus.joypad.button.pressed.A = is_pressed,
+                        SDL.SDLK_k => cpu.bus.joypad.button.pressed.B = is_pressed,
+                        SDL.SDLK_RETURN => cpu.bus.joypad.button.pressed.START = is_pressed,
+                        SDL.SDLK_QUOTE => cpu.bus.joypad.button.pressed.SELECT = is_pressed,
+                        SDL.SDLK_ESCAPE => break :mainLoop,
                         else => {},
                     }
                 },
@@ -114,23 +131,12 @@ pub fn main() !void {
             }
         }
 
-        // while (true) {
-
-        // todo
-        // using cycles simulate 1/60th of a second of cycles, then sleep for the extra time
-        // left
-        // const start = time.nanoTimestamp();
-        for (0..100000) |_| {
+        for (0..512) |_| {
             cpu.frame_walk();
             frame += 1;
-            // std.time.sleep(10000); // 60 FPS
         }
         frame = 0;
 
-        // if (frame % 70224 == 0) {
-        //     print_canvas(&cpu);
-        //     frame = 0;
-        // }
         _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
@@ -147,8 +153,6 @@ fn sdlPanic() noreturn {
 }
 
 fn print_canvas(cpu: *CPU) void {
-    // print the canvas to scale as hex bytes as 2d grid
-    //
     for (0..HEIGHT) |y| {
         for (0..WIDTH) |x| {
             std.debug.print("0x{x:0>2}{x:0>2}{x:0>2}", .{

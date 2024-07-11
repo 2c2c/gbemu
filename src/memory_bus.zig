@@ -318,7 +318,9 @@ pub const MemoryBus = struct {
     pub fn read_io(self: *const MemoryBus, io_addr: u16) u8 {
         return blk: {
             switch (io_addr) {
-                0xFF00 => break :blk self.joypad.joyp.unpressed | 0xF,
+                0xFF00 => {
+                    break :blk self.joypad.joyp.unpressed;
+                },
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
                 0xFF04 => break :blk self.timer.div,
@@ -350,12 +352,12 @@ pub const MemoryBus = struct {
             switch (io_addr) {
                 0xFF00 => {
                     // possibly need to not overwrite the lower 4 bits
-                    self.joypad.joyp = @bitCast(byte);
+                    self.joypad.joyp.select = @enumFromInt((byte >> 4) & 0b11);
                 },
-                // 0xFF01 => break :blk,
-                // 0xFF02 => break :blk,
-                0xFF01 => std.debug.print("{c}", .{byte}),
-                0xFF02 => std.debug.print("{c}", .{byte}),
+                0xFF01 => break :blk,
+                0xFF02 => break :blk,
+                // 0xFF01 => std.debug.print("{c}", .{byte}),
+                // 0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.div = 0;
                 },
