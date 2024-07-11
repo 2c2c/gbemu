@@ -140,6 +140,7 @@ const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
 
 pub const GPU = struct {
+    tile_canvas: [SCREEN_WIDTH * SCREEN_HEIGHT]TilePixelValue,
     canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * 3]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
@@ -179,6 +180,7 @@ pub const GPU = struct {
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
         return GPU{
+            .tile_canvas = .{.Zero} ** SCREEN_WIDTH ** SCREEN_HEIGHT,
             .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
@@ -357,6 +359,7 @@ pub const GPU = struct {
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
             const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(self.bgp, color_id));
+            self.tile_canvas[buffer_index / 3] = color;
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
             self.canvas[buffer_index +% 2] = color.to_color();
@@ -504,15 +507,20 @@ pub const GPU = struct {
                         continue;
                     }
                     // goofy
+                    // if (object.attributes.priority and
+                    //     self.canvas[buffer_index] == 0xFF and
+                    //     self.canvas[buffer_index +% 1] == 0xFF and
+                    //     self.canvas[buffer_index +% 2] == 0xFF)
+                    // {
+                    //     continue;
+                    // }
                     if (object.attributes.priority and
-                        self.canvas[buffer_index] == 0xFF and
-                        self.canvas[buffer_index +% 1] == 0xFF and
-                        self.canvas[buffer_index +% 2] == 0xFF)
+                        self.tile_canvas[buffer_index / 3] != TilePixelValue.Zero)
                     {
-                        // std.debug.print("TileColorZero\n", .{});
                         continue;
                     }
 
+                    self.tile_canvas[buffer_index / 3] = color;
                     self.canvas[buffer_index] = color.to_color();
                     self.canvas[buffer_index +% 1] = color.to_color();
                     self.canvas[buffer_index +% 2] = color.to_color();
