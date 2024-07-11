@@ -2884,9 +2884,9 @@ fn gameboy_doctor_print(self: *CPU) void {
 }
 
 fn beeg_print(self: *CPU) void {
-    if (self.pc <= 0x100) {
-        return;
-    }
+    // if (self.pc <= 0x100) {
+    //     return;
+    // }
     log.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         self.registers.A,
         @as(u8, @bitCast(self.registers.F)),

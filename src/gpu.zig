@@ -169,8 +169,8 @@ pub const GPU = struct {
 
     pub fn new() GPU {
         const obp: [2]Palette = .{
-            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
-            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
+            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
         };
         const objects = [_]Object{.{
             .y = 0,
@@ -183,8 +183,8 @@ pub const GPU = struct {
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
-            .lcdc = @bitCast(@as(u8, 0)),
-            .stat = @bitCast(@as(u8, 0)),
+            .lcdc = @bitCast(@as(u8, 0x91)),
+            .stat = @bitCast(@as(u8, 0x85)),
             .background_viewport = .{ .scy = 0, .scx = 0 },
             .ly = 0,
             .internal_window_counter = 0,
