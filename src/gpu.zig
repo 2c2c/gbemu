@@ -170,8 +170,8 @@ pub const GPU = struct {
 
     pub fn new() GPU {
         const obp: [2]Palette = .{
-            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
-            .{ .color_0 = 0, .color_1 = 1, .color_2 = 2, .color_3 = 3 },
+            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
+            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
         };
         const objects = [_]Object{.{
             .y = 0,
@@ -191,7 +191,7 @@ pub const GPU = struct {
             .ly = 0,
             .internal_window_counter = 0,
             .lyc = 0,
-            .bgp = @bitCast(@as(u8, 0)),
+            .bgp = @bitCast(@as(u8, 0xFC)),
             .obp = obp,
             .objects = objects,
             .window_position = .{ .wy = 0, .wx = 0 },
@@ -503,27 +503,15 @@ pub const GPU = struct {
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                     const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
 
-                    if (color == TilePixelValue.Zero) {
-                        continue;
+                    const draw_over_bg_and_window = !object.attributes.priority or
+                        (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
+                    // object.x + x > 160?
+                    if (draw_over_bg_and_window and color != TilePixelValue.Zero) {
+                        self.tile_canvas[buffer_index / 3] = color;
+                        self.canvas[buffer_index] = color.to_color();
+                        self.canvas[buffer_index +% 1] = color.to_color();
+                        self.canvas[buffer_index +% 2] = color.to_color();
                     }
-                    // goofy
-                    // if (object.attributes.priority and
-                    //     self.canvas[buffer_index] == 0xFF and
-                    //     self.canvas[buffer_index +% 1] == 0xFF and
-                    //     self.canvas[buffer_index +% 2] == 0xFF)
-                    // {
-                    //     continue;
-                    // }
-                    if (object.attributes.priority and
-                        self.tile_canvas[buffer_index / 3] != TilePixelValue.Zero)
-                    {
-                        continue;
-                    }
-
-                    self.tile_canvas[buffer_index / 3] = color;
-                    self.canvas[buffer_index] = color.to_color();
-                    self.canvas[buffer_index +% 1] = color.to_color();
-                    self.canvas[buffer_index +% 2] = color.to_color();
 
                     buffer_index += 3;
                 }

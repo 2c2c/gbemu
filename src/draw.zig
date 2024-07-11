@@ -13,9 +13,9 @@ const test_allocator = std.testing.allocator;
 const CPU_SPEED_HZ = 4194304;
 
 pub fn setup_cpu() !CPU {
-    // const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
+    const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
     // const file = try std.fs.cwd().openFile("tetris.gb", .{});
-    const file = try std.fs.cwd().openFile("dr_mario.gb", .{});
+    // const file = try std.fs.cwd().openFile("dr_mario.gb", .{});
     // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
