@@ -293,7 +293,7 @@ pub const GPU = struct {
         const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
         const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
 
-        std.debug.print("ly {} win_y {} window_counter {} y {} win_x {}\n", .{ self.ly, win_y, self.internal_window_counter, y, win_x });
+        // std.debug.print("ly {} win_y {} window_counter {} y {} win_x {}\n", .{ self.ly, win_y, self.internal_window_counter, y, win_x });
 
         // Reset the window counter at the start of the window
         if (self.ly == win_y) {
@@ -450,7 +450,7 @@ pub const GPU = struct {
             std.mem.sort(ObjectIndexPair, objects.*.items, {}, comparator.object_index);
         }
 
-        std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
+        // std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
 
         self.render_objects_list(renderable_objects);
 
@@ -471,7 +471,7 @@ pub const GPU = struct {
             // for (identical_x_objects.items) |object| {
             //     std.debug.print("x: {}\n", .{object.index});
             // }
-            self.render_objects_list(identical_x_objects);
+            // self.render_objects_list(identical_x_objects);
         }
     }
 
@@ -495,7 +495,7 @@ pub const GPU = struct {
                 for (0..8) |x| {
                     const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
                     const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
-                    const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+                    const high: u8 = @as(u8, @truncate(tile_line >> 8));
                     const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
                     // const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
