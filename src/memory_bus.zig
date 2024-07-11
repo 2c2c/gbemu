@@ -261,7 +261,7 @@ pub const MemoryBus = struct {
         switch (address) {
             0x0000...0x7FFF => {
                 // std.debug.print("Attempted write to rom\n", .{});
-                self.memory[address] = byte;
+                // self.memory[address] = byte;
                 return;
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {

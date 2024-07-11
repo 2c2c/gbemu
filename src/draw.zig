@@ -1,8 +1,10 @@
 const std = @import("std");
 const SDL = @import("sdl2");
 const gpu = @import("gpu.zig");
-const CPU = @import("cpu.zig").CPU;
+const cpu_ = @import("cpu.zig");
 const time = @import("std").time;
+
+const CPU = cpu_.CPU;
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
@@ -11,8 +13,9 @@ const test_allocator = std.testing.allocator;
 const CPU_SPEED_HZ = 4194304;
 
 pub fn setup_cpu() !CPU {
-    // const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
-    const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
+    // const file = try std.fs.cwd().openFile("tetris.gb", .{});
+    // const file = try std.fs.cwd().openFile("Dr. Mario (World).gb", .{});
     // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
     // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
     // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
@@ -131,10 +134,12 @@ pub fn main() !void {
             }
         }
 
-        for (0..512) |_| {
+        for (0..10000) |_| {
             cpu.frame_walk();
             frame += 1;
+            std.time.sleep(1000); // 60 FPS
         }
+        try cpu_.buf.flush();
         frame = 0;
 
         _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * 3);

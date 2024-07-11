@@ -9,7 +9,9 @@ const GPU = gpu.GPU;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const log = std.io.getStdOut().writer();
+const out = std.io.getStdOut();
+pub var buf = std.io.bufferedWriter(out.writer());
+pub const log = buf.writer();
 
 const HaltState = enum {
     SwitchedOn,
@@ -2904,21 +2906,21 @@ fn beeg_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 3),
     }) catch unreachable;
 
-    std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
-        self.registers.A,
-        @as(u8, @bitCast(self.registers.F)),
-        self.registers.B,
-        self.registers.C,
-        self.registers.D,
-        self.registers.E,
-        self.registers.H,
-        self.registers.L,
-        self.sp,
-        self.pc,
-        self.bus.read_byte(self.pc),
-        self.bus.read_byte(self.pc +% 1),
-        self.bus.read_byte(self.pc +% 2),
-        self.bus.read_byte(self.pc +% 3),
-    });
+    // std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+    //     self.registers.A,
+    //     @as(u8, @bitCast(self.registers.F)),
+    //     self.registers.B,
+    //     self.registers.C,
+    //     self.registers.D,
+    //     self.registers.E,
+    //     self.registers.H,
+    //     self.registers.L,
+    //     self.sp,
+    //     self.pc,
+    //     self.bus.read_byte(self.pc),
+    //     self.bus.read_byte(self.pc +% 1),
+    //     self.bus.read_byte(self.pc +% 2),
+    //     self.bus.read_byte(self.pc +% 3),
+    // });
     return;
 }

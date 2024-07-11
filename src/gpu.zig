@@ -497,7 +497,6 @@ pub const GPU = struct {
                     const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
                     const high: u8 = @as(u8, @truncate(tile_line >> 8));
                     const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                    // const color_id: u2 = (@as(u2, @truncate(high >> tile_x)) & 1) << 1 | (@as(u2, @truncate(low >> tile_x)) & 1);
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                     const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
 
