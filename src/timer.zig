@@ -50,11 +50,11 @@ pub const Timer = struct {
         };
     }
     pub fn step(self: *Timer, cycles: u64, div: u8) bool {
+        self.div = div;
         self.total_cycles += cycles;
         if (!self.tac.enabled) {
             return false;
         }
-        self.div = div;
 
         const freq: Frequency = @enumFromInt(self.tac.frequency);
         const cycles_per_tick = freq.cycles_per_tick();
