@@ -91,9 +91,30 @@ const RomSize = enum(u8) {
 
 const RamSize = enum(u8) {
     _None = 0x00,
-    _2KB = 0x01,
-    _8KB = 0x02,
-    _32KB = 0x03,
+    _8KB = 0x03,
+    _32KB = 0x04,
+    _128KB = 0x05,
+    _64KB = 0x06,
+
+    pub fn num_bytes(self: RamSize) u32 {
+        switch (self) {
+            ._None => return 0,
+            ._8KB => return 0x2000,
+            ._32KB => return 0x8000,
+            ._128KB => return 0x20000,
+            ._64KB => return 0x10000,
+        }
+    }
+
+    pub fn num_banks(self: RamSize) u32 {
+        switch (self) {
+            ._None => return 0,
+            ._8KB => return 0x01,
+            ._32KB => return 0x04,
+            ._128KB => return 0x16,
+            ._64KB => return 0x08,
+        }
+    }
 };
 
 /// this isnt consistent
