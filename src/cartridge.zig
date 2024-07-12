@@ -1,13 +1,16 @@
 const std = @import("std");
 
-const ROM_BANK_X0_START = 0x0000;
-const ROM_BANK_X0_END = 0x3FFF;
+pub const FULL_ROM_START = 0x0000;
+pub const FULL_ROM_END = 0x7FFF;
 
-const ROM_BANK_N_START = 0x4000;
-const ROM_BANK_N_END = 0x7FFF;
+pub const ROM_BANK_X0_START = 0x0000;
+pub const ROM_BANK_X0_END = 0x3FFF;
 
-const RAM_BANK_START = 0xA000;
-const RAM_BANK_END = 0xBFFF;
+pub const ROM_BANK_N_START = 0x4000;
+pub const ROM_BANK_N_END = 0x7FFF;
+
+pub const RAM_BANK_START = 0xA000;
+pub const RAM_BANK_END = 0xBFFF;
 
 /// MBC - Memory Bank Controller
 const MBCCartridgeType = enum(u8) {

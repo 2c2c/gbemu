@@ -2,6 +2,8 @@ const std = @import("std");
 
 const joypad = @import("joypad.zig");
 const timer = @import("timer.zig");
+const cartridge = @import("cartridge.zig");
+const MBC = cartridge.MBC;
 const IERegister = @import("ie_register.zig").IERegister;
 const gpu = @import("gpu.zig");
 const GPU = gpu.GPU;
@@ -71,12 +73,15 @@ const GameBoyRomHeader = extern struct {
 pub const MemoryBus = struct {
     boot_rom: [0x100]u8,
     memory: [0x10000]u8,
+
+    gpu: GPU,
     joypad: joypad.Joypad,
     timer: timer.Timer,
+    mbc: MBC,
+
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    gpu: GPU,
     pub fn new(boot_rom_buffer: []u8, game_rom: []u8) MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
         var boot_rom = [_]u8{0} ** 0x100;
@@ -184,9 +189,12 @@ pub const MemoryBus = struct {
         return MemoryBus{
             .boot_rom = boot_rom,
             .memory = memory,
+
             .gpu = GPU.new(),
             .joypad = joypad.Joypad.new(),
             .timer = timer_,
+            .mbc = MBC.new(),
+
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
         };
@@ -217,22 +225,28 @@ pub const MemoryBus = struct {
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
         switch (address) {
-            0x0000...0x00FF => {
-                // return self.boot_rom[address];
-                return self.memory[address];
-            },
-            0x0100...0x7FFF => {
-                // std.debug.print("Attempted read from rom\n", .{});
-                return self.memory[address];
+            cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
+                switch (rom_addr) {
+                    // TODO:
+                    0x0000...0x00FF => {
+                        // std.debug.print("Attempted read from boot rom\n", .{});
+                        return self.memory[address];
+                    },
+                    0x0000...0x7FFF => {
+                        return self.memory[address];
+                    },
+                }
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
                 // std.debug.print("Vram byte read\n", .{});
                 return self.gpu.read_vram(address);
             },
-            0xA000...0xBFFF => {
-                // eram
-                // std.debug.print("Attempted write to external ram\n", .{});
-                return self.memory[address];
+            // external ram
+            cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
+                if (self.mbc.ram_enabled) {
+                    return self.memory[address];
+                }
+                return 0xFF;
             },
             0xC000...0xFDFF => {
                 // wram eram
