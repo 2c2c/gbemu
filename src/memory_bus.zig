@@ -71,7 +71,6 @@ const GameBoyRomHeader = extern struct {
     global_checksum: [2]u8,
 };
 pub const MemoryBus = struct {
-    boot_rom: [0x100]u8,
     memory: [0x10000]u8,
 
     gpu: GPU,
@@ -82,118 +81,22 @@ pub const MemoryBus = struct {
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    pub fn new(boot_rom_buffer: []u8, game_rom: []u8) MemoryBus {
+    pub fn new(filename: []u8) !MemoryBus {
+        var mbc = try MBC.new(filename);
+
         var memory = [_]u8{0} ** 0x10000;
-        var boot_rom = [_]u8{0} ** 0x100;
-        for (0x0000..0x0100) |i| {
-            // temp separate memory for boot rom, idk what to do with it yet
-            // std.debug.print("byte 0x{x}\n", .{boot_rom_buffer[i]});
-            boot_rom[i] = boot_rom_buffer[i];
-            memory[i] = boot_rom_buffer[i];
-        }
-
-        for (0x0000..0x8000) |i| {
-            memory[i] = game_rom[i];
-        }
-
-        // memory[0x07] = 0x00;
-        // memory[0x10] = 0x80;
-        // memory[0x11] = 0xBF;
-        // memory[0x12] = 0xF3;
-        // memory[0x14] = 0xBF;
-        // memory[0x16] = 0x3F;
-        // memory[0x17] = 0x00;
-        // memory[0x19] = 0xBF;
-        // memory[0x1A] = 0x7F;
-        // memory[0x1B] = 0xFF;
-        // memory[0x1C] = 0x9F;
-        // memory[0x1E] = 0xBF;
-        // memory[0x20] = 0xFF;
-        // memory[0x21] = 0x00;
-        // memory[0x22] = 0x00;
-        // memory[0x23] = 0xBF;
-        // memory[0x24] = 0x77;
-        // memory[0x25] = 0xF3;
-        // memory[0x26] = 0xF1;
-        // memory[0x40] = 0x91;
-        // memory[0x42] = 0x00;
-        // memory[0x43] = 0x00;
-        // memory[0x45] = 0x00;
-        // memory[0x47] = 0xFC;
-        // memory[0x48] = 0xFF;
-        // memory[0x49] = 0xFF;
-        // memory[0x4A] = 0x00;
-        // memory[0x4B] = 0x00;
-        // memory[0xFF] = 0x00;
-        //
-        // pandocs
-        // memory[0xFF00] = 0xCF;
-        // memory[0xFF01] = 0x00;
-        // memory[0xFF02] = 0x7E;
-        // memory[0xFF04] = 0xAB;
-        // memory[0xFF05] = 0x00;
-        // memory[0xFF06] = 0x00;
-        // memory[0xFF07] = 0xF8;
-        // memory[0xFF0F] = 0xE1;
-        // memory[0xFF10] = 0x80;
-        // memory[0xFF11] = 0xBF;
-        // memory[0xFF12] = 0xF3;
-        // memory[0xFF13] = 0xFF;
-        // memory[0xFF14] = 0xBF;
-        // memory[0xFF16] = 0x3F;
-        // memory[0xFF17] = 0x00;
-        // memory[0xFF18] = 0xFF;
-        // memory[0xFF19] = 0xBF;
-        // memory[0xFF1A] = 0x7F;
-        // memory[0xFF1B] = 0xFF;
-        // memory[0xFF1C] = 0x9F;
-        // memory[0xFF1D] = 0xFF;
-        // memory[0xFF1E] = 0xBF;
-        // memory[0xFF20] = 0xFF;
-        // memory[0xFF21] = 0x00;
-        // memory[0xFF22] = 0x00;
-        // memory[0xFF23] = 0xBF;
-        // memory[0xFF24] = 0x77;
-        // memory[0xFF25] = 0xF3;
-        // memory[0xFF26] = 0xF1;
-        // memory[0xFF40] = 0x91;
-        // memory[0xFF41] = 0x85;
-        // memory[0xFF42] = 0x00;
-        // memory[0xFF43] = 0x00;
-        // memory[0xFF44] = 0x00;
-        // memory[0xFF45] = 0x00;
-        // memory[0xFF46] = 0xFF;
-        // memory[0xFF47] = 0xFC;
-        // // memory[0xFF48] = 0x?7 ;
-        // // memory[0xFF49] = 0x?7 ;
-        // memory[0xFF4A] = 0x00;
-        // memory[0xFF4B] = 0x00;
-        // // memory[0xFF4D] = --   ;
-        // // memory[0xFF4F] = --   ;
-        // // memory[0xFF51] = --   ;
-        // // memory[0xFF52] = --   ;
-        // // memory[0xFF53] = --   ;
-        // // memory[0xFF54] = --   ;
-        // // memory[0xFF55] = --   ;
-        // // memory[0xFF56] = --   ;
-        // // memory[0xFF68] = --   ;
-        // // memory[0xFF69] = --   ;
-        // // memory[0xFF6A] = --   ;
-        // // memory[0xFF6B] = --   ;
-        // // memory[0xFF70] = --   ;
-        // memory[0xFFFF] = 0x00;
+        std.mem.copyForwards(u8, memory[0..0x7FFF], mbc.cartridge_data[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
 
         return MemoryBus{
-            .boot_rom = boot_rom,
             .memory = memory,
 
             .gpu = GPU.new(),
             .joypad = joypad.Joypad.new(),
             .timer = timer_,
-            .mbc = MBC.new(),
+            .mbc = mbc,
 
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
@@ -206,9 +109,6 @@ pub const MemoryBus = struct {
             self.interrupt_flag.enable_timer = true;
         }
 
-        // TODO: should gpu control memory bus? gpu having direct oam write access?
-        // seems like delegating memory control to bus makes more sense
-        // would need to hand off the enabled interrupts to the bus from cpu
         const res = self.gpu.step(cycles);
 
         self.interrupt_flag.enable_lcd_stat = res.enable_lcd_stat;
@@ -227,14 +127,15 @@ pub const MemoryBus = struct {
         switch (address) {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
-                    // TODO:
+                    // TODO: ?
                     0x0000...0x00FF => {
                         // std.debug.print("Attempted read from boot rom\n", .{});
                         return self.memory[address];
                     },
-                    0x0000...0x7FFF => {
+                    0x0100...0x7FFF => {
                         return self.memory[address];
                     },
+                    else => {},
                 }
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
@@ -471,10 +372,5 @@ pub const MemoryBus = struct {
             }
         };
         _ = res; // autofix
-    }
-    pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {
-        const slice = memory[0x100..0x150];
-        const header: *GameBoyRomHeader = @ptrCast(slice);
-        return header.*;
     }
 };

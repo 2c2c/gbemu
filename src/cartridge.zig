@@ -72,6 +72,21 @@ const RomSize = enum(u8) {
             ._1_5MB => return 0x60,
         }
     }
+    pub fn num_bytes(self: RomSize) u32 {
+        switch (self) {
+            ._32KB => return 0x8000,
+            ._64KB => return 0x10000,
+            ._128KB => return 0x20000,
+            ._256KB => return 0x40000,
+            ._512KB => return 0x80000,
+            ._1MB => return 0x100000,
+            ._2MB => return 0x200000,
+            ._4MB => return 0x400000,
+            ._1_1MB => return 0x120000,
+            ._1_2MB => return 0x140000,
+            ._1_5MB => return 0x180000,
+        }
+    }
 };
 
 const RamSize = enum(u8) {
@@ -121,9 +136,13 @@ const GameBoyRomHeader = extern struct {
     global_checksum: [2]u8,
 };
 
-const MBC = struct {
-    rom: [0x8000]u8,
-    ram: [0x2000]u8,
+pub const MBC = struct {
+    gpa: std.heap.GeneralPurposeAllocator(.{}),
+    allocator: std.mem.Allocator,
+    filename: []u8,
+    cartridge_data: []u8,
+    header: GameBoyRomHeader,
+
     rom_bank: u8,
     ram_bank: u8,
     ram_enabled: bool,
@@ -135,7 +154,7 @@ const MBC = struct {
         self.ram_enabled = true;
         // probably in mmio react to setting this within range
         // 0x0000...0x1FFF
-        self.rom[0x0000] = 0xA;
+        self.cartridge_data[0x0000] = 0xA;
     }
     pub fn set_rom_bank_number(self: *MBC, bank: u8) void {
         // mask to 5 bits
@@ -153,7 +172,7 @@ const MBC = struct {
         // masked_bank = (secondary_bank << 5) | masked_bank;
 
         // 0x2000...0x3FFF
-        self.rom[0x2000] = masked_bank;
+        self.cartridge_data[0x2000] = masked_bank;
 
         // note: do not understand the 0x20 0x40 0x60 issues mentioned in docs
     }
@@ -166,19 +185,43 @@ const MBC = struct {
     // 1 -> the above can be bank switched
     pub fn set_banking_mode(self: *MBC, mode: u8) void {
         // 0x0000...0x1FFF
-        self.rom[0x6000] = mode;
+        self.cartridge_data[0x6000] = mode;
     }
 
-    pub fn new(header: GameBoyRomHeader) MBC {
+    pub fn new(filename: []u8) !MBC {
+        const file = try std.fs.cwd().openFile(filename, .{});
+        defer file.close();
+
+        const size = try file.getEndPos();
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+        const game_rom = try allocator.alloc(u8, size);
+        _ = try file.readAll(game_rom);
+        const header = get_game_rom_metadata(game_rom);
+        std.debug.print("rom {} \n", .{game_rom.len});
+
         return MBC{
+            .gpa = gpa,
+            .allocator = allocator,
+            .cartridge_data = game_rom,
+            .header = header,
+            .filename = filename,
             .rom_bank = 1,
             .ram_bank = 0,
             .ram_enabled = false,
             .mbc_type = header.cartridge_type,
             .rom_size = header.rom_size,
             .ram_size = header.ram_size,
-            .rom = undefined,
-            .ram = undefined,
         };
     }
+    pub fn deinit(self: *MBC) void {
+        self.allocator.free(self.cartridge_data);
+        self.gpa.deinit();
+    }
 };
+pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {
+    const slice = memory[0x100..0x150];
+    const header: *GameBoyRomHeader = @ptrCast(slice);
+    return header.*;
+}

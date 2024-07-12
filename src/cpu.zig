@@ -2604,50 +2604,7 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(game_rom: []u8) !CPU {
-        // init game_rom buffer and boot_rom buffer
-        // mock data wiht 1s for now
-        // var arena_allocator = ArenaAllocator.init(std.heap.page_allocator);
-        // defer arena_allocator.deinit();
-        // const allocator = arena_allocator.allocator();
-        // var boot_rom = ArrayList(u8).init(allocator);
-
-        // defer boot_rom.deinit();
-        // init to 0x100 0s
-        // slice game_rom
-        var boot_rom = game_rom[0..0x100];
-
-        // var game_rom = ArrayList(u8).init(allocator);
-        // defer game_rom.deinit();
-        // for (0..0x8000) |_| {
-        //     try game_rom.append(0);
-        // }
-        // const cpu: CPU = CPU{
-        //     .registers = Registers{
-        //         .A = 0x00,
-        //         .B = 0x00,
-        //         .C = 0x00,
-        //         .D = 0x00,
-        //         .E = 0x00,
-        //         .F = .{
-        //             .zero = false,
-        //             .subtract = false,
-        //             .half_carry = false,
-        //             .carry = false,
-        //         },
-        //         .H = 0x00,
-        //         .L = 0x00,
-        //     },
-        //     .pc = 0x00,
-        //     .sp = 0x00,
-        //     .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
-        //     .halt_state = HaltState.Disabled,
-        //     .is_stopped = false,
-        //     .ime = IME.Disabled,
-        //     .pending_t_cycles = 0,
-        //     .clock = .{ .t_cycles = 0 },
-        // };
-        //debug
+    pub fn new(filename: []u8) !CPU {
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x01,
@@ -2667,7 +2624,7 @@ pub const CPU = struct {
             },
             .pc = 0x0100,
             .sp = 0xFFFE,
-            .bus = MemoryBus.new(boot_rom[0..], game_rom[0..]),
+            .bus = try MemoryBus.new(filename),
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,
@@ -2692,159 +2649,6 @@ pub const CPU = struct {
         return @as(u16, high) << 8 | @as(u16, low);
     }
 };
-
-test "Add A + C" {
-    // std.debug.print("Add A + C\n", .{});
-    const instc = Instruction{ .ADD = ArithmeticTarget.C };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.A = 0xFF;
-    cpu.registers.C = 0x02;
-    // std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
-
-    _ = cpu.execute(instc);
-    // std.debug.print("A: {x}, C: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.C, @as(u8, @bitCast(cpu.registers.F)) });
-}
-
-test "Adc A + E" {
-    // std.debug.print("Adc A + E\n", .{});
-    const inste = Instruction{ .ADC = ArithmeticTarget.E };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.F = .{
-        .zero = true,
-        .subtract = false,
-        .carry = true,
-        .half_carry = false,
-    };
-
-    cpu.registers.A = 0xFE;
-    cpu.registers.E = 0x01;
-    // std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, @as(u8, @bitCast(cpu.registers.F)) });
-
-    _ = cpu.execute(inste);
-    // std.debug.print("A: {x}, E: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.E, @as(u8, @bitCast(cpu.registers.F)) });
-}
-
-test "Sub A + D" {
-    // std.debug.print("Sub A + D\n", .{});
-    const instd = Instruction{ .SUB = ArithmeticTarget.D };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.A = 0x01;
-    cpu.registers.D = 0x01;
-    // std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
-
-    _ = cpu.execute(instd);
-    // std.debug.print("A: {x}, D: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.D, @as(u8, @bitCast(cpu.registers.F)) });
-}
-
-test "Sbc A + B" {
-    // std.debug.print("Sbc A + D\n", .{});
-    const instb = Instruction{ .SBC = ArithmeticTarget.B };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.F = .{
-        .zero = true,
-        .subtract = false,
-        .carry = true,
-        .half_carry = false,
-    };
-    cpu.registers.A = 0x01;
-    cpu.registers.B = 0x01;
-    // std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, @as(u8, @bitCast(cpu.registers.F)) });
-
-    _ = cpu.execute(instb);
-    // std.debug.print("A: {x}, B: {x}, FLAGS: {b:0>8} \n", .{ cpu.registers.A, cpu.registers.B, @as(u8, @bitCast(cpu.registers.F)) });
-}
-
-test "sp add" {
-    // std.debug.print("SP ADD\n", .{});
-    const inst = Instruction{ .SPADD = {} };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.sp = 0xFFFF;
-    cpu.bus.memory[0x0001] = 0xFF;
-    // std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
-    _ = cpu.execute(inst);
-    // std.debug.print("SP: {x} FLAGS: {b:0>8}\n", .{ cpu.sp, @as(u8, @bitCast(cpu.registers.F)) });
-}
-
-test "Jump" {
-    // std.debug.print("Jump\n", .{});
-    const jp_inst = Instruction{ .JP = JumpTest.Always };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    const old_pos = 0x0000;
-    const new_pos = 0x1234;
-    cpu.bus.memory[old_pos + 1] = 0x34;
-    cpu.bus.memory[old_pos + 2] = 0x12;
-    cpu.pc = old_pos;
-    // std.debug.print("PC: {x}\n", .{cpu.pc});
-
-    cpu.execute(jp_inst);
-    std.debug.assert(cpu.pc == new_pos);
-}
-
-test "overflow" {
-    // std.debug.print("overflow test\n", .{});
-    const comp_a: u8 = 0xFF;
-    const comp_b: u8 = @bitCast(@as(i8, -0x01));
-    const res = @addWithOverflow(comp_a, comp_b);
-    _ = res; // autofix
-    // std.debug.print("0xFF + -1 = {d} {d}\n", .{ res[0], res[1] });
-}
-
-// test "signed to unsigned" {
-//     // std.debug.print("signed to unsigned\n", .{});
-//     const value: u8 = 0xFF;
-//     const signed: i8 = @bitCast(value);
-//     const extended = @as(i16, signed);
-//     const unsigned: u16 = @bitCast(extended);
-//     // std.debug.print("value: {b} signed: {b}, extended: {b}, unsigned: {b} \n", .{ value, signed, extended, unsigned });
-//     // std.debug.print("-1 as unsigned: {d}\n", .{unsigned});
-// }
-//
-
-test "RRC" {
-    // std.debug.print("RRC\n", .{});
-    const inst = Instruction{ .RRC = PrefixTarget.A };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.F = .{
-        .zero = true,
-        .subtract = false,
-        .carry = true,
-        .half_carry = false,
-    };
-    cpu.registers.A = 0b1100_1000;
-    // std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
-    _ = cpu.execute(inst);
-    // std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
-}
-test "RES" {
-    // std.debug.print("RES\n", .{});
-    const inst = Instruction{ .RES = .{ .target = PrefixTarget.A, .bit = 3 } };
-    var game_rom = [_]u8{0} ** 0x8000;
-    var cpu = try CPU.new(&game_rom);
-    cpu.registers.A = 0b1100_1000;
-    // std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
-    _ = cpu.execute(inst);
-    // std.debug.print("A: {b:0>8}\n", .{cpu.registers.A});
-}
-
-const expect = std.testing.expect;
-const eql = std.mem.eql;
-const test_allocator = std.testing.allocator;
-test "io reader usage" {
-    const file = try std.fs.cwd().openFile("test_rom.gb", .{});
-    defer file.close();
-
-    const size = try file.getEndPos();
-    const buffer = try test_allocator.alloc(u8, size);
-    defer test_allocator.free(buffer);
-    _ = try file.readAll(buffer);
-}
 
 /// Prints state of cpu that can be diffed against using gameboy_doctor
 /// just pipe GBEMU | gameboy_doctor

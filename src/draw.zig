@@ -12,43 +12,8 @@ const test_allocator = std.testing.allocator;
 
 const CPU_SPEED_HZ = 4194304;
 
-pub fn setup_cpu() !CPU {
-    const file = try std.fs.cwd().openFile("dmg-acid2.gb", .{});
-    // const file = try std.fs.cwd().openFile("tetris.gb", .{});
-    // const file = try std.fs.cwd().openFile("dr_mario.gb", .{});
-    // const file = try std.fs.cwd().openFile("instr_timing.gb", .{});
-    // const file = try std.fs.cwd().openFile("./02-interrupts.gb", .{});
-    // const file = try std.fs.cwd().openFile("./03-op sp,hl.gb", .{});
-    // const file = try std.fs.cwd().openFile("cpu_instrs.gb", .{});
-    // const file = try std.fs.cwd().openFile("flappy_boy.gb", .{});
-    // const file = try std.fs.cwd().openFile("Pokemon Blue.gb", .{});
-    // vid roms
-    //
-    // const file = try std.fs.cwd().openFile("lycscx.gb", .{});
-    // const file = try std.fs.cwd().openFile("lycscy.gb", .{});
-    // const file = try std.fs.cwd().openFile("palettely.gb", .{});
-    // const file = try std.fs.cwd().openFile("scxly.gb", .{});
-    // const file = try std.fs.cwd().openFile("statcount.gb", .{});
-    // const file = try std.fs.cwd().openFile("statcount-auto.gb", .{});
-    // const file = try std.fs.cwd().openFile("winpos.gb", .{});
-    // const file = try std.fs.cwd().openFile("Pokemon Blue.gb", .{});
-    // const file = try std.fs.cwd().openFile("Pokemon Blue.gb", .{});
-    defer file.close();
-
-    const size = try file.getEndPos();
-
-    var arena_allocator = ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_allocator.deinit();
-    const allocator = arena_allocator.allocator();
-    const game_rom = try allocator.alloc(u8, size);
-    defer allocator.free(game_rom);
-    _ = try file.readAll(game_rom);
-
-    // for (game_rom) |rom| {
-    //     std.debug.print("0x{x}\n", .{rom});
-    // }
-
-    const cpu = CPU.new(game_rom);
+pub fn setup_cpu(filename: []u8) !CPU {
+    const cpu = CPU.new(filename);
     return cpu;
 }
 
@@ -56,7 +21,7 @@ const WIDTH = 160;
 const HEIGHT = 144;
 const SCALE = 4;
 
-pub fn main() !void {
+pub fn main(filename: []u8) !void {
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
         sdlPanic();
     defer SDL.SDL_Quit();
@@ -87,7 +52,7 @@ pub fn main() !void {
     defer SDL.SDL_DestroyTexture(texture);
     _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
 
-    var cpu = try setup_cpu();
+    var cpu = try setup_cpu(filename);
 
     var frame: usize = 0;
     mainLoop: while (true) {
