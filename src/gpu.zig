@@ -118,10 +118,10 @@ const WindowPosition = packed struct {
 };
 
 const Palette = packed struct {
-    color_0: u2,
-    color_1: u2,
-    color_2: u2,
-    color_3: u2,
+    color_0: TilePixelValue,
+    color_1: TilePixelValue,
+    color_2: TilePixelValue,
+    color_3: TilePixelValue,
 };
 
 /// FF47
@@ -170,8 +170,18 @@ pub const GPU = struct {
 
     pub fn new() GPU {
         const obp: [2]Palette = .{
-            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
-            .{ .color_0 = 0, .color_1 = 0, .color_2 = 0, .color_3 = 0 },
+            .{
+                .color_0 = TilePixelValue.Zero,
+                .color_1 = TilePixelValue.Zero,
+                .color_2 = TilePixelValue.Zero,
+                .color_3 = TilePixelValue.Zero,
+            },
+            .{
+                .color_0 = TilePixelValue.Zero,
+                .color_1 = TilePixelValue.Zero,
+                .color_2 = TilePixelValue.Zero,
+                .color_3 = TilePixelValue.Zero,
+            },
         };
         const objects = [_]Object{.{
             .y = 0,
@@ -295,14 +305,10 @@ pub const GPU = struct {
         const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
         const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
 
-        // std.debug.print("ly {} win_y {} window_counter {} y {} win_x {}\n", .{ self.ly, win_y, self.internal_window_counter, y, win_x });
-
-        // Reset the window counter at the start of the window
         if (self.ly == win_y) {
             self.internal_window_counter = 0;
         }
 
-        // Check if the window is visible and increment the counter
         if (self.lcdc.window_enable and self.ly >= win_y and self.lcdc.bg_window_enable and win_x < 160) {
             self.internal_window_counter += 1;
         }
@@ -311,14 +317,12 @@ pub const GPU = struct {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
 
-            // Check if window should be rendered at this position
             if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
                 const adjusted_y: u16 = self.internal_window_counter - 1;
                 const temp_x: i16 = x - win_x;
                 const tile_y: u8 = @truncate(adjusted_y & 7);
                 tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
 
-                // Fetch the appropriate tile for the window
                 const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
@@ -343,7 +347,6 @@ pub const GPU = struct {
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
-                    // const tile_index_signed = @as(i8, @bitCast(tile_index));
                     const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
                     var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
                     if (tile_index_signed < 0) {
@@ -358,7 +361,7 @@ pub const GPU = struct {
             const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-            const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(self.bgp, color_id));
+            const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
             self.tile_canvas[buffer_index / 3] = color;
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
@@ -373,15 +376,13 @@ pub const GPU = struct {
         }
         const object_height: u8 = if (self.lcdc.obj_size) 16 else 8;
 
-        // limit of 10 objects per scanline
+        // there is a limit of 10 objects per scanline
         var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena_allocator.deinit();
         const allocator = arena_allocator.allocator();
         var renderable_objects = std.ArrayList(Object).init(allocator);
         defer renderable_objects.deinit();
-        // todo drop the static object storage, just cast and handle x/y offsets here
         for (self.objects) |object| {
-            // std.debug.print("object.y {}\n", .{object.y});
             const start_y = object.y;
             const end_y = start_y + object_height;
             if (start_y <= self.ly and end_y > self.ly) {
@@ -391,21 +392,14 @@ pub const GPU = struct {
                 break;
             }
         }
-        // std.debug.print("num objects {}\n", .{renderable_objects.items.len});
-        // if (!self.lcdc.obj_size) {
-        //     // ?
-        //     return;
-        // }
 
         // there are two difficult forms of priority
         // * an object more leftward takes priority over something to its right
         // * two objects with the same x, the one with the lower oam index takes priority
         //
-        //
-        // sort objects by x position, gtl
-        // hash objects by x position, sort those by oam index
-        // do two passes against these
-
+        // Sort objects by x position, descending. overlapping leftmosttiles will always overwrite rightmost tiles
+        // Hash objects by x position inside an array. sort those arrays by oam index, descending. the leftmost oam indexed tile will always overwrite the rightmost
+        // iterate through the first, then do a second pass against the hash for any array with more than one object
         const ObjectIndexPair = struct {
             object: Object,
             index: usize,
@@ -421,19 +415,12 @@ pub const GPU = struct {
         }
 
         for (renderable_objects.items, 0..) |object, oam_index| {
-            // if (!object_hash.contains(object.x)) {
-            //     object_hash.put(object.x, std.ArrayList(Object).init(allocator)) catch unreachable;
-            // } else {
-            //     const objects = object_hash.getPtr(object.x).?;
-            //     objects.*.append(object) catch unreachable;
-            // }
             const gop = objectpair_hash.getOrPut(object.x) catch unreachable;
             if (!gop.found_existing) {
                 gop.value_ptr.* = std.ArrayList(ObjectIndexPair).init(allocator);
-
-                const pair = ObjectIndexPair{ .object = object, .index = oam_index };
-                gop.value_ptr.*.append(pair) catch unreachable;
             }
+            const pair = ObjectIndexPair{ .object = object, .index = oam_index };
+            gop.value_ptr.*.append(pair) catch unreachable;
         }
 
         // std.debug.print("hash {} \n", .{objectpair_hash.count()});
@@ -453,35 +440,28 @@ pub const GPU = struct {
             std.mem.sort(ObjectIndexPair, objects.*.items, {}, comparator.object_index);
         }
 
-        // std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
+        std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
 
         self.render_objects_list(renderable_objects);
 
-        // do a second pass on objects with exact same x pos, left to right
+        // do a second pass on objects with the same object.x position
         var objectpairs_itr = objectpair_hash.valueIterator();
         while (objectpairs_itr.next()) |objectpairs| {
             if (objectpairs.*.items.len <= 1) {
                 continue;
             }
-            std.debug.print("pair found\n", .{});
             var identical_x_objects = std.ArrayList(Object).init(allocator);
             defer identical_x_objects.deinit();
             for (objectpairs.*.items) |objectpair| {
                 identical_x_objects.append(objectpair.object) catch unreachable;
             }
 
-            // std.debug.print("before:\n", .{});
-            // for (identical_x_objects.items) |object| {
-            //     std.debug.print("x: {}\n", .{object.index});
-            // }
-            // self.render_objects_list(identical_x_objects);
+            self.render_objects_list(identical_x_objects);
         }
     }
 
     pub fn render_objects_list(self: *GPU, renderable_objects: std.ArrayList(Object)) void {
         for (renderable_objects.items) |object| {
-            // i -= 1;
-            // const object = renderable_objects.items[i];
             if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
                 var tile_y: i16 = undefined;
                 if (self.lcdc.obj_size) {
@@ -501,10 +481,11 @@ pub const GPU = struct {
                     const high: u8 = @as(u8, @truncate(tile_line >> 8));
                     const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-                    const color: TilePixelValue = @enumFromInt(GPU.color_from_palette(palatte, color_id));
+                    const color: TilePixelValue = GPU.color_from_palette(palatte, color_id);
 
                     const draw_over_bg_and_window = !object.attributes.priority or
                         (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
+
                     // object.x + x > 160?
                     if (draw_over_bg_and_window and color != TilePixelValue.Zero) {
                         self.tile_canvas[buffer_index / 3] = color;
@@ -550,7 +531,7 @@ pub const GPU = struct {
             self.tile_set[tile_index][row_index][pixel_index] = @enumFromInt(pixel_value);
         }
     }
-    pub fn color_from_palette(palette: Palette, color: u2) u2 {
+    pub fn color_from_palette(palette: Palette, color: u2) TilePixelValue {
         return switch (color) {
             0b00 => return palette.color_0,
             0b01 => return palette.color_1,
