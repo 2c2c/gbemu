@@ -169,26 +169,42 @@ pub const GPU = struct {
     cycles: usize,
 
     pub fn new() GPU {
+        // const obp: [2]Palette = .{
+        //     .{
+        //         .color_0 = TilePixelValue.Zero,
+        //         .color_1 = TilePixelValue.Zero,
+        //         .color_2 = TilePixelValue.Zero,
+        //         .color_3 = TilePixelValue.Zero,
+        //     },
+        //     .{
+        //         .color_0 = TilePixelValue.Zero,
+        //         .color_1 = TilePixelValue.Zero,
+        //         .color_2 = TilePixelValue.Zero,
+        //         .color_3 = TilePixelValue.Zero,
+        //     },
+        // };
         const obp: [2]Palette = .{
             .{
                 .color_0 = TilePixelValue.Zero,
-                .color_1 = TilePixelValue.Zero,
-                .color_2 = TilePixelValue.Zero,
-                .color_3 = TilePixelValue.Zero,
+                .color_1 = TilePixelValue.One,
+                .color_2 = TilePixelValue.Two,
+                .color_3 = TilePixelValue.Three,
             },
             .{
                 .color_0 = TilePixelValue.Zero,
-                .color_1 = TilePixelValue.Zero,
-                .color_2 = TilePixelValue.Zero,
-                .color_3 = TilePixelValue.Zero,
+                .color_1 = TilePixelValue.One,
+                .color_2 = TilePixelValue.Two,
+                .color_3 = TilePixelValue.Three,
             },
         };
+
         const objects = [_]Object{.{
             .y = 0,
             .x = 0,
             .tile_index = 0,
             .attributes = @bitCast(@as(u8, 0)),
         }} ** 40;
+
         return GPU{
             .tile_canvas = .{.Zero} ** SCREEN_WIDTH ** SCREEN_HEIGHT,
             .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * 3),
@@ -291,6 +307,9 @@ pub const GPU = struct {
     fn render_scanline(self: *GPU) void {
         self.render_bg();
         self.render_objects();
+        for (0..self.tile_canvas.len) |i| {
+            self.tile_canvas[i] = TilePixelValue.Zero;
+        }
     }
 
     fn render_bg(self: *GPU) void {

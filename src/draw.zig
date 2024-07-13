@@ -99,7 +99,7 @@ pub fn main(filename: []u8) !void {
             }
         }
 
-        for (0..10000) |_| {
+        for (0..20000) |_| {
             cpu.frame_walk();
             frame += 1;
             std.time.sleep(1000); // 60 FPS

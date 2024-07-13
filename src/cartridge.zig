@@ -139,14 +139,16 @@ const RomSize = enum(u8) {
 
 const RamSize = enum(u8) {
     _None = 0x00,
-    _8KB = 0x03,
-    _32KB = 0x04,
-    _128KB = 0x05,
-    _64KB = 0x06,
+    _Unused = 0x01,
+    _8KB = 0x02,
+    _32KB = 0x03,
+    _128KB = 0x04,
+    _64KB = 0x05,
 
     pub fn num_bytes(self: RamSize) u32 {
         switch (self) {
             ._None => return 0,
+            ._Unused => return 0,
             ._8KB => return 0x2000,
             ._32KB => return 0x8000,
             ._128KB => return 0x20000,
@@ -157,6 +159,7 @@ const RamSize = enum(u8) {
     pub fn num_banks(self: RamSize) u32 {
         switch (self) {
             ._None => return 0,
+            ._Unused => return 0,
             ._8KB => return 0x01,
             ._32KB => return 0x04,
             ._128KB => return 0x16,
@@ -236,7 +239,11 @@ pub const MBC = struct {
     pub fn handle_register(self: *MBC, address: u16, byte: u8) void {
         switch (self.mbc_type) {
             MBCCartridgeType.ROM_ONLY => {},
-            MBCCartridgeType.MBC1 => {
+
+            MBCCartridgeType.MBC1,
+            MBCCartridgeType.MBC1_RAM,
+            MBCCartridgeType.MBC1_RAM_BATTERY,
+            => {
                 switch (address) {
                     MBC1_RAM_ENABLE_START...MBC1_RAM_ENABLE_END => {
                         self.set_ram_enabled(byte);
@@ -262,7 +269,11 @@ pub const MBC = struct {
             MBCCartridgeType.ROM_ONLY => {
                 return self.rom[address];
             },
-            MBCCartridgeType.MBC1 => {
+
+            MBCCartridgeType.MBC1,
+            MBCCartridgeType.MBC1_RAM,
+            MBCCartridgeType.MBC1_RAM_BATTERY,
+            => {
                 switch (address) {
                     ROM_BANK_X0_START...ROM_BANK_X0_END => {
                         const mbc1_address = MBC1RomAddressSpace{
