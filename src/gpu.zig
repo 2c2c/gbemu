@@ -506,7 +506,8 @@ pub const GPU = struct {
                         (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
 
                     // object.x + x > 160?
-                    if (draw_over_bg_and_window and color != TilePixelValue.Zero) {
+                    // miserable bug: the color check is on color_id, not the color
+                    if (draw_over_bg_and_window and color_id != 0) {
                         self.tile_canvas[buffer_index / 3] = color;
                         self.canvas[buffer_index] = color.to_color();
                         self.canvas[buffer_index +% 1] = color.to_color();
