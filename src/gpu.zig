@@ -1,6 +1,12 @@
 const std = @import("std");
 const IERegister = @import("ie_register.zig").IERegister;
 
+const BACKGROUND_WIDTH: usize = 256;
+const BACKGROUND_HEIGHT: usize = 256;
+
+const SCREEN_WIDTH: usize = 160;
+const SCREEN_HEIGHT: usize = 144;
+
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
 // const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
@@ -135,9 +141,6 @@ const BGP = Palette;
 /// same for but for objects
 /// lower 2 bits are ignored transparent
 const OBP = [2]Palette;
-
-const SCREEN_WIDTH: usize = 160;
-const SCREEN_HEIGHT: usize = 144;
 
 pub const GPU = struct {
     tile_canvas: [SCREEN_WIDTH * SCREEN_HEIGHT]TilePixelValue,
