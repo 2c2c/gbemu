@@ -52,11 +52,14 @@ pub fn main(filename: []u8) !void {
     defer SDL.SDL_DestroyTexture(texture);
     _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var alloc = gpa.allocator();
+    const title = try alloc.alloc(u8, 256);
     var cpu = try setup_cpu(filename);
+    var frame: u128 = 0;
 
-    var frame: usize = 0;
     mainLoop: while (true) {
-        const start_ms = std.time.microTimestamp();
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) > 0) {
             switch (ev.type) {
@@ -100,27 +103,32 @@ pub fn main(filename: []u8) !void {
             }
         }
 
-        for (0..10000) |_| {
+        const hz_60_micros: u64 = 16667;
+        const start_us = std.time.microTimestamp();
+        while (true) {
             cpu.frame_walk();
-            frame += 1;
-            // std.time.sleep(1000); // 60 FPS
+            const time_diff = std.time.microTimestamp() - start_us;
+            if (time_diff >= hz_60_micros) {
+                break;
+            }
         }
         try cpu_.buf.flush();
-        frame = 0;
+        frame += 1;
 
+        _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
+        SDL.SDL_SetWindowTitle(window, title.ptr);
         _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
 
-        const end_ms = std.time.microTimestamp();
-        const run_diff = @as(u64, @intCast(end_ms - start_ms));
-        const hz_60_micros: u64 = 16667;
-
-        const sleep_time = if (hz_60_micros > run_diff) hz_60_micros - run_diff else 0;
-        std.debug.print("hz_us {} run_diff {} sleep_time {}\n", .{ hz_60_micros, run_diff, sleep_time });
-        std.time.sleep(sleep_time * std.time.ns_per_us); // 60 FPS
+        // const end_ms = std.time.microTimestamp();
+        // const run_diff = @as(u64, @intCast(end_ms - start_us));
+        //
+        // const sleep_time = if (hz_60_micros > run_diff) hz_60_micros - run_diff else 0;
+        // std.debug.print("hz_us {} run_diff {} sleep_time {}\n", .{ hz_60_micros, run_diff, sleep_time });
+        // std.time.sleep(sleep_time * std.time.ns_per_us); // 60 FPS
     }
 }
 
@@ -140,4 +148,17 @@ fn print_canvas(cpu: *CPU) void {
         }
         std.debug.print("\n", .{});
     }
+}
+
+test "test" {
+    const hz_60_micros: u64 = 60 * 16667;
+    const start_us = std.time.microTimestamp();
+    std.debug.print("start\n", .{});
+    while (true) {
+        const time_diff = std.time.microTimestamp() - start_us;
+        if (time_diff >= hz_60_micros) {
+            break;
+        }
+    }
+    std.debug.print("end\n", .{});
 }

@@ -63,13 +63,3 @@ test {
     std.testing.refAllDeclsRecursive(@This());
     // or refAllDeclsRecursive
 }
-
-test "io reader usage" {
-    const file = try std.fs.cwd().openFile("test_rom.gb", .{});
-    defer file.close();
-
-    const size = try file.getEndPos();
-    const buffer = try test_allocator.alloc(u8, size);
-    defer test_allocator.free(buffer);
-    _ = try file.readAll(buffer);
-}
