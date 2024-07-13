@@ -245,11 +245,7 @@ pub const MBC = struct {
                         self.set_rom_bank_number(byte);
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
-                        if (self.banking_mode == 0) {
-                            self.set_ram_bank(byte);
-                        } else {
-                            self.set_ram_bank_number(byte);
-                        }
+                        self.set_ram_bank(byte);
                     },
                     MBC1_ROM_RAM_MODE_SELECT_START...MBC1_ROM_RAM_MODE_SELECT_END => {
                         self.set_banking_mode(byte);
@@ -272,7 +268,7 @@ pub const MBC = struct {
                         const mbc1_address = MBC1RomAddressSpace{
                             .base = @truncate(address),
                             .rom_bank = 0,
-                            .ram_bank = 0,
+                            .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
 
                         return self.rom[@as(u21, @bitCast(mbc1_address))];
@@ -280,13 +276,13 @@ pub const MBC = struct {
                     ROM_BANK_N_START...ROM_BANK_N_END => {
                         const mbc1_address = MBC1RomAddressSpace{
                             .base = @truncate(address),
-                            .rom_bank = @truncate(self.rom_bank & 0b0001_1111),
-                            .ram_bank = @truncate(self.rom_bank & 0b0110_0000),
+                            .rom_bank = @truncate(self.rom_bank),
+                            .ram_bank = @truncate(self.ram_bank),
                         };
                         return self.rom[@as(u21, @bitCast(mbc1_address))];
                     },
                     else => {
-                        return 0;
+                        return 0xFF;
                     },
                 }
             },
@@ -300,16 +296,19 @@ pub const MBC = struct {
                 return self.ram[address];
             },
             MBCCartridgeType.MBC1 => {
+                if (!self.ram_enabled) {
+                    return 0xFF;
+                }
                 switch (address) {
                     RAM_BANK_START...RAM_BANK_END => {
                         const mbc1_address = MBC1RamAddressSpace{
                             .base = @truncate(address),
-                            .ram_bank = @truncate(self.ram_bank),
+                            .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         self.ram[@as(u14, @bitCast(mbc1_address))];
                     },
                     else => {
-                        return 0;
+                        return 0xFF;
                     },
                 }
             },
@@ -321,7 +320,7 @@ pub const MBC = struct {
         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
     }
 
-    /// this is has dual purpose for MBC1
+    /// this has dual purpose for MBC1
     /// in mode 0, it selects the upper 2 bits of the ROM bank number
     /// in mode 1, it selects the RAM bank number
     pub fn set_ram_bank(self: *MBC, bank: u8) void {
@@ -333,21 +332,15 @@ pub const MBC = struct {
         // 0 is set to 1, looking at all 5 bits
         masked_bank = if (masked_bank == 0) 1 else masked_bank;
         // after, we mask to the size of the cart
-        const rom_banks = @intFromEnum(self.rom_size.num_banks());
+        const rom_banks = @as(u8, @truncate(self.rom_size.num_banks()));
         masked_bank = masked_bank & (rom_banks - 1);
         // const new_bank = self.rom_bank & 0b0110_0000;
         // self.rom_bank = new_bank | masked_bank;
         self.rom_bank = masked_bank;
 
-        // TODO:
-        // secondary banks
-        // const secondary_bank = 0x12345;
-        // masked_bank = (secondary_bank << 5) | masked_bank;
-
         // note: do not understand the 0x20 0x40 0x60 issues mentioned in docs
     }
     pub fn set_ram_bank_number(self: *MBC, bank: u8) void {
-        self.debug.assert(self.ram_size == RamSize._32KB, "only 32KB ram supported");
         self.ram_bank = bank;
     }
 
@@ -382,7 +375,7 @@ pub const MBC = struct {
             .header = header,
             .rom = rom,
             .ram = ram,
-            .rom_bank = 0,
+            .rom_bank = 1,
             .ram_bank = 0,
             .ram_enabled = false,
             .banking_mode = 0,
@@ -394,6 +387,8 @@ pub const MBC = struct {
             .allocator = allocator,
         };
     }
+
+    // lives for entire program, no need to worry about this
     pub fn deinit(self: *MBC) void {
         self.allocator.free(self.ram);
         self.allocator.free(self.rom);
