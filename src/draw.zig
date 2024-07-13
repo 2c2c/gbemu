@@ -127,13 +127,6 @@ pub fn main(filename: []u8) !void {
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
-
-        // const end_ms = std.time.microTimestamp();
-        // const run_diff = @as(u64, @intCast(end_ms - start_us));
-        //
-        // const sleep_time = if (hz_60_micros > run_diff) hz_60_micros - run_diff else 0;
-        // std.debug.print("hz_us {} run_diff {} sleep_time {}\n", .{ hz_60_micros, run_diff, sleep_time });
-        // std.time.sleep(sleep_time * std.time.ns_per_us); // 60 FPS
     }
 }
 
