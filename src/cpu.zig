@@ -489,7 +489,7 @@ const Instruction = union(enum) {
             // 10. 0xFC: This is an invalid/unused opcode on the Game Boy.
             // 11. 0xFD: This is an invalid/unused opcode on the Game Boy.
             else => {
-                // std.debug.print("Invalid instruction byte: 0x{x}", .{byte});
+                std.debug.print("Invalid instruction byte: 0x{x}", .{byte});
                 return Instruction.NOP;
             },
         };
@@ -2028,7 +2028,7 @@ pub const CPU = struct {
         current_cycles = self.clock.t_cycles;
 
         // gameboy_doctor_print(self);
-        // beeg_print(self);
+        beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             // self.pc -%= 1;

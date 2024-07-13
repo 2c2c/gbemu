@@ -220,7 +220,7 @@ pub const MBC1RomAddress = packed struct {
 };
 
 pub const MBC5RomAddress = packed struct {
-    base: u13,
+    base: u14,
     rom_bank_low: u8,
     rom_bank_high: u1,
 };
@@ -354,11 +354,17 @@ pub const MBC = struct {
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
                         const mbc5_address = MBC5RomAddress{
-                            .base = @truncate(address - ROM_BANK_N_START),
-                            .rom_bank_low = @truncate(self.rom_bank & 0xFF),
+                            // .base = @truncate(address - ROM_BANK_N_START),
+                            .base = @truncate(address),
+                            .rom_bank_low = @truncate(self.rom_bank),
                             .rom_bank_high = @truncate(self.rom_bank >> 8 & 0x01),
                         };
-                        const full_address = @as(u22, @bitCast(mbc5_address));
+                        const full_address = @as(u23, @bitCast(mbc5_address));
+                        if (full_address >= 0x5865) {
+                            _ = 123;
+                        }
+
+                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {
@@ -405,10 +411,11 @@ pub const MBC = struct {
                 switch (address) {
                     RAM_BANK_START...RAM_BANK_END => {
                         const mbc5_address = MBC5RamAddress{
-                            .base = @truncate(address - RAM_BANK_START),
+                            .base = @truncate(address & 0x1FFF),
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u17, @bitCast(mbc5_address));
+                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
                         return self.ram[full_address];
                     },
                     else => {

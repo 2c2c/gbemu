@@ -118,7 +118,7 @@ pub fn main(filename: []u8) !void {
 
         while (timer.read() < hz_60_nanos) {}
 
-        std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
+        // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 
         _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
