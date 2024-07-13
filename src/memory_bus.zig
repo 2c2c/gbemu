@@ -132,7 +132,7 @@ pub const MemoryBus = struct {
                     //     return self.memory[address];
                     // },
                     0x0000...0x7FFF => {
-                        return self.mbc.read_rom(address);
+                        return self.mbc.read_rom(rom_addr);
                     },
                     else => {},
                 }

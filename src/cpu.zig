@@ -2026,7 +2026,7 @@ pub const CPU = struct {
         current_cycles = self.clock.t_cycles;
 
         // gameboy_doctor_print(self);
-        // beeg_print(self);
+        beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
             // self.pc -%= 1;

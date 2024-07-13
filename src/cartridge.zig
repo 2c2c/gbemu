@@ -205,6 +205,17 @@ const GameBoyRomHeader = extern struct {
     global_checksum: [2]u8,
 };
 
+pub const MBC1RamAddressSpace = packed struct {
+    base: u12,
+    ram_bank: u2,
+};
+
+pub const MBC1RomAddressSpace = packed struct {
+    base: u14,
+    rom_bank: u5,
+    ram_bank: u2,
+};
+
 pub const MBC = struct {
     filename: []u8,
     header: GameBoyRomHeader,
@@ -235,7 +246,7 @@ pub const MBC = struct {
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
                         if (self.banking_mode == 0) {
-                            self.set_upper_rom_bank_number(byte);
+                            self.set_ram_bank(byte);
                         } else {
                             self.set_ram_bank_number(byte);
                         }
@@ -258,10 +269,21 @@ pub const MBC = struct {
             MBCCartridgeType.MBC1 => {
                 switch (address) {
                     ROM_BANK_X0_START...ROM_BANK_X0_END => {
-                        return self.rom[address];
+                        const mbc1_address = MBC1RomAddressSpace{
+                            .base = @truncate(address),
+                            .rom_bank = 0,
+                            .ram_bank = 0,
+                        };
+
+                        return self.rom[@as(u21, @bitCast(mbc1_address))];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
-                        return self.rom[address + (@as(u16, self.rom_bank) * 0x4000)];
+                        const mbc1_address = MBC1RomAddressSpace{
+                            .base = @truncate(address),
+                            .rom_bank = @truncate(self.rom_bank & 0b0001_1111),
+                            .ram_bank = @truncate(self.rom_bank & 0b0110_0000),
+                        };
+                        return self.rom[@as(u21, @bitCast(mbc1_address))];
                     },
                     else => {
                         return 0;
@@ -275,12 +297,16 @@ pub const MBC = struct {
     pub fn read_ram(self: *MBC, address: u16) u8 {
         switch (self.mbc_type) {
             MBCCartridgeType.ROM_ONLY => {
-                return self.rom[address];
+                return self.ram[address];
             },
             MBCCartridgeType.MBC1 => {
                 switch (address) {
                     RAM_BANK_START...RAM_BANK_END => {
-                        return self.rom[address + (self.ram_bank * 0x2000)];
+                        const mbc1_address = MBC1RamAddressSpace{
+                            .base = @truncate(address),
+                            .ram_bank = @truncate(self.ram_bank),
+                        };
+                        self.ram[@as(u14, @bitCast(mbc1_address))];
                     },
                     else => {
                         return 0;
@@ -295,13 +321,11 @@ pub const MBC = struct {
         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
     }
 
-    pub fn set_upper_rom_bank_number(self: *MBC, bank: u8) void {
-        var masked_bank = bank & 0x03;
-        const rom_banks = @intFromEnum(self.rom_size.num_banks());
-        masked_bank = masked_bank & (rom_banks - 1);
-        const new_banks = self.rom_bank & 0b0001_1111;
-
-        self.rom_bank = new_banks | masked_bank;
+    /// this is has dual purpose for MBC1
+    /// in mode 0, it selects the upper 2 bits of the ROM bank number
+    /// in mode 1, it selects the RAM bank number
+    pub fn set_ram_bank(self: *MBC, bank: u8) void {
+        self.ram_bank = bank & 0x03;
     }
     pub fn set_rom_bank_number(self: *MBC, bank: u8) void {
         // mask to 5 bits
@@ -311,8 +335,9 @@ pub const MBC = struct {
         // after, we mask to the size of the cart
         const rom_banks = @intFromEnum(self.rom_size.num_banks());
         masked_bank = masked_bank & (rom_banks - 1);
-        const new_bank = self.rom_bank & 0b0110_0000;
-        self.rom_bank = new_bank | masked_bank;
+        // const new_bank = self.rom_bank & 0b0110_0000;
+        // self.rom_bank = new_bank | masked_bank;
+        self.rom_bank = masked_bank;
 
         // TODO:
         // secondary banks
@@ -357,7 +382,7 @@ pub const MBC = struct {
             .header = header,
             .rom = rom,
             .ram = ram,
-            .rom_bank = 1,
+            .rom_bank = 0,
             .ram_bank = 0,
             .ram_enabled = false,
             .banking_mode = 0,
