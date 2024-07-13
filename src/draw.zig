@@ -56,6 +56,7 @@ pub fn main(filename: []u8) !void {
 
     var frame: usize = 0;
     mainLoop: while (true) {
+        const start_ms = std.time.microTimestamp();
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) > 0) {
             switch (ev.type) {
@@ -99,10 +100,10 @@ pub fn main(filename: []u8) !void {
             }
         }
 
-        for (0..20000) |_| {
+        for (0..10000) |_| {
             cpu.frame_walk();
             frame += 1;
-            std.time.sleep(1000); // 60 FPS
+            // std.time.sleep(1000); // 60 FPS
         }
         try cpu_.buf.flush();
         frame = 0;
@@ -113,7 +114,13 @@ pub fn main(filename: []u8) !void {
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
 
-        std.time.sleep(0 * std.time.ns_per_ms); // 60 FPS
+        const end_ms = std.time.microTimestamp();
+        const run_diff = @as(u64, @intCast(end_ms - start_ms));
+        const hz_60_micros: u64 = 16667;
+
+        const sleep_time = if (hz_60_micros > run_diff) hz_60_micros - run_diff else 0;
+        std.debug.print("hz_us {} run_diff {} sleep_time {}\n", .{ hz_60_micros, run_diff, sleep_time });
+        std.time.sleep(sleep_time * std.time.ns_per_us); // 60 FPS
     }
 }
 
