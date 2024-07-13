@@ -334,7 +334,9 @@ pub const MBC = struct {
                             .rom_bank = @truncate(self.rom_bank),
                             .ram_bank = @truncate(self.ram_bank),
                         };
-                        return self.rom[@as(u21, @bitCast(mbc1_address))];
+                        const full_address = @as(u21, @bitCast(mbc1_address));
+                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        return self.rom[full_address];
                     },
                     else => {
                         return 0xFF;
@@ -364,7 +366,7 @@ pub const MBC = struct {
                             _ = 123;
                         }
 
-                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {
@@ -376,7 +378,7 @@ pub const MBC = struct {
         }
     }
 
-    pub fn read_ram(self: *MBC, address: u16) u8 {
+    pub fn read_ram(self: *const MBC, address: u16) u8 {
         switch (self.mbc_type) {
             MBCCartridgeType.ROM_ONLY => {
                 return self.ram[address];
@@ -391,7 +393,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
-                        self.ram[@as(u14, @bitCast(mbc1_address))];
+                        return self.ram[@as(u14, @bitCast(mbc1_address))];
                     },
                     else => {
                         return 0xFF;

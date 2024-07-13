@@ -143,10 +143,7 @@ pub const MemoryBus = struct {
             },
             // external ram
             cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
-                if (self.mbc.ram_enabled) {
-                    return self.memory[address];
-                }
-                return 0xFF;
+                return self.mbc.read_ram(address);
             },
             0xC000...0xFDFF => {
                 // wram eram
