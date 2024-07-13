@@ -1954,8 +1954,9 @@ pub const CPU = struct {
             },
         }
     }
-    pub fn frame_walk(self: *CPU) void {
+    pub fn frame_walk(self: *CPU) u64 {
         self.pending_t_cycles = 0;
+        var frame_cycles: u64 = 0;
         var current_cycles = self.clock.t_cycles;
 
         Joypad.update_joyp_keys(self);
@@ -2020,6 +2021,7 @@ pub const CPU = struct {
         }
         // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
+        frame_cycles = self.pending_t_cycles;
         self.bus.step(self.pending_t_cycles, self.clock.bits.div);
 
         self.pending_t_cycles = 0;
@@ -2036,6 +2038,9 @@ pub const CPU = struct {
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
         self.bus.step(self.pending_t_cycles, self.clock.bits.div);
+        frame_cycles += self.pending_t_cycles;
+
+        return frame_cycles;
     }
 
     pub fn step(self: *CPU) void {

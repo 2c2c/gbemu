@@ -56,6 +56,7 @@ pub fn main(filename: []u8) !void {
     defer _ = gpa.deinit();
     var alloc = gpa.allocator();
     const title = try alloc.alloc(u8, 256);
+    defer alloc.free(title);
     var cpu = try setup_cpu(filename);
     var frame: u128 = 0;
 
@@ -103,17 +104,23 @@ pub fn main(filename: []u8) !void {
             }
         }
 
-        const hz_60_micros: u64 = 16667;
-        const start_us = std.time.microTimestamp();
+        const cycles_per_frame = CPU_SPEED_HZ / 60;
+        const hz_60_nanos: u64 = std.time.ns_per_s / 60;
+        var timer = try std.time.Timer.start();
+        var frame_cycles: u64 = 0;
         while (true) {
-            cpu.frame_walk();
-            const time_diff = std.time.microTimestamp() - start_us;
-            if (time_diff >= hz_60_micros) {
+            const cycles = cpu.frame_walk();
+            frame_cycles += cycles;
+            if (frame_cycles >= cycles_per_frame) {
                 break;
             }
         }
         try cpu_.buf.flush();
         frame += 1;
+
+        while (timer.read() < hz_60_nanos) {}
+
+        std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 
         _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
