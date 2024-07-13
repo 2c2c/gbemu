@@ -213,10 +213,21 @@ pub const MBC1RamAddressSpace = packed struct {
     ram_bank: u2,
 };
 
-pub const MBC1RomAddressSpace = packed struct {
+pub const MBC1RomAddress = packed struct {
     base: u14,
     rom_bank: u5,
     ram_bank: u2,
+};
+
+pub const MBC5RomAddress = packed struct {
+    base: u13,
+    rom_bank_low: u8,
+    rom_bank_high: u1,
+};
+
+pub const MBC5RamAddress = packed struct {
+    base: u13,
+    ram_bank: u4,
 };
 
 pub const MBC = struct {
@@ -225,7 +236,7 @@ pub const MBC = struct {
     rom: []u8,
     ram: []u8,
 
-    rom_bank: u8,
+    rom_bank: u16,
     ram_bank: u8,
     ram_enabled: bool,
     banking_mode: u8,
@@ -246,47 +257,53 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     MBC1_RAM_ENABLE_START...MBC1_RAM_ENABLE_END => {
-                        self.set_ram_enabled(byte);
+                        self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
                     },
                     MBC1_ROM_BANK_NUMBER_START...MBC1_ROM_BANK_NUMBER_END => {
-                        self.set_rom_bank_number(byte);
+                        // mask to 5 bits
+                        var masked_bank = byte & 0x1F;
+                        // 0 is set to 1, looking at all 5 bits
+                        masked_bank = if (masked_bank == 0) 1 else masked_bank;
+                        // after, we mask to the size of the cart
+                        const rom_banks = @as(u8, @truncate(self.rom_size.num_banks()));
+                        masked_bank = masked_bank & (rom_banks - 1);
+                        // const new_bank = self.rom_bank & 0b0110_0000;
+                        // self.rom_bank = new_bank | masked_bank;
+                        self.rom_bank = masked_bank;
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
-                        self.set_ram_bank(byte);
+                        self.ram_bank = byte;
                     },
                     MBC1_ROM_RAM_MODE_SELECT_START...MBC1_ROM_RAM_MODE_SELECT_END => {
-                        self.set_banking_mode(byte);
+                        self.banking_mode = byte & 0x01;
                     },
                     else => {},
                 }
             },
             MBCCartridgeType.MBC5,
             MBCCartridgeType.MBC5_RAM,
+            MBCCartridgeType.MBC5_RAM_BATTERY,
             MBCCartridgeType.MBC5_RUMBLE,
             MBCCartridgeType.MBC5_RUMBLE_RAM,
             MBCCartridgeType.MBC5_RUMBLE_RAM_BATTERY,
             => {
                 switch (address) {
                     MBC5_RAM_ENABLE_START...MBC5_RAM_ENABLE_END => {
-                        self.set_ram_enabled(byte);
+                        self.ram_enabled = (byte & 0x0F) == 0x0A;
                     },
                     MBC5_ROM_BANK_NUMBER_LOW_START...MBC5_ROM_BANK_NUMBER_LOW_END => {
-                        self.set_rom_bank_number(byte);
+                        self.rom_bank = (self.rom_bank & 0x100) | byte;
                     },
                     MBC5_ROM_BANK_NUMBER_HIGH_START...MBC5_ROM_BANK_NUMBER_HIGH_END => {
-                        // this is a 9 bit register
-                        // the high bit is the 8th bit of the rom bank number
-                        // the low 8 bits are the ram bank number
-                        // we need to set both
-                        self.set_rom_bank_number(byte);
-                        self.set_ram_bank_number(byte);
+                        self.rom_bank = (self.rom_bank & 0xFF) | (@as(u16, byte & 0x01) << 8);
                     },
                     MBC5_RAM_BANK_NUMBER_START...MBC5_RAM_BANK_NUMBER_END => {
-                        self.set_ram_bank_number(byte);
+                        self.ram_bank = byte & 0x0F;
                     },
                     else => {},
                 }
             },
+
             else => {},
         }
     }
@@ -303,7 +320,7 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     ROM_BANK_X0_START...ROM_BANK_X0_END => {
-                        const mbc1_address = MBC1RomAddressSpace{
+                        const mbc1_address = MBC1RomAddress{
                             .base = @truncate(address),
                             .rom_bank = 0,
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
@@ -312,12 +329,37 @@ pub const MBC = struct {
                         return self.rom[@as(u21, @bitCast(mbc1_address))];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
-                        const mbc1_address = MBC1RomAddressSpace{
+                        const mbc1_address = MBC1RomAddress{
                             .base = @truncate(address),
                             .rom_bank = @truncate(self.rom_bank),
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         return self.rom[@as(u21, @bitCast(mbc1_address))];
+                    },
+                    else => {
+                        return 0xFF;
+                    },
+                }
+            },
+            MBCCartridgeType.MBC5,
+            MBCCartridgeType.MBC5_RAM,
+            MBCCartridgeType.MBC5_RAM_BATTERY,
+            MBCCartridgeType.MBC5_RUMBLE,
+            MBCCartridgeType.MBC5_RUMBLE_RAM,
+            MBCCartridgeType.MBC5_RUMBLE_RAM_BATTERY,
+            => {
+                switch (address) {
+                    ROM_BANK_X0_START...ROM_BANK_X0_END => {
+                        return self.rom[address];
+                    },
+                    ROM_BANK_N_START...ROM_BANK_N_END => {
+                        const mbc5_address = MBC5RomAddress{
+                            .base = @truncate(address - ROM_BANK_N_START),
+                            .rom_bank_low = @truncate(self.rom_bank & 0xFF),
+                            .rom_bank_high = @truncate(self.rom_bank >> 8 & 0x01),
+                        };
+                        const full_address = @as(u22, @bitCast(mbc5_address));
+                        return self.rom[full_address];
                     },
                     else => {
                         return 0xFF;
@@ -344,6 +386,30 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         self.ram[@as(u14, @bitCast(mbc1_address))];
+                    },
+                    else => {
+                        return 0xFF;
+                    },
+                }
+            },
+            MBCCartridgeType.MBC5,
+            MBCCartridgeType.MBC5_RAM,
+            MBCCartridgeType.MBC5_RAM_BATTERY,
+            MBCCartridgeType.MBC5_RUMBLE,
+            MBCCartridgeType.MBC5_RUMBLE_RAM,
+            MBCCartridgeType.MBC5_RUMBLE_RAM_BATTERY,
+            => {
+                if (!self.ram_enabled) {
+                    return 0xFF;
+                }
+                switch (address) {
+                    RAM_BANK_START...RAM_BANK_END => {
+                        const mbc5_address = MBC5RamAddress{
+                            .base = @truncate(address - RAM_BANK_START),
+                            .ram_bank = @truncate(self.ram_bank),
+                        };
+                        const full_address = @as(u17, @bitCast(mbc5_address));
+                        return self.ram[full_address];
                     },
                     else => {
                         return 0xFF;
