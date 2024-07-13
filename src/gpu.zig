@@ -7,6 +7,8 @@ pub const BACKGROUND_HEIGHT: usize = 256;
 pub const SCREEN_WIDTH: usize = 160;
 pub const SCREEN_HEIGHT: usize = 144;
 
+pub const PALETTE_DEBUG_WIDTH: usize = 8;
+
 pub const DRAW_WIDTH: usize = SCREEN_WIDTH;
 pub const DRAW_HEIGHT: usize = SCREEN_HEIGHT;
 
@@ -149,6 +151,10 @@ pub const GPU = struct {
     tile_canvas: [DRAW_WIDTH * DRAW_HEIGHT]TilePixelValue,
     canvas: [DRAW_WIDTH * DRAW_HEIGHT * 3]u8,
     full_bg_canvas: [BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3]u8,
+
+    /// 8x8 tiles * 4 palette possibilities * 3 palette sets * 3rgb
+    palette_canvas: [8 * 8 * 4 * 3 * 3]u8,
+
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -216,6 +222,7 @@ pub const GPU = struct {
             .tile_canvas = .{.Zero} ** DRAW_WIDTH ** DRAW_HEIGHT,
             .canvas = [_]u8{0} ** (DRAW_WIDTH * DRAW_HEIGHT * 3),
             .full_bg_canvas = [_]u8{0} ** (BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3),
+            .palette_canvas = [_]u8{0} ** (8 * 8 * 4 * 3 * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
@@ -277,7 +284,7 @@ pub const GPU = struct {
                         if (self.stat.mode_2_interrupt_enabled) {
                             request.enable_lcd_stat = true;
                         }
-                        self.render_full_bg();
+                        // self.render_full_bg();
                     }
                     self.lyc_ly_check(&request);
                 }
@@ -320,7 +327,41 @@ pub const GPU = struct {
             self.tile_canvas[i] = TilePixelValue.Zero;
         }
     }
+    fn render_palettes(self: *GPU) void {
+        const palette_sets = 3;
+        const colors_per_palette = 4;
+        const tile_size = 8;
+        const rgb_values = 3;
 
+        for (0..palette_sets) |palette_index| {
+            const palette = blk: {
+                switch (palette_index) {
+                    0 => break :blk self.bgp,
+                    1 => break :blk self.obp0,
+                    2 => break :blk self.obp1,
+                    else => unreachable,
+                }
+            };
+
+            for (0..colors_per_palette) |color_index| {
+                const color = GPU.color_from_palette(palette, @truncate(color_index));
+                const x = color_index * tile_size;
+                const y = palette_index * tile_size;
+
+                for (0..tile_size) |ty| {
+                    for (0..tile_size) |tx| {
+                        const pixel_x = x + tx;
+                        const pixel_y = y + ty;
+                        const pixel_index = (pixel_y * (tile_size * colors_per_palette) + pixel_x) * rgb_values;
+
+                        self.palette_canvas[pixel_index] = color[0];
+                        self.palette_canvas[pixel_index + 1] = color[1];
+                        self.palette_canvas[pixel_index + 2] = color[2];
+                    }
+                }
+            }
+        }
+    }
     fn render_full_bg(self: *GPU) void {
         const bg_tile_map_base: usize = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
         const tile_base: usize = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
@@ -369,9 +410,85 @@ pub const GPU = struct {
             }
         }
     }
+    fn render_full_bg2(self: *GPU) void {
+        var buffer_index = @as(usize, self.ly) * BACKGROUND_WIDTH * 3;
+        var x: u16 = 0;
+        var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
+        const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
+        const win_y = self.window_position.wy;
+
+        const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+        const tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+        const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
+        const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+
+        if (self.ly == win_y) {
+            self.internal_window_counter = 0;
+        }
+
+        if (self.lcdc.window_enable and self.ly >= win_y and self.lcdc.bg_window_enable and win_x < 160) {
+            self.internal_window_counter += 1;
+        }
+
+        while (x < BACKGROUND_WIDTH) : (x += 1) {
+            var tile_line: u16 = 0;
+            var tile_x: u3 = 0;
+
+            if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
+                const adjusted_y: u16 = self.internal_window_counter - 1;
+                const temp_x: i16 = @as(i16, @intCast(x)) - win_x;
+                const tile_y: u8 = @truncate(adjusted_y & 7);
+                tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
+
+                const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
+                if (tile_base == 0x8000) {
+                    tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
+                } else {
+                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
+                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
+                    if (tile_index_signed < 0) {
+                        addr -= @abs(tile_index_signed * 16);
+                    } else {
+                        addr += @abs(tile_index_signed * 16);
+                    }
+                    tile_line = self.read_vram16(addr);
+                }
+            } else if (self.lcdc.bg_window_enable) {
+                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
+                const tile_y = y % 8;
+
+                const temp_x = x +% self.background_viewport.scx;
+                tile_x = @truncate(temp_x % 8);
+
+                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+                if (tile_base == 0x8000) {
+                    tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
+                } else {
+                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
+                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
+                    if (tile_index_signed < 0) {
+                        addr -= @abs(tile_index_signed * 16);
+                    } else {
+                        addr += @abs(tile_index_signed * 16);
+                    }
+                    tile_line = self.read_vram16(addr);
+                }
+            }
+
+            const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+            const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+            const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
+            const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
+            // self.tile_canvas[buffer_index / 3] = color;
+            self.full_bg_canvas[buffer_index] = color.to_color();
+            self.full_bg_canvas[buffer_index +% 1] = color.to_color();
+            self.full_bg_canvas[buffer_index +% 2] = color.to_color();
+            buffer_index += 3;
+        }
+    }
 
     fn render_bg(self: *GPU) void {
-        var buffer_index = @as(usize, self.ly) * DRAW_WIDTH * 3;
+        var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
         var x: u8 = 0;
         var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
         const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
