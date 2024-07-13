@@ -325,15 +325,16 @@ pub const GPU = struct {
         const bg_tile_map_base: usize = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
         const tile_base: usize = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
 
-        for (0..BACKGROUND_HEIGHT) |y| {
-            for (0..BACKGROUND_WIDTH) |x| {
+        for (0..BACKGROUND_HEIGHT - 1) |y| {
+            for (0..BACKGROUND_WIDTH - 1) |x| {
                 var tile_line: u16 = 0;
                 var tile_x: u3 = 0;
 
                 const tile_y = y % 8;
                 tile_x = @truncate(x % 8);
 
-                const tile_index = self.read_vram(bg_tile_map_base + (y * 32) + (x / 8)); // & 31?
+                const tile_addr = bg_tile_map_base + (y / 8 * 32) + (x / 8);
+                const tile_index = self.read_vram(tile_addr);
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (tile_index * 16) + tile_y * 2);
                 } else {
@@ -347,16 +348,28 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
 
+                // std.debug.print("{},{} tb 0x{x} tmp 0x{x}+{x} tile_addr 0x{x} tile_index 0x{x} tile_line 0x{x}\n", .{
+                //     x,
+                //     y,
+                //     tile_base,
+                //     bg_tile_map_base,
+                //     y * 32 + x / 8,
+                //     tile_addr,
+                //     tile_index,
+                //     tile_line,
+                // });
                 const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
                 const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
                 const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                 const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
-                self.full_bg_canvas[y * x] = color.to_color();
-                self.full_bg_canvas[y * x +% 1] = color.to_color();
-                self.full_bg_canvas[y * x +% 2] = color.to_color();
+                const pixel_index = (y * BACKGROUND_WIDTH + x) * 3;
+                self.full_bg_canvas[pixel_index] = color.to_color();
+                self.full_bg_canvas[pixel_index + 1] = color.to_color();
+                self.full_bg_canvas[pixel_index + 2] = color.to_color();
             }
         }
     }
+
     fn render_bg(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * DRAW_WIDTH * 3;
         var x: u8 = 0;
