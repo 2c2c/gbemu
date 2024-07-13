@@ -85,7 +85,7 @@ pub const MemoryBus = struct {
         var mbc = try MBC.new(filename);
 
         var memory = [_]u8{0} ** 0x10000;
-        std.mem.copyForwards(u8, memory[0..0x7FFF], mbc.cartridge_data[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
+        std.mem.copyForwards(u8, memory[0..0x7FFF], mbc.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
@@ -127,13 +127,12 @@ pub const MemoryBus = struct {
         switch (address) {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
-                    // TODO: ?
-                    0x0000...0x00FF => {
-                        // std.debug.print("Attempted read from boot rom\n", .{});
-                        return self.memory[address];
-                    },
-                    0x0100...0x7FFF => {
-                        return self.memory[address];
+                    // 0x0000...0x00FF => {
+                    //     // std.debug.print("Attempted read from boot rom\n", .{});
+                    //     return self.memory[address];
+                    // },
+                    0x0000...0x7FFF => {
+                        return self.mbc.read_rom(address);
                     },
                     else => {},
                 }
