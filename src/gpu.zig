@@ -7,8 +7,8 @@ pub const BACKGROUND_HEIGHT: usize = 256;
 pub const SCREEN_WIDTH: usize = 160;
 pub const SCREEN_HEIGHT: usize = 144;
 
-pub const DRAW_WIDTH: usize = BACKGROUND_WIDTH;
-pub const DRAW_HEIGHT: usize = BACKGROUND_HEIGHT;
+pub const DRAW_WIDTH: usize = SCREEN_WIDTH;
+pub const DRAW_HEIGHT: usize = SCREEN_HEIGHT;
 
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
@@ -148,6 +148,7 @@ const OBP = [2]Palette;
 pub const GPU = struct {
     tile_canvas: [DRAW_WIDTH * DRAW_HEIGHT]TilePixelValue,
     canvas: [DRAW_WIDTH * DRAW_HEIGHT * 3]u8,
+    full_bg_canvas: [BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -214,6 +215,7 @@ pub const GPU = struct {
         return GPU{
             .tile_canvas = .{.Zero} ** DRAW_WIDTH ** DRAW_HEIGHT,
             .canvas = [_]u8{0} ** (DRAW_WIDTH * DRAW_HEIGHT * 3),
+            .full_bg_canvas = [_]u8{0} ** (BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
@@ -275,6 +277,7 @@ pub const GPU = struct {
                         if (self.stat.mode_2_interrupt_enabled) {
                             request.enable_lcd_stat = true;
                         }
+                        self.render_full_bg();
                     }
                     self.lyc_ly_check(&request);
                 }
@@ -318,6 +321,42 @@ pub const GPU = struct {
         }
     }
 
+    fn render_full_bg(self: *GPU) void {
+        const bg_tile_map_base: usize = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+        const tile_base: usize = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+
+        for (0..BACKGROUND_HEIGHT) |y| {
+            for (0..BACKGROUND_WIDTH) |x| {
+                var tile_line: u16 = 0;
+                var tile_x: u3 = 0;
+
+                const tile_y = y % 8;
+                tile_x = @truncate(x % 8);
+
+                const tile_index = self.read_vram(bg_tile_map_base + (y * 32) + (x / 8)); // & 31?
+                if (tile_base == 0x8000) {
+                    tile_line = self.read_vram16(tile_base + (tile_index * 16) + tile_y * 2);
+                } else {
+                    const tile_index_signed = @as(i16, @as(u8, @intCast(tile_index)));
+                    var addr = 0x9000 + tile_y * 2;
+                    if (tile_index_signed < 0) {
+                        addr -= @abs(tile_index_signed * 16);
+                    } else {
+                        addr += @abs(tile_index_signed * 16);
+                    }
+                    tile_line = self.read_vram16(addr);
+                }
+
+                const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
+                const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+                const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
+                const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
+                self.full_bg_canvas[y * x] = color.to_color();
+                self.full_bg_canvas[y * x +% 1] = color.to_color();
+                self.full_bg_canvas[y * x +% 2] = color.to_color();
+            }
+        }
+    }
     fn render_bg(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * DRAW_WIDTH * 3;
         var x: u8 = 0;
