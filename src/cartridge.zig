@@ -260,6 +260,33 @@ pub const MBC = struct {
                     else => {},
                 }
             },
+            MBCCartridgeType.MBC5,
+            MBCCartridgeType.MBC5_RAM,
+            MBCCartridgeType.MBC5_RUMBLE,
+            MBCCartridgeType.MBC5_RUMBLE_RAM,
+            MBCCartridgeType.MBC5_RUMBLE_RAM_BATTERY,
+            => {
+                switch (address) {
+                    MBC5_RAM_ENABLE_START...MBC5_RAM_ENABLE_END => {
+                        self.set_ram_enabled(byte);
+                    },
+                    MBC5_ROM_BANK_NUMBER_LOW_START...MBC5_ROM_BANK_NUMBER_LOW_END => {
+                        self.set_rom_bank_number(byte);
+                    },
+                    MBC5_ROM_BANK_NUMBER_HIGH_START...MBC5_ROM_BANK_NUMBER_HIGH_END => {
+                        // this is a 9 bit register
+                        // the high bit is the 8th bit of the rom bank number
+                        // the low 8 bits are the ram bank number
+                        // we need to set both
+                        self.set_rom_bank_number(byte);
+                        self.set_ram_bank_number(byte);
+                    },
+                    MBC5_RAM_BANK_NUMBER_START...MBC5_RAM_BANK_NUMBER_END => {
+                        self.set_ram_bank_number(byte);
+                    },
+                    else => {},
+                }
+            },
             else => {},
         }
     }
