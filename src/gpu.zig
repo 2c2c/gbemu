@@ -1,11 +1,14 @@
 const std = @import("std");
 const IERegister = @import("ie_register.zig").IERegister;
 
-const BACKGROUND_WIDTH: usize = 256;
-const BACKGROUND_HEIGHT: usize = 256;
+pub const BACKGROUND_WIDTH: usize = 256;
+pub const BACKGROUND_HEIGHT: usize = 256;
 
-const SCREEN_WIDTH: usize = 160;
-const SCREEN_HEIGHT: usize = 144;
+pub const SCREEN_WIDTH: usize = 160;
+pub const SCREEN_HEIGHT: usize = 144;
+
+pub const DRAW_WIDTH: usize = BACKGROUND_WIDTH;
+pub const DRAW_HEIGHT: usize = BACKGROUND_HEIGHT;
 
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
@@ -143,8 +146,8 @@ const BGP = Palette;
 const OBP = [2]Palette;
 
 pub const GPU = struct {
-    tile_canvas: [SCREEN_WIDTH * SCREEN_HEIGHT]TilePixelValue,
-    canvas: [SCREEN_WIDTH * SCREEN_HEIGHT * 3]u8,
+    tile_canvas: [DRAW_WIDTH * DRAW_HEIGHT]TilePixelValue,
+    canvas: [DRAW_WIDTH * DRAW_HEIGHT * 3]u8,
     objects: [40]Object,
     vram: [0x10000]u8,
     tile_set: [384]Tile,
@@ -209,8 +212,8 @@ pub const GPU = struct {
         }} ** 40;
 
         return GPU{
-            .tile_canvas = .{.Zero} ** SCREEN_WIDTH ** SCREEN_HEIGHT,
-            .canvas = [_]u8{0} ** (SCREEN_WIDTH * SCREEN_HEIGHT * 3),
+            .tile_canvas = .{.Zero} ** DRAW_WIDTH ** DRAW_HEIGHT,
+            .canvas = [_]u8{0} ** (DRAW_WIDTH * DRAW_HEIGHT * 3),
             .vram = [_]u8{0} ** 0x10000,
             .tile_set = .{empty_tile()} ** 384,
             // ai says htis is default value
@@ -316,7 +319,7 @@ pub const GPU = struct {
     }
 
     fn render_bg(self: *GPU) void {
-        var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
+        var buffer_index = @as(usize, self.ly) * DRAW_WIDTH * 3;
         var x: u8 = 0;
         var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
         const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values

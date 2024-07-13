@@ -17,8 +17,6 @@ pub fn setup_cpu(filename: []u8) !CPU {
     return cpu;
 }
 
-const WIDTH = 160;
-const HEIGHT = 144;
 const SCALE = 4;
 
 pub fn main(filename: []u8) !void {
@@ -30,8 +28,8 @@ pub fn main(filename: []u8) !void {
         "SDL2 Native Demo",
         SDL.SDL_WINDOWPOS_CENTERED,
         SDL.SDL_WINDOWPOS_CENTERED,
-        WIDTH * SCALE,
-        HEIGHT * SCALE,
+        gpu.DRAW_WIDTH * SCALE,
+        gpu.DRAW_HEIGHT * SCALE,
         SDL.SDL_WINDOW_SHOWN | SDL.SDL_WINDOW_RESIZABLE,
     ) orelse sdlPanic();
     defer _ = SDL.SDL_DestroyWindow(window);
@@ -46,8 +44,8 @@ pub fn main(filename: []u8) !void {
         SDL.SDL_PIXELFORMAT_RGB24,
         // SDL.SDL_PIXELFORMAT_RGB888,
         SDL.SDL_TEXTUREACCESS_STREAMING,
-        WIDTH,
-        HEIGHT,
+        gpu.DRAW_WIDTH,
+        gpu.DRAW_HEIGHT,
     ) orelse sdlPanic();
     defer SDL.SDL_DestroyTexture(texture);
     _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
@@ -124,7 +122,7 @@ pub fn main(filename: []u8) !void {
 
         _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
-        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, WIDTH * 3);
+        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, gpu.DRAW_WIDTH * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
@@ -145,8 +143,8 @@ fn sdlPanic() noreturn {
 }
 
 fn print_canvas(cpu: *CPU) void {
-    for (0..HEIGHT) |y| {
-        for (0..WIDTH) |x| {
+    for (0..gpu.DRAW_HEIGHT) |y| {
+        for (0..gpu.DRAW_WIDTH) |x| {
             std.debug.print("0x{x:0>2}{x:0>2}{x:0>2}", .{
                 cpu.bus.gpu.canvas[y * x + 0],
                 cpu.bus.gpu.canvas[y * x + 1],
