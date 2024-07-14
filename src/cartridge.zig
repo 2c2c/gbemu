@@ -94,6 +94,7 @@ const MBCCartridgeType = enum(u8) {
 };
 
 const RomSize = enum(u8) {
+    // mooneye has these and they seem wrong
     _32KB = 0x00,
     _64KB = 0x01,
     _128KB = 0x02,
@@ -102,6 +103,10 @@ const RomSize = enum(u8) {
     _1MB = 0x05,
     _2MB = 0x06,
     _4MB = 0x07,
+    _8MB = 0x08,
+    _16MB = 0x09,
+    _32MB = 0x0A,
+    _64MB = 0x0B,
     _1_1MB = 0x52,
     _1_2MB = 0x53,
     _1_5MB = 0x54,
@@ -116,6 +121,10 @@ const RomSize = enum(u8) {
             ._1MB => return 0x40,
             ._2MB => return 0x80,
             ._4MB => return 0x100,
+            ._8MB => return 0x200,
+            ._16MB => return 0x400,
+            ._32MB => return 0x800,
+            ._64MB => return 0x1000,
             ._1_1MB => return 0x48,
             ._1_2MB => return 0x50,
             ._1_5MB => return 0x60,
@@ -131,9 +140,13 @@ const RomSize = enum(u8) {
             ._1MB => return 0x100000,
             ._2MB => return 0x200000,
             ._4MB => return 0x400000,
-            ._1_1MB => return 0x120000,
-            ._1_2MB => return 0x140000,
-            ._1_5MB => return 0x180000,
+            ._8MB => return 0x800000,
+            ._16MB => return 0x1000000,
+            ._32MB => return 0x2000000,
+            ._64MB => return 0x4000000,
+            ._1_1MB => return 0x110000,
+            ._1_2MB => return 0x120000,
+            ._1_5MB => return 0x150000,
         }
     }
 };
@@ -424,7 +437,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .rom_bank = @truncate(self.rom_bank),
                         };
-                        const full_address = @as(u21, @bitCast(mbc3_address));
+                        const full_address = @as(u21, @bitCast(mbc3_address)) & (self.rom.len - 1);
                         return self.rom[full_address];
                     },
                     else => {
@@ -455,7 +468,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                        std.debug.print("ram length {} ram bank: {} full_addr 0b{b}\n", .{ self.ram.len, self.ram_bank, full_address });
+                        // std.debug.print("ram length {} ram bank: {} full_addr 0b{b}\n", .{ self.ram.len, self.ram_bank, full_address });
 
                         return self.ram[full_address];
                     },
@@ -480,7 +493,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .ram_bank = @truncate(self.ram_bank),
                         };
-                        const full_address = @as(u17, @bitCast(mbc5_address));
+                        const full_address = @as(u17, @bitCast(mbc5_address)) & (self.ram.len - 1);
                         // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
                         return self.ram[full_address];
                     },
@@ -505,7 +518,7 @@ pub const MBC = struct {
                                 .base = @truncate(address),
                                 .ram_bank = @truncate(self.ram_bank),
                             };
-                            const full_address = @as(u15, @bitCast(mbc3_address));
+                            const full_address = @as(u15, @bitCast(mbc3_address)) & (self.ram.len - 1);
                             return self.ram[full_address];
                         } else {
                             // RTC register access
@@ -566,6 +579,11 @@ pub const MBC = struct {
         const allocator = gpa.allocator();
         const rom = try allocator.alloc(u8, size);
         _ = try file.readAll(rom);
+        std.debug.print("raw mbc {} rom size {}, ram size {}\n", .{
+            rom[0x147],
+            rom[0x148],
+            rom[0x149],
+        });
         const header = get_game_rom_metadata(rom);
 
         const ram = try allocator.alloc(u8, header.ram_size.num_bytes());
