@@ -272,6 +272,7 @@ pub const MemoryBus = struct {
                 0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.div = 0;
+                    self.timer.tima = self.timer.tma;
                 },
                 0xFF05 => self.timer.tima = byte,
                 0xFF06 => self.timer.tma = byte,
