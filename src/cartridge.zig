@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("./cpu.zig").log;
 
 //
 pub const FULL_ROM_START = 0x0000;
@@ -373,7 +374,7 @@ pub const MBC = struct {
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u21, @bitCast(mbc1_address));
-                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // log.print("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address }) catch unreachable;
                         return self.rom[full_address];
                     },
                     else => {
@@ -399,7 +400,7 @@ pub const MBC = struct {
                             .rom_bank_high = @truncate(self.rom_bank >> 8 & 0x01),
                         };
                         const full_address = @as(u23, @bitCast(mbc5_address));
-                        std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {

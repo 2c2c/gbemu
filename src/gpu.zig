@@ -323,10 +323,8 @@ pub const GPU = struct {
     fn render_scanline(self: *GPU) void {
         self.render_bg();
         self.render_objects();
-        for (0..self.tile_canvas.len) |i| {
-            self.tile_canvas[i] = TilePixelValue.Zero;
-        }
     }
+
     fn render_palettes(self: *GPU) void {
         const palette_sets = 3;
         const colors_per_palette = 4;
