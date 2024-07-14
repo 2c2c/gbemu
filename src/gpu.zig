@@ -535,7 +535,7 @@ pub const GPU = struct {
                 const temp_x = x +% self.background_viewport.scx;
                 tile_x = @truncate(temp_x % 8);
 
-                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8));
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
@@ -554,12 +554,7 @@ pub const GPU = struct {
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
             const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
-            if ((buffer_index / 3) >= DRAW_HEIGHT * DRAW_WIDTH) {
-                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
-                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
-                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
-                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
-            }
+
             self.tile_canvas[buffer_index / 3] = color;
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
