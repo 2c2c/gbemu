@@ -271,8 +271,13 @@ pub const MemoryBus = struct {
                 0xFF01 => std.debug.print("{c}", .{byte}),
                 0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
+                    // theres a bunch of obscure timing accuracy fixes like this that will make things impossible to read
+                    const bit_9_low = (self.timer.div & 0b1) == 1;
                     self.timer.div = 0;
                     self.timer.tima = self.timer.tma;
+                    if (bit_9_low) {
+                        self.timer.tima += 1;
+                    }
                 },
                 0xFF05 => self.timer.tima = byte,
                 0xFF06 => self.timer.tma = byte,
