@@ -209,7 +209,7 @@ const GameBoyRomHeader = extern struct {
 };
 
 pub const MBC1RamAddressSpace = packed struct {
-    base: u12,
+    base: u13,
     ram_bank: u2,
 };
 
@@ -228,6 +228,21 @@ pub const MBC5RomAddress = packed struct {
 pub const MBC5RamAddress = packed struct {
     base: u13,
     ram_bank: u4,
+};
+
+pub const MBC3RomAddress = packed struct {
+    base: u14,
+    rom_bank: u7,
+};
+
+pub const MBC3RamAddress = packed struct {
+    base: u13,
+    ram_bank: u2,
+};
+
+pub const MBC3RTCAddress = packed struct {
+    base: u13,
+    rtc_register: u3,
 };
 
 pub const MBC = struct {
@@ -303,6 +318,29 @@ pub const MBC = struct {
                     else => {},
                 }
             },
+            // complete the switch for mbc3
+            MBCCartridgeType.MBC3,
+            MBCCartridgeType.MBC3_RAM,
+            MBCCartridgeType.MBC3_RAM_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_RAM_BATTERY,
+            => {
+                switch (address) {
+                    MBC3_RAM_RTC_ENABLE_START...MBC3_RAM_RTC_ENABLE_END => {
+                        self.ram_enabled = (byte & 0x0F) == 0x0A;
+                    },
+                    MBC3_ROM_BANK_NUMBER_START...MBC3_ROM_BANK_NUMBER_END => {
+                        self.rom_bank = if (byte == 0) 1 else byte & 0x7F;
+                    },
+                    MBC3_RAM_RTC_SELECT_START...MBC3_RAM_RTC_SELECT_END => {
+                        self.ram_bank = byte;
+                    },
+                    MBC3_RTC_LATCH_CLOCK_DATA_START...MBC3_RTC_LATCH_CLOCK_DATA_END => {
+                        // Implement RTC latch functionality if needed
+                    },
+                    else => {},
+                }
+            },
 
             else => {},
         }
@@ -356,17 +394,35 @@ pub const MBC = struct {
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
                         const mbc5_address = MBC5RomAddress{
-                            // .base = @truncate(address - ROM_BANK_N_START),
                             .base = @truncate(address),
                             .rom_bank_low = @truncate(self.rom_bank),
                             .rom_bank_high = @truncate(self.rom_bank >> 8 & 0x01),
                         };
                         const full_address = @as(u23, @bitCast(mbc5_address));
-                        if (full_address >= 0x5865) {
-                            _ = 123;
-                        }
-
                         std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        return self.rom[full_address];
+                    },
+                    else => {
+                        return 0xFF;
+                    },
+                }
+            },
+            MBCCartridgeType.MBC3,
+            MBCCartridgeType.MBC3_RAM,
+            MBCCartridgeType.MBC3_RAM_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_RAM_BATTERY,
+            => {
+                switch (address) {
+                    ROM_BANK_X0_START...ROM_BANK_X0_END => {
+                        return self.rom[address];
+                    },
+                    ROM_BANK_N_START...ROM_BANK_N_END => {
+                        const mbc3_address = MBC3RomAddress{
+                            .base = @truncate(address),
+                            .rom_bank = @truncate(self.rom_bank),
+                        };
+                        const full_address = @as(u21, @bitCast(mbc3_address));
                         return self.rom[full_address];
                     },
                     else => {
@@ -383,7 +439,10 @@ pub const MBC = struct {
             MBCCartridgeType.ROM_ONLY => {
                 return self.ram[address];
             },
-            MBCCartridgeType.MBC1 => {
+            MBCCartridgeType.MBC1,
+            MBCCartridgeType.MBC1_RAM,
+            MBCCartridgeType.MBC1_RAM_BATTERY,
+            => {
                 if (!self.ram_enabled) {
                     return 0xFF;
                 }
@@ -393,7 +452,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
-                        return self.ram[@as(u14, @bitCast(mbc1_address))];
+                        return self.ram[@as(u15, @bitCast(mbc1_address))];
                     },
                     else => {
                         return 0xFF;
@@ -413,12 +472,41 @@ pub const MBC = struct {
                 switch (address) {
                     RAM_BANK_START...RAM_BANK_END => {
                         const mbc5_address = MBC5RamAddress{
-                            .base = @truncate(address & 0x1FFF),
+                            .base = @truncate(address),
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u17, @bitCast(mbc5_address));
                         // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
                         return self.ram[full_address];
+                    },
+                    else => {
+                        return 0xFF;
+                    },
+                }
+            },
+            MBCCartridgeType.MBC3,
+            MBCCartridgeType.MBC3_RAM,
+            MBCCartridgeType.MBC3_RAM_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_BATTERY,
+            MBCCartridgeType.MBC3_TIMER_RAM_BATTERY,
+            => {
+                if (!self.ram_enabled) {
+                    return 0xFF;
+                }
+                switch (address) {
+                    RAM_BANK_START...RAM_BANK_END => {
+                        if (self.ram_bank <= 0x03) {
+                            const mbc3_address = MBC3RamAddress{
+                                .base = @truncate(address),
+                                .ram_bank = @truncate(self.ram_bank),
+                            };
+                            const full_address = @as(u15, @bitCast(mbc3_address));
+                            return self.ram[full_address];
+                        } else {
+                            // RTC register access
+                            // Implement RTC register reading if needed
+                            return 0xFF;
+                        }
                     },
                     else => {
                         return 0xFF;
