@@ -103,8 +103,10 @@ pub fn main(filename: []u8) !void {
         }
 
         const cycles_per_frame = CPU_SPEED_HZ / 60;
-        const hz_60_nanos: u64 = std.time.ns_per_s / 60;
-        var timer = try std.time.Timer.start();
+        // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
+        // _ = hz_60_nanos; // autofix
+        // var timer = try std.time.Timer.start();
+        // _ = timer; // autofix
         var frame_cycles: u64 = 0;
         while (true) {
             const cycles = cpu.frame_walk();
@@ -116,7 +118,7 @@ pub fn main(filename: []u8) !void {
         try cpu_.buf.flush();
         frame += 1;
 
-        while (timer.read() < hz_60_nanos) {}
+        // while (timer.read() < hz_60_nanos) {}
 
         // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 

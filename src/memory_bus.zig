@@ -266,10 +266,10 @@ pub const MemoryBus = struct {
                     // possibly need to not overwrite the lower 4 bits
                     self.joypad.joyp.select = @enumFromInt((byte >> 4) & 0b11);
                 },
-                0xFF01 => break :blk,
-                0xFF02 => break :blk,
-                // 0xFF01 => std.debug.print("{c}", .{byte}),
-                // 0xFF02 => std.debug.print("{c}", .{byte}),
+                // 0xFF01 => break :blk,
+                // 0xFF02 => break :blk,
+                0xFF01 => std.debug.print("{c}", .{byte}),
+                0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.div = 0;
                 },
