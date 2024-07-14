@@ -1980,11 +1980,7 @@ pub const CPU = struct {
                 self.push(self.pc);
                 self.halt_state = HaltState.Disabled;
 
-                // when handling an interrupt,
-                // 1 cycle for interrupt check
-                // 1 cycle for ack
-                // 8 cycles for push
-                // 4 cycles for jump
+                // 20 cycles for interrupts
                 // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
                     // std.debug.print("HANDLING VBLANK\n", .{});
@@ -2049,6 +2045,7 @@ pub const CPU = struct {
         const prefixed = instruction_byte == 0xCB;
         if (prefixed) {
             instruction_byte = self.bus.read_byte(self.pc +% 1);
+            self.clock.t_cycles += 4;
         }
         if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
             break :blk self.execute(instruction);
@@ -2490,7 +2487,6 @@ pub const CPU = struct {
         return value & ~(@as(u8, 1) << args.bit.?);
     }
 
-    // fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, instruction: Instruction, op: *const fn (*CPU, u8) u8) u16 {
     fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8, PrefixExtendedArgs) u8, args: PrefixExtendedArgs) void {
         switch (target) {
             PrefixTarget.A => {
@@ -2562,8 +2558,6 @@ pub const CPU = struct {
         return @as(u16, high) << 8 | @as(u16, low);
     }
 
-    /// For the call opcode, we increment pc prior to the call
-    /// wheras for interrupt usage we return to the current instruction so leave pc as is
     fn call(self: *CPU, next_pc: u16, should_call: bool) u16 {
         if (should_call) {
             self.push(next_pc);
