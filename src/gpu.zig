@@ -660,7 +660,7 @@ pub const GPU = struct {
 
     pub fn render_objects_list(self: *GPU, renderable_objects: std.ArrayList(Object)) void {
         for (renderable_objects.items) |object| {
-            if (object.x >= 0 and object.x < SCREEN_WIDTH and self.ly < SCREEN_HEIGHT) {
+            if (self.ly < SCREEN_HEIGHT) {
                 var tile_y: i16 = undefined;
                 if (self.lcdc.obj_size) {
                     tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
@@ -668,43 +668,34 @@ pub const GPU = struct {
                     tile_y = if (object.attributes.y_flip) 7 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 7);
                 }
 
-                const palatte = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
-
-                var buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(u16, @bitCast(object.x)) * 3;
+                const palette = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
                 const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
 
                 for (0..8) |x| {
-                    const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
-                    const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
-                    const high: u8 = @as(u8, @truncate(tile_line >> 8));
-                    const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                    const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-                    const color: TilePixelValue = GPU.color_from_palette(palatte, color_id);
+                    const draw_x = @as(usize, @intCast(object.x)) + x;
+                    if (draw_x >= 0 and draw_x < SCREEN_WIDTH) {
+                        const buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, draw_x) * 3;
+                        const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
+                        const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
+                        const high: u8 = @as(u8, @truncate(tile_line >> 8));
+                        const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
+                        const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
+                        const color: TilePixelValue = GPU.color_from_palette(palette, color_id);
 
-                    if ((buffer_index / 3) >= DRAW_HEIGHT * DRAW_WIDTH) {
-                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
-                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
-                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
-                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
+                        const draw_over_bg_and_window = !object.attributes.priority or
+                            (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
+
+                        if (draw_over_bg_and_window and color_id != 0) {
+                            self.tile_canvas[buffer_index / 3] = color;
+                            self.canvas[buffer_index] = color.to_color();
+                            self.canvas[buffer_index + 1] = color.to_color();
+                            self.canvas[buffer_index + 2] = color.to_color();
+                        }
                     }
-                    const draw_over_bg_and_window = !object.attributes.priority or
-                        (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
-
-                    // object.x + x > 160?
-                    // miserable bug: the color check is on color_id, not the color
-                    if (draw_over_bg_and_window and color_id != 0 and object.x + @as(i16, @intCast(x)) < SCREEN_WIDTH) {
-                        self.tile_canvas[buffer_index / 3] = color;
-                        self.canvas[buffer_index] = color.to_color();
-                        self.canvas[buffer_index +% 1] = color.to_color();
-                        self.canvas[buffer_index +% 2] = color.to_color();
-                    }
-
-                    buffer_index += 3;
                 }
             }
         }
     }
-
     pub fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
     }
