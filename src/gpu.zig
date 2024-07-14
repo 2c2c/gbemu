@@ -554,6 +554,12 @@ pub const GPU = struct {
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
             const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
+            if ((buffer_index / 3) >= DRAW_HEIGHT * DRAW_WIDTH) {
+                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
+                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
+                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
+                std.debug.print("ly {} x {} y {} buffer {} color_id {}\n", .{ self.ly, x, y, buffer_index, color_id });
+            }
             self.tile_canvas[buffer_index / 3] = color;
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
@@ -654,7 +660,7 @@ pub const GPU = struct {
 
     pub fn render_objects_list(self: *GPU, renderable_objects: std.ArrayList(Object)) void {
         for (renderable_objects.items) |object| {
-            if (object.x >= 0 and object.x <= SCREEN_WIDTH) {
+            if (object.x >= 0 and object.x < SCREEN_WIDTH and self.ly < SCREEN_HEIGHT) {
                 var tile_y: i16 = undefined;
                 if (self.lcdc.obj_size) {
                     tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
@@ -675,12 +681,18 @@ pub const GPU = struct {
                     const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
                     const color: TilePixelValue = GPU.color_from_palette(palatte, color_id);
 
+                    if ((buffer_index / 3) >= DRAW_HEIGHT * DRAW_WIDTH) {
+                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
+                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
+                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
+                        std.debug.print("ly {} object.x {} object.y {} x {} buffer {} color_id {}\n", .{ self.ly, object.x, object.y, x, buffer_index, color_id });
+                    }
                     const draw_over_bg_and_window = !object.attributes.priority or
                         (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
 
                     // object.x + x > 160?
                     // miserable bug: the color check is on color_id, not the color
-                    if (draw_over_bg_and_window and color_id != 0) {
+                    if (draw_over_bg_and_window and color_id != 0 and object.x + @as(i16, @intCast(x)) < SCREEN_WIDTH) {
                         self.tile_canvas[buffer_index / 3] = color;
                         self.canvas[buffer_index] = color.to_color();
                         self.canvas[buffer_index +% 1] = color.to_color();
