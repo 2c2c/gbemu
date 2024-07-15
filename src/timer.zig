@@ -25,6 +25,11 @@ pub const Frequency = enum(u2) {
     }
 };
 
+pub const Tac = packed struct {
+    frequency: Frequency,
+    enabled: bool,
+    _padding: u5 = 0,
+};
 pub const Timer = struct {
     /// FF07
     /// 00: 4096Hz
@@ -32,14 +37,12 @@ pub const Timer = struct {
     /// 10: 65536Hz
     /// 11: 16384Hz
     /// 0b0000_0100 -> enabled
-    tac: packed struct {
-        frequency: Frequency,
-        enabled: bool,
-        _padding: u5 = 0,
-    },
+    tac: Tac,
+
     /// FF04
     /// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
     div: u8,
+
     /// FF05
     /// increases at rate of TAC frequency
     /// when overflows, resets to TMA + interrupt is called
@@ -63,11 +66,6 @@ pub const Timer = struct {
         };
     }
     pub fn step(self: *Timer, cycles: u64, div: u8) bool {
-        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
-        //     self.total_cycles,
-        //     cycles_per_tick,
-        //     self.tima,
-        // });
         self.div = div;
         self.total_cycles += cycles;
         if (!self.tac.enabled) {
@@ -89,6 +87,11 @@ pub const Timer = struct {
         if (tac_overflow) {
             self.tima = self.tma;
         }
+        std.debug.print("tc {}, cpt {}, tima {}\n", .{
+            self.total_cycles,
+            cycles_per_tick,
+            self.tima,
+        });
         return tac_overflow;
     }
 };

@@ -1955,7 +1955,7 @@ pub const CPU = struct {
         }
     }
 
-    pub fn handle_interrupt(self: *CPU) void {
+    pub fn handle_interrupt(self: *CPU) bool {
         if (self.bus.has_interrupt()) {
             // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
@@ -2003,25 +2003,28 @@ pub const CPU = struct {
                     self.clock.t_cycles += 20;
                 }
                 // std.debug.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
+
+                return true;
             }
         }
         if (self.ime == IME.EILagCycle) {
             // std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
             self.ime = IME.Enabled;
         }
+
+        return false;
     }
     pub fn step(self: *CPU) u64 {
         self.pending_t_cycles = 0;
         var frame_cycles: u64 = 0;
         var current_cycles = self.clock.t_cycles;
 
-        Joypad.update_joyp_keys(self);
-        // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
-
-        self.handle_interrupt();
-        // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
-        self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-        frame_cycles = self.pending_t_cycles;
+        const ran_interrupt = self.handle_interrupt();
+        if (ran_interrupt) {
+            self.pending_t_cycles = self.clock.t_cycles - current_cycles;
+            frame_cycles = self.pending_t_cycles;
+            return frame_cycles;
+        }
 
         // TODO: reworked how components tick, cleanup this area
         self.pending_t_cycles = 0;
