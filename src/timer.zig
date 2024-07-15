@@ -16,7 +16,7 @@ pub const Frequency = enum(u2) {
         };
     }
 
-    fn clock_bit_to_check(self: Frequency) u8 {
+    fn clock_bit_to_check(self: Frequency) u6 {
         return switch (self) {
             Frequency.Hz4096 => 9,
             Frequency.Hz262144 => 3,
@@ -86,7 +86,11 @@ pub const Timer = struct {
                 self.tima_reload_cycle = true;
             }
         }
-        self.clock_update(self.internal_clock.t_cycles + 4);
+        const new_clock = cpu.Clock{ .t_cycles = self.internal_clock.t_cycles };
+        self.clock_update(new_clock);
+
+        // interrupt fires when true
+        return self.tima_reload_cycle;
     }
 
     /// TIMA updates are determined by specific bit falling from 1 -> 0
@@ -98,8 +102,7 @@ pub const Timer = struct {
         self.internal_clock = clock;
 
         const check_bit = self.tac.frequency.clock_bit_to_check();
-        var new_bit = @as(u64, @bitCast(self.internal_clock)) >> check_bit & 1;
-
+        var new_bit: u1 = @truncate(@as(u64, @bitCast(self.internal_clock)) >> check_bit & 1);
         new_bit = new_bit & @intFromBool(self.tac.enabled);
 
         self.check_falling_edge(self.prev_bit, new_bit);
@@ -109,7 +112,7 @@ pub const Timer = struct {
     pub fn check_falling_edge(self: *Timer, old_bit: u1, new_bit: u1) void {
         if (old_bit == 1 and new_bit == 0) {
             const res: u8, const overflow: u1 = @addWithOverflow(self.tima, 1);
-            if (overflow) {
+            if (overflow == 1) {
                 self.tima_cycles_till_interrupt = 4;
             }
             self.tima = res;

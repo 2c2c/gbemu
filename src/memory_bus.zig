@@ -262,25 +262,34 @@ pub const MemoryBus = struct {
                 0xFF01 => std.debug.print("{c}", .{byte}),
                 0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
-                    self.timer.clock_update(@bitCast(0));
+                    self.timer.clock_update(@bitCast(@as(u64, 0)));
+                    std.debug.print("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
                 },
                 0xFF05 => {
                     if (!self.timer.tima_reload_cycle) {
-                        self.tima = byte;
+                        self.timer.tima = byte;
                     }
                     if (self.timer.tima_cycles_till_interrupt > 0) {
                         self.timer.tima_cycles_till_interrupt = 0;
                     }
+                    std.debug.print("tima {}\n", .{self.timer.tima});
                 },
                 0xFF06 => {
                     if (self.timer.tima_reload_cycle) {
                         self.timer.tima = byte;
                     }
                     self.timer.tma = byte;
+                    std.debug.print("tma {}\n", .{self.timer.tima});
                 },
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
+                    const new_enabled_bit = @intFromBool(new_tac.enabled);
+                    self.timer.check_falling_edge(self.timer.prev_bit, new_enabled_bit);
+
                     self.timer.tac = new_tac;
+                    std.debug.print("tac {}\n", .{self.timer.tima});
+
+                    self.timer.prev_bit = new_enabled_bit;
                     // std.debug.print("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
                 },
                 0xFF0F => {

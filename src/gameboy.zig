@@ -82,7 +82,7 @@ pub const Gameboy = struct {
             frame_cycles += cpu_cycles_spent;
 
             while (cpu_cycles_spent > 0) : (cpu_cycles_spent -= 4) {
-                const enable_timer_flag = self.timer.step(4, self.cpu.clock.bits.div);
+                const enable_timer_flag = self.timer.step();
                 const gpu_interrupt_requests = self.gpu.step(4);
 
                 const interrupt_flags = ie_register.IERegister{

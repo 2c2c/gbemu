@@ -582,7 +582,7 @@ const Instruction = union(enum) {
     }
 };
 
-const Clock = packed union {
+pub const Clock = packed union {
     t_cycles: u64,
     bits: packed struct {
         lower_clock: u8,
