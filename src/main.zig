@@ -24,7 +24,7 @@ pub fn headless_main() !void {
     }
 
     const filename = args[1];
-    var gb = try Gameboy.new(filename);
+    var gb = try Gameboy.new(filename, allocator);
     while (true) {
         _ = gb.frame();
     }
@@ -43,7 +43,7 @@ pub fn draw_main() !void {
 
     const filename = args[1];
 
-    try draw.main(filename);
+    try draw.main(filename, allocator);
 }
 
 test {

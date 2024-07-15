@@ -573,7 +573,7 @@ pub const MBC = struct {
         defer file.close();
 
         const rom = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
-        _ = try file.readAll(rom);
+        // _ = try file.readAll(rom);
         std.debug.print("raw mbc {} rom size {}, ram size {}\n", .{
             rom[0x147],
             rom[0x148],
@@ -611,8 +611,8 @@ pub const MBC = struct {
 
     // lives for entire program, no need to worry about this
     pub fn deinit(self: *MBC) void {
-        self.allocator.free(self.ram);
-        self.allocator.free(self.rom);
+        self.alloc.free(self.ram);
+        self.alloc.free(self.rom);
     }
 };
 pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {

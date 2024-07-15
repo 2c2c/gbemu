@@ -13,14 +13,9 @@ const test_allocator = std.testing.allocator;
 
 const CPU_SPEED_HZ = 4194304;
 
-pub fn setup_gameboy(filename: []u8) !Gameboy {
-    const gb = try Gameboy.new(filename);
-    return gb;
-}
-
 const SCALE = 2;
 
-pub fn main(filename: []u8) !void {
+pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
         sdlPanic();
     defer SDL.SDL_Quit();
@@ -51,13 +46,11 @@ pub fn main(filename: []u8) !void {
     defer SDL.SDL_DestroyTexture(texture);
     _ = SDL.SDL_SetTextureScaleMode(texture, SDL.SDL_ScaleModeNearest);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
     const title = try alloc.alloc(u8, 256);
     defer alloc.free(title);
 
-    var gb = try setup_gameboy(filename);
+    var gb = try Gameboy.new(filename, alloc);
+    defer gb.deinit();
     var frame: u128 = 0;
 
     mainLoop: while (true) {
