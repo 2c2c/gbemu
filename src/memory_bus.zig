@@ -275,7 +275,7 @@ pub const MemoryBus = struct {
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
                     self.timer.*.tac = new_tac;
-                    std.debug.print("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
+                    // std.debug.print("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
                 },
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);

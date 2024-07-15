@@ -8,8 +8,8 @@ const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
-    try headless_main();
-    // try draw_main();
+    // try headless_main();
+    try draw_main();
 }
 
 pub fn headless_main() !void {

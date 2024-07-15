@@ -87,11 +87,11 @@ pub const Timer = struct {
         if (tac_overflow) {
             self.tima = self.tma;
         }
-        std.debug.print("tc {}, cpt {}, tima {}\n", .{
-            self.total_cycles,
-            cycles_per_tick,
-            self.tima,
-        });
+        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
+        //     self.total_cycles,
+        //     cycles_per_tick,
+        //     self.tima,
+        // });
         return tac_overflow;
     }
 };

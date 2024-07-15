@@ -10,7 +10,7 @@ const ie_register = @import("ie_register.zig");
 const CPU_SPEED_HZ = 4194304;
 pub const Gameboy = struct {
     mbc: *cartridge.MBC,
-    cpu: *cpu.CPU,
+    cpu: cpu.CPU,
     gpu: *gpu.GPU,
     memory_bus: *memory_bus.MemoryBus,
     joypad: *joypad.Joypad,
@@ -23,11 +23,11 @@ pub const Gameboy = struct {
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = timer.Frequency.Hz4096;
         var memory_bus_ = try memory_bus.MemoryBus.new(&mbc_, &gpu_, &timer_, &joypad_);
-        var cpu_ = try cpu.CPU.new(&memory_bus_);
+        const cpu_ = try cpu.CPU.new(&memory_bus_);
 
         return Gameboy{
             .mbc = &mbc_,
-            .cpu = &cpu_,
+            .cpu = cpu_,
             .gpu = &gpu_,
             .joypad = &joypad_,
             .timer = &timer_,
@@ -63,7 +63,7 @@ pub const Gameboy = struct {
                     .enable_joypad = false,
                 };
 
-                std.debug.print("gb.timer {} gb.bus.timer {}\n", .{ self.timer.tac, self.memory_bus.timer.tac });
+                // std.debug.print("gb.timer {} gb.bus.timer {}\n", .{ self.timer.tac, self.memory_bus.timer.tac });
                 self.memory_bus.update_if_flags(interrupt_flags);
             }
 
