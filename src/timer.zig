@@ -58,9 +58,16 @@ pub const Timer = struct {
             .tima = 0,
             .tma = 0,
             .total_cycles = 0,
+            .tima_reload_cycle = false,
+            .tma_reload_cycle = false,
         };
     }
     pub fn step(self: *Timer, cycles: u64, div: u8) bool {
+        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
+        //     self.total_cycles,
+        //     cycles_per_tick,
+        //     self.tima,
+        // });
         self.div = div;
         self.total_cycles += cycles;
         if (!self.tac.enabled) {
@@ -68,11 +75,6 @@ pub const Timer = struct {
         }
 
         const cycles_per_tick = self.tac.frequency.cycles_per_tick();
-        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
-        //     self.total_cycles,
-        //     cycles_per_tick,
-        //     self.tima,
-        // });
         const tac_overflow = blk: {
             if (self.total_cycles >= cycles_per_tick) {
                 self.total_cycles = self.total_cycles % cycles_per_tick;
