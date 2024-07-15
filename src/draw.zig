@@ -109,7 +109,7 @@ pub fn main(filename: []u8) !void {
         // _ = timer; // autofix
         var frame_cycles: u64 = 0;
         while (true) {
-            const cycles = cpu.frame_walk();
+            const cycles = cpu.step();
             frame_cycles += cycles;
             if (frame_cycles >= cycles_per_frame) {
                 break;

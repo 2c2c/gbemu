@@ -1954,14 +1954,8 @@ pub const CPU = struct {
             },
         }
     }
-    pub fn frame_walk(self: *CPU) u64 {
-        self.pending_t_cycles = 0;
-        var frame_cycles: u64 = 0;
-        var current_cycles = self.clock.t_cycles;
 
-        Joypad.update_joyp_keys(self);
-        // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
-
+    pub fn handle_interrupt(self: *CPU) void {
         if (self.bus.has_interrupt()) {
             // std.debug.print("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
@@ -2015,6 +2009,16 @@ pub const CPU = struct {
             // std.debug.print("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
             self.ime = IME.Enabled;
         }
+    }
+    pub fn step(self: *CPU) u64 {
+        self.pending_t_cycles = 0;
+        var frame_cycles: u64 = 0;
+        var current_cycles = self.clock.t_cycles;
+
+        Joypad.update_joyp_keys(self);
+        // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
+
+        self.handle_interrupt();
         // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
         frame_cycles = self.pending_t_cycles;
@@ -2027,10 +2031,19 @@ pub const CPU = struct {
         // beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
-            // self.pc -%= 1;
             self.clock.t_cycles += 4;
         } else {
-            self.step();
+            var instruction_byte = self.bus.read_byte(self.pc);
+            const prefixed = instruction_byte == 0xCB;
+            if (prefixed) {
+                instruction_byte = self.bus.read_byte(self.pc +% 1);
+                self.clock.t_cycles += 4;
+            }
+            if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
+                break :blk self.execute(instruction);
+            } else {
+                std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
+            }
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
         self.bus.step(self.pending_t_cycles, self.clock.bits.div);
@@ -2039,20 +2052,6 @@ pub const CPU = struct {
         return frame_cycles;
     }
 
-    pub fn step(self: *CPU) void {
-        // std.debug.print("CPU STEP PC: 0x{x}\n", .{self.pc});
-        var instruction_byte = self.bus.read_byte(self.pc);
-        const prefixed = instruction_byte == 0xCB;
-        if (prefixed) {
-            instruction_byte = self.bus.read_byte(self.pc +% 1);
-            self.clock.t_cycles += 4;
-        }
-        if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
-            break :blk self.execute(instruction);
-        } else {
-            std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
-        }
-    }
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {
             const low = self.bus.read_byte(self.pc +% 1);

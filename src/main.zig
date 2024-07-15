@@ -25,7 +25,7 @@ pub fn cpumain() !void {
     const filename = args[1];
     var cpu = try CPU.new(filename);
     while (true) {
-        _ = cpu.frame_walk();
+        _ = cpu.step();
     }
 }
 
