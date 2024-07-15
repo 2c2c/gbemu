@@ -273,8 +273,7 @@ pub const MBC = struct {
     rom_size: RomSize,
     ram_size: RamSize,
 
-    gpa: std.heap.GeneralPurposeAllocator(.{}),
-    allocator: std.mem.Allocator,
+    alloc: std.mem.Allocator,
 
     pub fn handle_register(self: *MBC, address: u16, byte: u8) void {
         switch (self.mbc_type) {
@@ -569,15 +568,11 @@ pub const MBC = struct {
         self.banking_mode = mode & 0x01;
     }
 
-    pub fn new(filename: []u8) !MBC {
+    pub fn new(filename: []u8, alloc: std.mem.Allocator) !MBC {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
-        const size = try file.getEndPos();
-
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = gpa.allocator();
-        const rom = try allocator.alloc(u8, size);
+        const rom = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
         _ = try file.readAll(rom);
         std.debug.print("raw mbc {} rom size {}, ram size {}\n", .{
             rom[0x147],
@@ -586,11 +581,11 @@ pub const MBC = struct {
         });
         const header = get_game_rom_metadata(rom);
 
-        const ram = try allocator.alloc(u8, header.ram_size.num_bytes());
+        const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
 
         std.debug.print("cartridge type: {}, size {}, rom size: {}, rom bytes: {}, rom banks: {}, ram size: {}\n", .{
             header.cartridge_type,
-            size,
+            rom.len,
             header.rom_size,
             header.rom_size.num_bytes(),
             header.rom_size.num_banks(),
@@ -610,8 +605,7 @@ pub const MBC = struct {
             .rom_size = header.rom_size,
             .ram_size = header.ram_size,
 
-            .gpa = gpa,
-            .allocator = allocator,
+            .alloc = alloc,
         };
     }
 
@@ -619,7 +613,6 @@ pub const MBC = struct {
     pub fn deinit(self: *MBC) void {
         self.allocator.free(self.ram);
         self.allocator.free(self.rom);
-        self.gpa.deinit();
     }
 };
 pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {

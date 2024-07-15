@@ -17,13 +17,16 @@ pub const Gameboy = struct {
     timer: timer.Timer,
 
     pub fn new(filename: []u8) !Gameboy {
-        const mbc_ = try cartridge.MBC.new(filename);
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const alloc = gpa.allocator();
+
+        const mbc_ = try cartridge.MBC.new(filename, alloc);
         const gpu_ = gpu.GPU.new();
         const joypad_ = joypad.Joypad.new();
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = timer.Frequency.Hz4096;
-        const memory_bus_ = try memory_bus.MemoryBus.new(mbc_, gpu_, timer_, joypad_);
-        const cpu_ = try cpu.CPU.new(memory_bus_);
+        const memory_bus_ = memory_bus.MemoryBus.new(mbc_, gpu_, timer_, joypad_);
+        const cpu_ = cpu.CPU.new(memory_bus_);
 
         return Gameboy{
             .mbc = mbc_,

@@ -2604,7 +2604,7 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(bus: MemoryBus) !CPU {
+    pub fn new(bus: MemoryBus) CPU {
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x01,

@@ -81,7 +81,7 @@ pub const MemoryBus = struct {
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    pub fn new(mbc_: MBC, gpu_: GPU, timer_: timer.Timer, joypad_: joypad.Joypad) !MemoryBus {
+    pub fn new(mbc_: MBC, gpu_: GPU, timer_: timer.Timer, joypad_: joypad.Joypad) MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
