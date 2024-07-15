@@ -110,11 +110,7 @@ pub fn main(filename: []u8) !void {
         // _ = hz_60_nanos; // autofix
         // var timer = try std.time.Timer.start();
         // _ = timer; // autofix
-        var frame_cycles: u64 = 0;
-        while (true) {
-            gb.frame();
-            frame_cycles += 1;
-        }
+        gb.frame();
         frame += 1;
 
         // while (timer.read() < hz_60_nanos) {}

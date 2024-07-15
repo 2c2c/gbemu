@@ -586,7 +586,7 @@ pub const CPU = struct {
     registers: Registers,
     pc: u16,
     sp: u16,
-    bus: *MemoryBus,
+    bus: MemoryBus,
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
@@ -2604,7 +2604,7 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(bus: *MemoryBus) !CPU {
+    pub fn new(bus: MemoryBus) !CPU {
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x01,

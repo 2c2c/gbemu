@@ -9,29 +9,29 @@ const ie_register = @import("ie_register.zig");
 
 const CPU_SPEED_HZ = 4194304;
 pub const Gameboy = struct {
-    mbc: *cartridge.MBC,
+    mbc: cartridge.MBC,
     cpu: cpu.CPU,
-    gpu: *gpu.GPU,
-    memory_bus: *memory_bus.MemoryBus,
-    joypad: *joypad.Joypad,
-    timer: *timer.Timer,
+    gpu: gpu.GPU,
+    memory_bus: memory_bus.MemoryBus,
+    joypad: joypad.Joypad,
+    timer: timer.Timer,
 
     pub fn new(filename: []u8) !Gameboy {
-        var mbc_ = try cartridge.MBC.new(filename);
-        var gpu_ = gpu.GPU.new();
-        var joypad_ = joypad.Joypad.new();
+        const mbc_ = try cartridge.MBC.new(filename);
+        const gpu_ = gpu.GPU.new();
+        const joypad_ = joypad.Joypad.new();
         var timer_ = timer.Timer.new();
         timer_.tac.frequency = timer.Frequency.Hz4096;
-        var memory_bus_ = try memory_bus.MemoryBus.new(&mbc_, &gpu_, &timer_, &joypad_);
-        const cpu_ = try cpu.CPU.new(&memory_bus_);
+        const memory_bus_ = try memory_bus.MemoryBus.new(mbc_, gpu_, timer_, joypad_);
+        const cpu_ = try cpu.CPU.new(memory_bus_);
 
         return Gameboy{
-            .mbc = &mbc_,
+            .mbc = mbc_,
             .cpu = cpu_,
-            .gpu = &gpu_,
-            .joypad = &joypad_,
-            .timer = &timer_,
-            .memory_bus = &memory_bus_,
+            .gpu = gpu_,
+            .joypad = joypad_,
+            .timer = timer_,
+            .memory_bus = memory_bus_,
         };
     }
 

@@ -73,15 +73,15 @@ const GameBoyRomHeader = extern struct {
 pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
-    gpu: *GPU,
-    joypad: *joypad.Joypad,
-    timer: *timer.Timer,
-    mbc: *MBC,
+    gpu: GPU,
+    joypad: joypad.Joypad,
+    timer: timer.Timer,
+    mbc: MBC,
 
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    pub fn new(mbc_: *MBC, gpu_: *GPU, timer_: *timer.Timer, joypad_: *joypad.Joypad) !MemoryBus {
+    pub fn new(mbc_: MBC, gpu_: GPU, timer_: timer.Timer, joypad_: joypad.Joypad) !MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
@@ -274,7 +274,7 @@ pub const MemoryBus = struct {
                 0xFF06 => self.timer.tma = byte,
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
-                    self.timer.*.tac = new_tac;
+                    self.timer.tac = new_tac;
                     // std.debug.print("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
                 },
                 0xFF0F => {
