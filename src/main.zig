@@ -1,5 +1,6 @@
 const std = @import("std");
 const CPU = @import("cpu.zig").CPU;
+const Gameboy = @import("gameboy.zig").Gameboy;
 const draw = @import("draw.zig");
 
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -8,10 +9,10 @@ const test_allocator = std.testing.allocator;
 
 pub fn main() !void {
     // try cpumain();
-    try drawmain();
+    try draw_main();
 }
 
-pub fn cpumain() !void {
+pub fn headless_main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
@@ -23,13 +24,13 @@ pub fn cpumain() !void {
     }
 
     const filename = args[1];
-    var cpu = try CPU.new(filename);
+    var gb = try Gameboy.new(filename);
     while (true) {
-        _ = cpu.step();
+        _ = gb.frame();
     }
 }
 
-pub fn drawmain() !void {
+pub fn draw_main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();

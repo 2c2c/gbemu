@@ -73,46 +73,37 @@ const GameBoyRomHeader = extern struct {
 pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
-    gpu: GPU,
-    joypad: joypad.Joypad,
-    timer: timer.Timer,
-    mbc: MBC,
+    gpu: *GPU,
+    joypad: *joypad.Joypad,
+    timer: *timer.Timer,
+    mbc: *MBC,
 
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    pub fn new(filename: []u8) !MemoryBus {
-        var mbc = try MBC.new(filename);
-
+    pub fn new(mbc_: *MBC, gpu_: *GPU, timer_: *timer.Timer, joypad_: *joypad.Joypad) !MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
-        std.mem.copyForwards(u8, memory[0..0x7FFF], mbc.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
-
-        var timer_ = timer.Timer.new();
-        timer_.tac.frequency = timer.Frequency.Hz4096;
+        std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
         return MemoryBus{
             .memory = memory,
 
-            .gpu = GPU.new(),
-            .joypad = joypad.Joypad.new(),
+            .gpu = gpu_,
+            .joypad = joypad_,
             .timer = timer_,
-            .mbc = mbc,
+            .mbc = mbc_,
 
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
         };
     }
 
-    pub fn step(self: *MemoryBus, cycles: u64, div: u8) void {
-        if (self.timer.step(cycles, div)) {
-            // std.debug.print("timer interrupt flag turned on\n", .{});
-            self.interrupt_flag.enable_timer = true;
-        }
-
-        const res = self.gpu.step(cycles);
-
-        self.interrupt_flag.enable_lcd_stat = res.enable_lcd_stat;
-        self.interrupt_flag.enable_vblank = res.enable_vblank;
+    pub fn update_if_flags(self: *MemoryBus, new_enabled_if_flags: IERegister) void {
+        self.interrupt_flag.enable_vblank = if (new_enabled_if_flags.enable_vblank) true else self.interrupt_flag.enable_vblank;
+        self.interrupt_flag.enable_lcd_stat = if (new_enabled_if_flags.enable_lcd_stat) true else self.interrupt_flag.enable_lcd_stat;
+        self.interrupt_flag.enable_timer = if (new_enabled_if_flags.enable_timer) true else self.interrupt_flag.enable_timer;
+        self.interrupt_flag.enable_joypad = if (new_enabled_if_flags.enable_joypad) true else self.interrupt_flag.enable_joypad;
+        self.interrupt_flag.enable_serial = if (new_enabled_if_flags.enable_serial) true else self.interrupt_flag.enable_serial;
     }
 
     pub fn has_interrupt(self: *MemoryBus) bool {

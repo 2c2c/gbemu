@@ -586,7 +586,7 @@ pub const CPU = struct {
     registers: Registers,
     pc: u16,
     sp: u16,
-    bus: MemoryBus,
+    bus: *MemoryBus,
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
@@ -2022,8 +2022,8 @@ pub const CPU = struct {
         // can doing this regardless of interrupt or halt occuring break things? should always be 0 cycles?
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
         frame_cycles = self.pending_t_cycles;
-        self.bus.step(self.pending_t_cycles, self.clock.bits.div);
 
+        // TODO: reworked how components tick, cleanup this area
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
 
@@ -2046,7 +2046,6 @@ pub const CPU = struct {
             }
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-        self.bus.step(self.pending_t_cycles, self.clock.bits.div);
         frame_cycles += self.pending_t_cycles;
 
         return frame_cycles;
@@ -2602,7 +2601,7 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(filename: []u8) !CPU {
+    pub fn new(bus: *MemoryBus) !CPU {
         const cpu: CPU = CPU{
             .registers = Registers{
                 .A = 0x01,
@@ -2611,18 +2610,12 @@ pub const CPU = struct {
                 .D = 0x00,
                 .E = 0xD8,
                 .F = @bitCast(@as(u8, 0xB0)),
-                // .F = .{
-                //     .zero = false,
-                //     .subtract = false,
-                //     .half_carry = false,
-                //     .carry = false,
-                // },
                 .H = 0x01,
                 .L = 0x4D,
             },
             .pc = 0x0100,
             .sp = 0xFFFE,
-            .bus = try MemoryBus.new(filename),
+            .bus = bus,
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,

@@ -5,6 +5,7 @@ const cpu_ = @import("cpu.zig");
 const time = @import("std").time;
 
 const CPU = cpu_.CPU;
+const Gameboy = @import("gameboy.zig").Gameboy;
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
@@ -12,9 +13,9 @@ const test_allocator = std.testing.allocator;
 
 const CPU_SPEED_HZ = 4194304;
 
-pub fn setup_cpu(filename: []u8) !CPU {
-    const cpu = CPU.new(filename);
-    return cpu;
+pub fn setup_gameboy(filename: []u8) !Gameboy {
+    const gb = try Gameboy.new(filename);
+    return gb;
 }
 
 const SCALE = 2;
@@ -55,7 +56,8 @@ pub fn main(filename: []u8) !void {
     var alloc = gpa.allocator();
     const title = try alloc.alloc(u8, 256);
     defer alloc.free(title);
-    var cpu = try setup_cpu(filename);
+
+    var gb = try setup_gameboy(filename);
     var frame: u128 = 0;
 
     mainLoop: while (true) {
@@ -69,14 +71,14 @@ pub fn main(filename: []u8) !void {
                     const is_pressed = ev.type == SDL.SDL_KEYDOWN;
                     // std.debug.print("Key down event: {d} pressed\n", .{key});
                     switch (key) {
-                        SDL.SDLK_w => cpu.bus.joypad.dpad.pressed.UP = is_pressed,
-                        SDL.SDLK_a => cpu.bus.joypad.dpad.pressed.LEFT = is_pressed,
-                        SDL.SDLK_s => cpu.bus.joypad.dpad.pressed.DOWN = is_pressed,
-                        SDL.SDLK_d => cpu.bus.joypad.dpad.pressed.RIGHT = is_pressed,
-                        SDL.SDLK_j => cpu.bus.joypad.button.pressed.A = is_pressed,
-                        SDL.SDLK_k => cpu.bus.joypad.button.pressed.B = is_pressed,
-                        SDL.SDLK_RETURN => cpu.bus.joypad.button.pressed.START = is_pressed,
-                        SDL.SDLK_QUOTE => cpu.bus.joypad.button.pressed.SELECT = is_pressed,
+                        SDL.SDLK_w => gb.joypad.dpad.pressed.UP = is_pressed,
+                        SDL.SDLK_a => gb.joypad.dpad.pressed.LEFT = is_pressed,
+                        SDL.SDLK_s => gb.joypad.dpad.pressed.DOWN = is_pressed,
+                        SDL.SDLK_d => gb.joypad.dpad.pressed.RIGHT = is_pressed,
+                        SDL.SDLK_j => gb.joypad.button.pressed.A = is_pressed,
+                        SDL.SDLK_k => gb.joypad.button.pressed.B = is_pressed,
+                        SDL.SDLK_RETURN => gb.joypad.button.pressed.START = is_pressed,
+                        SDL.SDLK_QUOTE => gb.joypad.button.pressed.SELECT = is_pressed,
                         SDL.SDLK_ESCAPE => break :mainLoop,
                         else => {},
                     }
@@ -86,14 +88,14 @@ pub fn main(filename: []u8) !void {
                     const is_pressed = ev.type == SDL.SDL_KEYDOWN;
                     // std.debug.print("Key up event: {d} released\n", .{key});
                     switch (key) {
-                        SDL.SDLK_w => cpu.bus.joypad.dpad.pressed.UP = is_pressed,
-                        SDL.SDLK_a => cpu.bus.joypad.dpad.pressed.LEFT = is_pressed,
-                        SDL.SDLK_s => cpu.bus.joypad.dpad.pressed.DOWN = is_pressed,
-                        SDL.SDLK_d => cpu.bus.joypad.dpad.pressed.RIGHT = is_pressed,
-                        SDL.SDLK_j => cpu.bus.joypad.button.pressed.A = is_pressed,
-                        SDL.SDLK_k => cpu.bus.joypad.button.pressed.B = is_pressed,
-                        SDL.SDLK_RETURN => cpu.bus.joypad.button.pressed.START = is_pressed,
-                        SDL.SDLK_QUOTE => cpu.bus.joypad.button.pressed.SELECT = is_pressed,
+                        SDL.SDLK_w => gb.joypad.dpad.pressed.UP = is_pressed,
+                        SDL.SDLK_a => gb.joypad.dpad.pressed.LEFT = is_pressed,
+                        SDL.SDLK_s => gb.joypad.dpad.pressed.DOWN = is_pressed,
+                        SDL.SDLK_d => gb.joypad.dpad.pressed.RIGHT = is_pressed,
+                        SDL.SDLK_j => gb.joypad.button.pressed.A = is_pressed,
+                        SDL.SDLK_k => gb.joypad.button.pressed.B = is_pressed,
+                        SDL.SDLK_RETURN => gb.joypad.button.pressed.START = is_pressed,
+                        SDL.SDLK_QUOTE => gb.joypad.button.pressed.SELECT = is_pressed,
                         SDL.SDLK_ESCAPE => break :mainLoop,
                         else => {},
                     }
@@ -102,20 +104,17 @@ pub fn main(filename: []u8) !void {
             }
         }
 
-        const cycles_per_frame = CPU_SPEED_HZ / 60;
+        // const cycles_per_frame = CPU_SPEED_HZ / 60;
+        // _ = cycles_per_frame; // autofix
         // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
         // _ = hz_60_nanos; // autofix
         // var timer = try std.time.Timer.start();
         // _ = timer; // autofix
         var frame_cycles: u64 = 0;
         while (true) {
-            const cycles = cpu.step();
-            frame_cycles += cycles;
-            if (frame_cycles >= cycles_per_frame) {
-                break;
-            }
+            gb.frame();
+            frame_cycles += 1;
         }
-        try cpu_.buf.flush();
         frame += 1;
 
         // while (timer.read() < hz_60_nanos) {}
@@ -124,7 +123,7 @@ pub fn main(filename: []u8) !void {
 
         _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
-        _ = SDL.SDL_UpdateTexture(texture, null, &cpu.bus.gpu.canvas, gpu.DRAW_WIDTH * 3);
+        _ = SDL.SDL_UpdateTexture(texture, null, &gb.gpu.canvas, gpu.DRAW_WIDTH * 3);
 
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);

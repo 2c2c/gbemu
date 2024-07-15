@@ -240,10 +240,15 @@ pub const GPU = struct {
         };
     }
 
-    pub fn step(self: *GPU, cycles: u64) IERegister {
-        var request: IERegister = @bitCast(@as(u8, 0));
+    /// update the respective IF flag with the respective true result
+    const IFEnableRequests = struct {
+        lcd_stat: bool,
+        vblank: bool,
+    };
+    pub fn step(self: *GPU, cycles: u64) IFEnableRequests {
+        var updated_flags = IFEnableRequests{ .lcd_stat = false, .vblank = false };
         if (!self.lcdc.lcd_enable) {
-            return request;
+            return updated_flags;
         }
 
         self.cycles += cycles;
@@ -259,17 +264,17 @@ pub const GPU = struct {
                     if (self.ly >= 144) {
                         // if (self.ly >= 90) {
                         self.stat.ppu_mode = 0b01;
-                        request.enable_vblank = true;
+                        updated_flags.vblank = true;
                         if (self.stat.mode_1_interrupt_enabled) {
-                            request.enable_lcd_stat = true;
+                            updated_flags.lcd_stat = true;
                         }
                     } else {
                         self.stat.ppu_mode = 0b10;
                         if (self.stat.mode_2_interrupt_enabled) {
-                            request.enable_lcd_stat = true;
+                            updated_flags.lcd_stat = true;
                         }
                     }
-                    self.lyc_ly_check(&request);
+                    self.lyc_ly_check(&updated_flags);
                 }
             },
             // Vertical blank
@@ -282,11 +287,11 @@ pub const GPU = struct {
                         self.internal_window_counter = 0;
                         self.stat.ppu_mode = 0b10;
                         if (self.stat.mode_2_interrupt_enabled) {
-                            request.enable_lcd_stat = true;
+                            updated_flags.lcd_stat = true;
                         }
                         // self.render_full_bg();
                     }
-                    self.lyc_ly_check(&request);
+                    self.lyc_ly_check(&updated_flags);
                 }
             },
             // OAM read
@@ -301,21 +306,20 @@ pub const GPU = struct {
                 if (self.cycles >= 172) {
                     self.cycles = self.cycles % 172;
                     if (self.stat.mode_0_interrupt_enabled) {
-                        request.enable_lcd_stat = true;
+                        updated_flags.lcd_stat = true;
                     }
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
                 }
-                // render scan line
             },
         }
-        return request;
+        return updated_flags;
     }
 
-    fn lyc_ly_check(self: *GPU, request: *IERegister) void {
+    fn lyc_ly_check(self: *GPU, request: *IFEnableRequests) void {
         const check = self.ly == self.lyc;
         if (check and self.stat.lyc_int_interrupt_enabled) {
-            request.enable_lcd_stat = true;
+            request.lcd_stat = true;
         }
         self.stat.lyc_ly_compare = check;
     }
