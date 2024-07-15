@@ -44,9 +44,11 @@ pub const Timer = struct {
     /// increases at rate of TAC frequency
     /// when overflows, resets to TMA + interrupt is called
     tima: u8,
+    tima_reload_cycle: bool,
     /// FF06
     /// Timer Modulo. tima is set to this value when tima overflows
     tma: u8,
+    tma_reload_cycle: bool,
     total_cycles: usize,
 
     pub fn new() Timer {
