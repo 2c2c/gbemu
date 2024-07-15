@@ -262,16 +262,22 @@ pub const MemoryBus = struct {
                 0xFF01 => std.debug.print("{c}", .{byte}),
                 0xFF02 => std.debug.print("{c}", .{byte}),
                 0xFF04 => {
-                    // theres a bunch of obscure timing accuracy fixes like this that will make things impossible to read
-                    const bit_9_low = (self.timer.div & 0b1) == 1;
-                    self.timer.div = 0;
-                    self.timer.tima = self.timer.tma;
-                    if (bit_9_low) {
-                        self.timer.tima += 1;
+                    self.timer.clock_update(@bitCast(0));
+                },
+                0xFF05 => {
+                    if (!self.timer.tima_reload_cycle) {
+                        self.tima = byte;
+                    }
+                    if (self.timer.tima_cycles_till_interrupt > 0) {
+                        self.timer.tima_cycles_till_interrupt = 0;
                     }
                 },
-                0xFF05 => self.timer.tima = byte,
-                0xFF06 => self.timer.tma = byte,
+                0xFF06 => {
+                    if (self.timer.tima_reload_cycle) {
+                        self.timer.tima = byte;
+                    }
+                    self.timer.tma = byte;
+                },
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
                     self.timer.tac = new_tac;

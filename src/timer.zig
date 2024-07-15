@@ -1,4 +1,5 @@
 const std = @import("std");
+const cpu = @import("cpu.zig");
 
 pub const Frequency = enum(u2) {
     Hz4096 = 0b00,
@@ -39,6 +40,10 @@ pub const Timer = struct {
     /// 0b0000_0100 -> enabled
     tac: Tac,
 
+    /// interally div is just the upper 8 bits of a 16bit counter (measured in t-cycles)
+    /// most of the docs related to this will be in terms of m-cycles, and talk about 14bits
+    /// better accuracy to track this and handle the actual bit logic used by the hardware
+    internal_clock: cpu.Clock,
     /// FF04
     /// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
     div: u8,
@@ -48,50 +53,66 @@ pub const Timer = struct {
     /// when overflows, resets to TMA + interrupt is called
     tima: u8,
     tima_reload_cycle: bool,
+    tima_cycles_till_interrupt: u8,
     /// FF06
     /// Timer Modulo. tima is set to this value when tima overflows
     tma: u8,
     tma_reload_cycle: bool,
     total_cycles: usize,
 
+    prev_bit: u1 = 0,
+
     pub fn new() Timer {
         return Timer{
             .tac = @bitCast(@as(u8, 0)),
             .div = 0,
             .tima = 0,
-            .tma = 0,
-            .total_cycles = 0,
             .tima_reload_cycle = false,
+            .tima_cycles_till_interrupt = 0,
+            .tma = 0,
             .tma_reload_cycle = false,
+            .total_cycles = 0,
+            .internal_clock = @bitCast(@as(u64, 0)),
+            .prev_bit = 0,
         };
     }
-    pub fn step(self: *Timer, cycles: u64, div: u8) bool {
-        self.div = div;
-        self.total_cycles += cycles;
-        if (!self.tac.enabled) {
-            return false;
-        }
-
-        const cycles_per_tick = self.tac.frequency.cycles_per_tick();
-        const tac_overflow = blk: {
-            if (self.total_cycles >= cycles_per_tick) {
-                self.total_cycles = self.total_cycles % cycles_per_tick;
-
-                const res: u8, const overflow: u1 = @addWithOverflow(self.tima, 1);
-                self.tima = res;
-                break :blk overflow == 1;
-            } else {
-                break :blk false;
+    pub fn step(self: *Timer) bool {
+        self.tima_reload_cycle = false;
+        if (self.tima_cycles_till_interrupt > 0) {
+            self.tima_cycles_till_interrupt -= 4;
+            if (self.tima_cycles_till_interrupt == 0) {
+                // interrupt
+                self.tima = self.tma;
+                self.tima_reload_cycle = true;
             }
-        };
-        if (tac_overflow) {
-            self.tima = self.tma;
         }
-        // std.debug.print("tc {}, cpt {}, tima {}\n", .{
-        //     self.total_cycles,
-        //     cycles_per_tick,
-        //     self.tima,
-        // });
-        return tac_overflow;
+        self.clock_update(self.internal_clock.t_cycles + 4);
+    }
+
+    /// TIMA updates are determined by specific bit falling from 1 -> 0
+    /// The particular bit is determined by TAC. ie 0b01 -> check for 3rd bit falling
+    /// this logic is additionally ran through an AND gate with TAC's enabled bit
+    /// meaning if previously 3rd bit was 1, and the next cycle it was still 1, but TAC's enable bit is now 0,
+    /// you get an early TIMA tick
+    pub fn clock_update(self: *Timer, clock: cpu.Clock) void {
+        self.internal_clock = clock;
+
+        const check_bit = self.tac.frequency.clock_bit_to_check();
+        var new_bit = @as(u64, @bitCast(self.internal_clock)) >> check_bit & 1;
+
+        new_bit = new_bit & @intFromBool(self.tac.enabled);
+
+        self.check_falling_edge(self.prev_bit, new_bit);
+        self.prev_bit = new_bit;
+    }
+
+    pub fn check_falling_edge(self: *Timer, old_bit: u1, new_bit: u1) void {
+        if (old_bit == 1 and new_bit == 0) {
+            const res: u8, const overflow: u1 = @addWithOverflow(self.tima, 1);
+            if (overflow) {
+                self.tima_cycles_till_interrupt = 4;
+            }
+            self.tima = res;
+        }
     }
 };

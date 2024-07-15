@@ -582,6 +582,15 @@ const Instruction = union(enum) {
     }
 };
 
+const Clock = packed union {
+    t_cycles: u64,
+    bits: packed struct {
+        lower_clock: u8,
+        div: u8,
+        _padding2: u48,
+    },
+};
+
 pub const CPU = struct {
     registers: Registers,
     pc: u16,
@@ -591,14 +600,7 @@ pub const CPU = struct {
     is_stopped: bool,
     ime: IME,
     pending_t_cycles: u64,
-    clock: packed union {
-        t_cycles: u64,
-        bits: packed struct {
-            lower_clock: u8,
-            div: u8,
-            _padding2: u48,
-        },
-    },
+    clock: Clock,
     fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.print("Instruction {}\n", .{instruction}) catch unreachable;
         // halt bug isnt needed to pass blargg fully i think
