@@ -88,7 +88,7 @@ pub const MemoryBus = struct {
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
         var timer_ = timer.Timer.new();
-        timer_.tac.frequency = @intFromEnum(timer.Frequency.Hz4096);
+        timer_.tac.frequency = timer.Frequency.Hz4096;
 
         return MemoryBus{
             .memory = memory,

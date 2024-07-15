@@ -594,7 +594,7 @@ pub const CPU = struct {
     clock: packed union {
         t_cycles: u64,
         bits: packed struct {
-            _padding: u8,
+            lower_clock: u8,
             div: u8,
             _padding2: u48,
         },

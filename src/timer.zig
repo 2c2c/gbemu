@@ -14,6 +14,15 @@ pub const Frequency = enum(u2) {
             Frequency.Hz16384 => 256,
         };
     }
+
+    fn clock_bit_to_check(self: Frequency) u8 {
+        return switch (self) {
+            Frequency.Hz4096 => 9,
+            Frequency.Hz262144 => 3,
+            Frequency.Hz65536 => 5,
+            Frequency.Hz16384 => 7,
+        };
+    }
 };
 
 pub const Timer = struct {
@@ -24,7 +33,7 @@ pub const Timer = struct {
     /// 11: 16384Hz
     /// 0b0000_0100 -> enabled
     tac: packed struct {
-        frequency: u2,
+        frequency: Frequency,
         enabled: bool,
         _padding: u5 = 0,
     },
@@ -56,8 +65,7 @@ pub const Timer = struct {
             return false;
         }
 
-        const freq: Frequency = @enumFromInt(self.tac.frequency);
-        const cycles_per_tick = freq.cycles_per_tick();
+        const cycles_per_tick = self.tac.frequency.cycles_per_tick();
         // std.debug.print("tc {}, cpt {}, tima {}\n", .{
         //     self.total_cycles,
         //     cycles_per_tick,
