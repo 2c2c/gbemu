@@ -312,11 +312,11 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
-                    cpu.log.print("scx {} scy {} ly {}\n", .{
+                    std.log.debug("scx {} scy {} ly {}\n", .{
                         self.background_viewport.scx,
                         self.background_viewport.scy,
                         self.ly,
-                    }) catch unreachable;
+                    });
                     cpu.buf.flush() catch unreachable;
 
                     // std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{

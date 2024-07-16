@@ -285,7 +285,7 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     MBC1_RAM_ENABLE_START...MBC1_RAM_ENABLE_END => {
-                        // std.debug.print("ram enabled set {}\n", .{0x0A});
+                        // std.log.debug("ram enabled set {}\n", .{0x0A});
                         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
                     },
                     MBC1_ROM_BANK_NUMBER_START...MBC1_ROM_BANK_NUMBER_END => {
@@ -294,16 +294,16 @@ pub const MBC = struct {
                         // 0 is set to 1, looking at all 5 bits
                         masked_bank = if (masked_bank == 0) 1 else masked_bank;
                         masked_bank = masked_bank & 0b11111;
-                        // std.debug.print("rom_bank {} set\n", .{masked_bank});
+                        // std.log.debug("rom_bank {} set\n", .{masked_bank});
                         self.rom_bank = masked_bank;
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
                         self.ram_bank = byte & 0x03;
-                        // std.debug.print("ram_bank {} set\n", .{self.ram_bank});
+                        // std.log.debug("ram_bank {} set\n", .{self.ram_bank});
                     },
                     MBC1_ROM_RAM_MODE_SELECT_START...MBC1_ROM_RAM_MODE_SELECT_END => {
                         self.banking_mode = byte & 0x01;
-                        // std.debug.print("banking_mode {} set\n", .{self.banking_mode});
+                        // std.log.debug("banking_mode {} set\n", .{self.banking_mode});
                     },
                     else => {},
                 }
@@ -376,8 +376,8 @@ pub const MBC = struct {
                             .rom_bank = 0,
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
-
                         const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
+                        std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
@@ -387,7 +387,7 @@ pub const MBC = struct {
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
-                        // log.print("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address }) catch unreachable;
+                        std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {
@@ -413,7 +413,7 @@ pub const MBC = struct {
                             .rom_bank_high = @truncate(self.rom_bank >> 8),
                         };
                         const full_address = @as(u23, @bitCast(mbc5_address)) & (self.rom.len - 1);
-                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // std.log.debug("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {
@@ -467,7 +467,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                        // std.debug.print("ram length {} ram bank: {} full_addr 0b{b}\n", .{ self.ram.len, self.ram_bank, full_address });
+                        std.log.info("rom bank: {} full_addr 0x{x:0>15}\n", .{ self.rom_bank, full_address });
 
                         return self.ram[full_address];
                     },
@@ -493,7 +493,7 @@ pub const MBC = struct {
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u17, @bitCast(mbc5_address)) & (self.ram.len - 1);
-                        // std.debug.print("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
+                        // std.log.debug("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
                         return self.ram[full_address];
                     },
                     else => {
@@ -534,47 +534,13 @@ pub const MBC = struct {
         }
     }
 
-    pub fn set_ram_enabled(self: *MBC, byte: u8) void {
-        self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
-    }
-
-    /// this has dual purpose for MBC1
-    /// in mode 0, it selects the upper 2 bits of the ROM bank number
-    /// in mode 1, it selects the RAM bank number
-    pub fn set_ram_bank(self: *MBC, bank: u8) void {
-        self.ram_bank = bank & 0x03;
-    }
-    pub fn set_rom_bank_number(self: *MBC, bank: u8) void {
-        // mask to 5 bits
-        var masked_bank = bank & 0x1F;
-        // 0 is set to 1, looking at all 5 bits
-        masked_bank = if (masked_bank == 0) 1 else masked_bank;
-        // after, we mask to the size of the cart
-        const rom_banks = @as(u8, @truncate(self.rom_size.num_banks()));
-        masked_bank = masked_bank & (rom_banks - 1);
-        // const new_bank = self.rom_bank & 0b0110_0000;
-        // self.rom_bank = new_bank | masked_bank;
-        self.rom_bank = masked_bank;
-
-        // note: do not understand the 0x20 0x40 0x60 issues mentioned in docs
-    }
-    pub fn set_ram_bank_number(self: *MBC, bank: u8) void {
-        self.ram_bank = bank;
-    }
-
-    // 0 -> 0x0000-0x3FFF and 0xA000-0xBFFF locked to rom bank 0 / sram
-    // 1 -> the above can be bank switched
-    pub fn set_banking_mode(self: *MBC, mode: u8) void {
-        self.banking_mode = mode & 0x01;
-    }
-
     pub fn new(filename: []u8, alloc: std.mem.Allocator) !MBC {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
         const rom = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
         // _ = try file.readAll(rom);
-        std.debug.print("raw mbc {} rom size {}, ram size {}\n", .{
+        std.log.info("raw mbc {} rom size {}, ram size {}\n", .{
             rom[0x147],
             rom[0x148],
             rom[0x149],
@@ -583,7 +549,7 @@ pub const MBC = struct {
 
         const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
 
-        std.debug.print("cartridge type: {}, size {}, rom size: {}, rom bytes: {}, rom banks: {}, ram size: {}\n", .{
+        std.log.info("cartridge type: {}, size {}, rom size: {}, rom bytes: {}, rom banks: {}, ram size: {}\n", .{
             header.cartridge_type,
             rom.len,
             header.rom_size,

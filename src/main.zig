@@ -7,6 +7,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
+// pub const std_options: std.Options = struct {
+//     .log_level = std.log.Level.debug,
+// };
+
 pub fn main() !void {
     // try headless_main();
     try draw_main();
