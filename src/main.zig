@@ -12,7 +12,7 @@ pub const std_options: std.Options = .{
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .gb, .level = .info },
         .{ .scope = .cpu, .level = .info },
-        .{ .scope = .gpu, .level = .info },
+        .{ .scope = .gpu, .level = .debug },
         .{ .scope = .mbc, .level = .info },
         .{ .scope = .timer, .level = .info },
         .{ .scope = .joy, .level = .info },

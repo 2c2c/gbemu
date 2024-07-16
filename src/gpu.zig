@@ -256,7 +256,6 @@ pub const GPU = struct {
 
         self.cycles += cycles;
 
-        // log.debug("GPU STEP cycles: {}, ly: {}, mode: {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
         switch (self.stat.ppu_mode) {
             // Horizontal blank
             0b00 => {
@@ -314,13 +313,13 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
-                    log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
-                        self.background_viewport.scx,
-                        self.background_viewport.scy,
-                        self.ly,
-                        self.window_position.wx,
-                        self.window_position.wy,
-                    });
+                    // log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
+                    //     self.background_viewport.scx,
+                    //     self.background_viewport.scy,
+                    //     self.ly,
+                    //     self.window_position.wx,
+                    //     self.window_position.wy,
+                    // });
 
                     // log.debug("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
                     //     @as(u8, @bitCast(self.bgp)),
@@ -509,7 +508,6 @@ pub const GPU = struct {
     fn render_bg(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
         var x: u8 = 0;
-        var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
         const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
         const win_y = self.window_position.wy;
 
@@ -550,7 +548,7 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
             } else if (self.lcdc.bg_window_enable) {
-                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy) % 255;
+                const y = (@as(u16, self.ly) + @as(u16, self.background_viewport.scy)) % 255;
                 const tile_y = y % 8;
 
                 const temp_x = self.background_viewport.scx +% x;
@@ -569,15 +567,15 @@ pub const GPU = struct {
                     }
                     tile_line = self.read_vram16(addr);
                 }
+                // log.debug("x {} y {} scx {} scy {} ly {}\n", .{
+                //     x,
+                //     y,
+                //     self.background_viewport.scx,
+                //     self.background_viewport.scy,
+                //     self.ly,
+                // });
             }
 
-            // log.debug("x {} y {} scx {} scy {} ly {}\n", .{
-            //     x,
-            //     y,
-            //     self.background_viewport.scx,
-            //     self.background_viewport.scy,
-            //     self.ly,
-            // });
             const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
@@ -643,8 +641,6 @@ pub const GPU = struct {
             const pair = ObjectIndexPair{ .object = object, .index = oam_index };
             gop.value_ptr.*.append(pair) catch unreachable;
         }
-
-        // log.debug("hash {} \n", .{objectpair_hash.count()});
 
         const comparator = struct {
             pub fn object_index(_: void, a: ObjectIndexPair, b: ObjectIndexPair) bool {
