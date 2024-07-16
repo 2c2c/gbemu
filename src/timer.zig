@@ -1,3 +1,4 @@
+// passes all of mooneye besides div_write and rapid_toggle. seems like div_write should work, dunno
 const std = @import("std");
 const cpu = @import("cpu.zig");
 
@@ -19,9 +20,9 @@ pub const Frequency = enum(u2) {
     fn clock_bit_to_check(self: Frequency) u6 {
         return switch (self) {
             Frequency.Hz4096 => 9,
-            Frequency.Hz262144 => 3,
-            Frequency.Hz65536 => 5,
             Frequency.Hz16384 => 7,
+            Frequency.Hz65536 => 5,
+            Frequency.Hz262144 => 3,
         };
     }
 };
@@ -86,8 +87,16 @@ pub const Timer = struct {
                 self.tima_reload_cycle = true;
             }
         }
-        const new_clock = cpu.Clock{ .t_cycles = self.internal_clock.t_cycles };
+        const new_clock = cpu.Clock{ .t_cycles = self.internal_clock.t_cycles + 4 };
         self.clock_update(new_clock);
+
+        // std.debug.print("clock 0b{b>0:16} div {} tima {} tma {} tac {}\n", .{
+        //     self.internal_clock.t_cycles,
+        //     self.internal_clock.bits.div,
+        //     self.tima,
+        //     self.tma,
+        //     self.tac.frequency,
+        // });
 
         // interrupt fires when true
         return self.tima_reload_cycle;
@@ -106,6 +115,17 @@ pub const Timer = struct {
         new_bit = new_bit & @intFromBool(self.tac.enabled);
 
         self.check_falling_edge(self.prev_bit, new_bit);
+        // std.debug.print("clock 0b{b:0>16} check_bit {} prev_bit {} new_bit {} div {} tima {} tma {} tac {} tac_bits 0b{b:0>2}\n", .{
+        //     self.internal_clock.t_cycles,
+        //     check_bit,
+        //     self.prev_bit,
+        //     new_bit,
+        //     self.internal_clock.bits.div,
+        //     self.tima,
+        //     self.tma,
+        //     self.tac.frequency,
+        //     @intFromEnum(self.tac.frequency),
+        // });
         self.prev_bit = new_bit;
     }
 
