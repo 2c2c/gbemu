@@ -1,6 +1,9 @@
 const std = @import("std");
 const CPU = @import("cpu.zig").CPU;
 const Gameboy = @import("gameboy.zig").Gameboy;
+
+const log = std.log.scoped(.joy);
+
 /// FF00 - P1/JOYP - Joypad (R/W)
 const Joyp = packed struct {
     unpressed: u4 = 0x0,
@@ -66,13 +69,13 @@ pub const Joypad = struct {
     }
 
     pub fn update_joyp_keys(gb: *Gameboy) void {
-        // std.debug.print("Updating joypad keys\n", .{});
+        // log.debug("Updating joypad keys\n", .{});
         switch (gb.joypad.joyp.select) {
             .Both => gb.joypad.joyp.unpressed = ~(gb.joypad.button.bits | gb.joypad.dpad.bits),
             .Action => gb.joypad.joyp.unpressed = ~gb.joypad.button.bits,
             .Direction => gb.joypad.joyp.unpressed = ~gb.joypad.dpad.bits,
             .None => gb.joypad.joyp.unpressed = 0xF,
         }
-        // std.debug.print("writing joypad keys to joyp: 0b{b:0>8}\n", .{@as(u8, @bitCast(cpu.bus.joypad.joyp))});
+        // log.debug("writing joypad keys to joyp: 0b{b:0>8}\n", .{@as(u8, @bitCast(cpu.bus.joypad.joyp))});
     }
 };

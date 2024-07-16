@@ -2,6 +2,8 @@
 const std = @import("std");
 const cpu = @import("cpu.zig");
 
+const log = std.log.scoped(.timer);
+
 pub const Frequency = enum(u2) {
     Hz4096 = 0b00,
     Hz262144 = 0b01,

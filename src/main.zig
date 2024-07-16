@@ -7,9 +7,18 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
 const test_allocator = std.testing.allocator;
 
-// pub const std_options: std.Options = struct {
-//     .log_level = std.log.Level.debug,
-// };
+pub const std_options: std.Options = .{
+    .log_level = std.log.Level.info,
+    .log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .gb, .level = .info },
+        .{ .scope = .cpu, .level = .info },
+        .{ .scope = .gpu, .level = .info },
+        .{ .scope = .mbc, .level = .info },
+        .{ .scope = .timer, .level = .info },
+        .{ .scope = .joy, .level = .info },
+        .{ .scope = .bus, .level = .info },
+    },
+};
 
 pub fn main() !void {
     // try headless_main();

@@ -7,6 +7,8 @@ const joypad = @import("joypad.zig");
 const timer = @import("timer.zig");
 const ie_register = @import("ie_register.zig");
 
+const log = std.log.scoped(.gameboy);
+
 const CPU_SPEED_HZ = 4194304;
 pub const Gameboy = struct {
     mbc: *cartridge.MBC,

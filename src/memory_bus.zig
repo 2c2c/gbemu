@@ -10,6 +10,8 @@ const GPU = gpu.GPU;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
+const log = std.log.scoped(.bus);
+
 const RomSize = enum(u8) {
     _32KB = 0x00,
     _64KB = 0x01,
@@ -119,7 +121,7 @@ pub const MemoryBus = struct {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
                     // 0x0000...0x00FF => {
-                    //     // std.debug.print("Attempted read from boot rom\n", .{});
+                    //     // std.log.debug("Attempted read from boot rom\n", .{});
                     //     return self.memory[address];
                     // },
                     0x0000...0x7FFF => {
@@ -129,7 +131,7 @@ pub const MemoryBus = struct {
                 }
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
-                // std.debug.print("Vram byte read\n", .{});
+                // std.log.debug("Vram byte read\n", .{});
                 return self.gpu.read_vram(address);
             },
             // external ram
@@ -145,7 +147,7 @@ pub const MemoryBus = struct {
                 return self.memory[address];
             },
             0xFEA0...0xFEFF => {
-                // std.debug.print("Attempted read from unusable memory\n", .{});
+                // std.log.debug("Attempted read from unusable memory\n", .{});
             },
             0xFF00...0xFF7F => {
                 return self.read_io(address);
@@ -162,7 +164,7 @@ pub const MemoryBus = struct {
     pub fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
         switch (address) {
             0x0000...0x7FFF => {
-                // std.debug.print("Attempted write to rom\n", .{});
+                // std.log.debug("Attempted write to rom\n", .{});
                 self.mbc.handle_register(address, byte);
                 return;
             },
@@ -171,7 +173,7 @@ pub const MemoryBus = struct {
                 return;
             },
             cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
-                // std.debug.print("Attempted write to external ram\n", .{});
+                // std.log.debug("Attempted write to external ram\n", .{});
                 self.mbc.write_ram(address, byte);
                 return;
             },
@@ -185,7 +187,7 @@ pub const MemoryBus = struct {
                 return;
             },
             0xFEA0...0xFEFF => {
-                // std.debug.print("Attempted write to unusable memory\n", .{});
+                // std.log.debug("Attempted write to unusable memory\n", .{});
                 // self.memory[address] = byte;
                 return;
             },
@@ -259,11 +261,11 @@ pub const MemoryBus = struct {
                 },
                 // 0xFF01 => break :blk,
                 // 0xFF02 => break :blk,
-                0xFF01 => std.debug.print("{c}", .{byte}),
-                0xFF02 => std.debug.print("{c}", .{byte}),
+                0xFF01 => std.log.debug("{c}", .{byte}),
+                0xFF02 => std.log.debug("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.clock_update(@bitCast(@as(u64, 0)));
-                    std.debug.print("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
+                    std.log.debug("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
                 },
                 0xFF05 => {
                     if (!self.timer.tima_reload_cycle) {
@@ -272,14 +274,14 @@ pub const MemoryBus = struct {
                     if (self.timer.tima_cycles_till_interrupt > 0) {
                         self.timer.tima_cycles_till_interrupt = 0;
                     }
-                    std.debug.print("tima {}\n", .{self.timer.tima});
+                    std.log.debug("tima {}\n", .{self.timer.tima});
                 },
                 0xFF06 => {
                     if (self.timer.tima_reload_cycle) {
                         self.timer.tima = byte;
                     }
                     self.timer.tma = byte;
-                    std.debug.print("tma {}\n", .{self.timer.tima});
+                    std.log.debug("tma {}\n", .{self.timer.tima});
                 },
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
@@ -287,10 +289,10 @@ pub const MemoryBus = struct {
                     self.timer.check_falling_edge(self.timer.prev_bit, new_enabled_bit);
 
                     self.timer.tac = new_tac;
-                    std.debug.print("tac {}\n", .{self.timer.tima});
+                    std.log.debug("tac {}\n", .{self.timer.tima});
 
                     self.timer.prev_bit = new_enabled_bit;
-                    // std.debug.print("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
+                    // std.log.debug("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
                 },
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);

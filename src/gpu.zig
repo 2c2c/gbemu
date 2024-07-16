@@ -21,6 +21,8 @@ pub const OAM_BEGIN: usize = 0xFE00;
 pub const OAM_END: usize = 0xFE9F;
 pub const OAM_SIZE: usize = OAM_END - OAM_BEGIN + 1;
 
+const log = std.log.scoped(.gpu);
+
 pub const TilePixelValue = enum(u2) {
     /// white
     Zero,
@@ -254,7 +256,7 @@ pub const GPU = struct {
 
         self.cycles += cycles;
 
-        // std.debug.print("GPU STEP cycles: {}, ly: {}, mode: {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
+        // log.debug("GPU STEP cycles: {}, ly: {}, mode: {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
         switch (self.stat.ppu_mode) {
             // Horizontal blank
             0b00 => {
@@ -312,14 +314,15 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
-                    std.log.debug("scx {} scy {} ly {}\n", .{
+                    log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
                         self.background_viewport.scx,
                         self.background_viewport.scy,
                         self.ly,
+                        self.window_position.wx,
+                        self.window_position.wy,
                     });
-                    cpu.buf.flush() catch unreachable;
 
-                    // std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
+                    // log.debug("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
                     //     @as(u8, @bitCast(self.bgp)),
                     //     @as(u8, @bitCast(self.obp[0])),
                     //     @as(u8, @bitCast(self.obp[1])),
@@ -405,7 +408,7 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
 
-                // std.debug.print("{},{} tb 0x{x} tmp 0x{x}+{x} tile_addr 0x{x} tile_index 0x{x} tile_line 0x{x}\n", .{
+                // log.debug("{},{} tb 0x{x} tmp 0x{x}+{x} tile_addr 0x{x} tile_index 0x{x} tile_line 0x{x}\n", .{
                 //     x,
                 //     y,
                 //     tile_base,
@@ -547,7 +550,7 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
             } else if (self.lcdc.bg_window_enable) {
-                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
+                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy) % 255;
                 const tile_y = y % 8;
 
                 const temp_x = self.background_viewport.scx +% x;
@@ -568,7 +571,7 @@ pub const GPU = struct {
                 }
             }
 
-            // std.debug.print("x {} y {} scx {} scy {} ly {}\n", .{
+            // log.debug("x {} y {} scx {} scy {} ly {}\n", .{
             //     x,
             //     y,
             //     self.background_viewport.scx,
@@ -641,7 +644,7 @@ pub const GPU = struct {
             gop.value_ptr.*.append(pair) catch unreachable;
         }
 
-        // std.debug.print("hash {} \n", .{objectpair_hash.count()});
+        // log.debug("hash {} \n", .{objectpair_hash.count()});
 
         const comparator = struct {
             pub fn object_index(_: void, a: ObjectIndexPair, b: ObjectIndexPair) bool {
