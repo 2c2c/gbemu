@@ -170,9 +170,9 @@ pub const MemoryBus = struct {
                 self.gpu.write_vram(address, byte);
                 return;
             },
-            0xA000...0xBFFF => {
+            cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
                 // std.debug.print("Attempted write to external ram\n", .{});
-                self.memory[address] = byte;
+                self.mbc.write_ram(address, byte);
                 return;
             },
             0xC000...0xFDFF => {

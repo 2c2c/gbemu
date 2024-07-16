@@ -377,7 +377,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
-                        std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
@@ -387,7 +387,7 @@ pub const MBC = struct {
                             .ram_bank = @truncate(self.ram_bank),
                         };
                         const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
-                        std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // std.log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
                     else => {
@@ -467,7 +467,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                        std.log.info("rom bank: {} full_addr 0x{x:0>15}\n", .{ self.rom_bank, full_address });
+                        // std.log.info("rom bank: {} full_addr 0x{x:0>15}\n", .{ self.rom_bank, full_address });
 
                         return self.ram[full_address];
                     },
@@ -531,6 +531,52 @@ pub const MBC = struct {
                 }
             },
             else => unreachable,
+        }
+    }
+
+    pub fn write_ram(self: *MBC, address: u16, value: u8) void {
+        if (!self.ram_enabled) return;
+
+        switch (self.mbc_type) {
+            .ROM_ONLY => {
+                self.ram[address] = value;
+            },
+            .MBC1, .MBC1_RAM, .MBC1_RAM_BATTERY => {
+                if (address >= RAM_BANK_START and address <= RAM_BANK_END) {
+                    const mbc1_address = MBC1RamAddressSpace{
+                        .base = @truncate(address),
+                        .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
+                    };
+                    const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
+                    self.ram[full_address] = value;
+                }
+            },
+            .MBC5, .MBC5_RAM, .MBC5_RAM_BATTERY, .MBC5_RUMBLE, .MBC5_RUMBLE_RAM, .MBC5_RUMBLE_RAM_BATTERY => {
+                if (address >= RAM_BANK_START and address <= RAM_BANK_END) {
+                    const mbc5_address = MBC5RamAddress{
+                        .base = @truncate(address),
+                        .ram_bank = @truncate(self.ram_bank),
+                    };
+                    const full_address = @as(u17, @bitCast(mbc5_address)) & (self.ram.len - 1);
+                    self.ram[full_address] = value;
+                }
+            },
+            .MBC3, .MBC3_RAM, .MBC3_RAM_BATTERY, .MBC3_TIMER_BATTERY, .MBC3_TIMER_RAM_BATTERY => {
+                if (address >= RAM_BANK_START and address <= RAM_BANK_END) {
+                    if (self.ram_bank <= 0x03) {
+                        const mbc3_address = MBC3RamAddress{
+                            .base = @truncate(address),
+                            .ram_bank = @truncate(self.ram_bank),
+                        };
+                        const full_address = @as(u15, @bitCast(mbc3_address)) & (self.ram.len - 1);
+                        self.ram[full_address] = value;
+                    } else {
+                        // RTC register access
+                        // Implement RTC register writing if needed
+                    }
+                }
+            },
+            else => {},
         }
     }
 
