@@ -148,7 +148,7 @@ const BGP = Palette;
 const OBP = [2]Palette;
 
 pub const GPU = struct {
-    tile_canvas: [DRAW_WIDTH * DRAW_HEIGHT]TilePixelValue,
+    tile_canvas: [DRAW_WIDTH * DRAW_HEIGHT]u8,
     canvas: [DRAW_WIDTH * DRAW_HEIGHT * 3]u8,
     full_bg_canvas: [BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3]u8,
 
@@ -219,7 +219,7 @@ pub const GPU = struct {
         }} ** 40;
 
         return GPU{
-            .tile_canvas = .{.Zero} ** DRAW_WIDTH ** DRAW_HEIGHT,
+            .tile_canvas = [_]u8{0} ** DRAW_WIDTH ** DRAW_HEIGHT,
             .canvas = [_]u8{0} ** (DRAW_WIDTH * DRAW_HEIGHT * 3),
             .full_bg_canvas = [_]u8{0} ** (BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3),
             .palette_canvas = [_]u8{0} ** (8 * 8 * 4 * 3 * 3),
@@ -310,11 +310,12 @@ pub const GPU = struct {
                     }
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
-                    std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
-                        @as(u8, @bitCast(self.bgp)),
-                        @as(u8, @bitCast(self.obp[0])),
-                        @as(u8, @bitCast(self.obp[1])),
-                    });
+
+                    // std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
+                    //     @as(u8, @bitCast(self.bgp)),
+                    //     @as(u8, @bitCast(self.obp[0])),
+                    //     @as(u8, @bitCast(self.obp[1])),
+                    // });
                 }
             },
         }
@@ -564,7 +565,7 @@ pub const GPU = struct {
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
             const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
 
-            self.tile_canvas[buffer_index / 3] = color;
+            self.tile_canvas[buffer_index / 3] = color_id;
             self.canvas[buffer_index] = color.to_color();
             self.canvas[buffer_index +% 1] = color.to_color();
             self.canvas[buffer_index +% 2] = color.to_color();
@@ -687,10 +688,10 @@ pub const GPU = struct {
                         const color: TilePixelValue = GPU.color_from_palette(palette, color_id);
 
                         const draw_over_bg_and_window = !object.attributes.priority or
-                            (object.attributes.priority and self.tile_canvas[buffer_index / 3] == TilePixelValue.Zero);
+                            (object.attributes.priority and self.tile_canvas[buffer_index / 3] == 0);
 
                         if (draw_over_bg_and_window and color_id != 0) {
-                            self.tile_canvas[buffer_index / 3] = color;
+                            self.tile_canvas[buffer_index / 3] = color_id;
                             self.canvas[buffer_index] = color.to_color();
                             self.canvas[buffer_index + 1] = color.to_color();
                             self.canvas[buffer_index + 2] = color.to_color();
