@@ -420,8 +420,6 @@ pub const GPU = struct {
     }
     fn render_full_bg2(self: *GPU) void {
         var buffer_index = @as(usize, self.ly) * BACKGROUND_WIDTH * 3;
-        var x: u16 = 0;
-        var y: u16 = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
         const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
         const win_y = self.window_position.wy;
 
@@ -438,6 +436,7 @@ pub const GPU = struct {
             self.internal_window_counter += 1;
         }
 
+        var x: u16 = 0;
         while (x < BACKGROUND_WIDTH) : (x += 1) {
             var tile_line: u16 = 0;
             var tile_x: u3 = 0;
@@ -448,6 +447,7 @@ pub const GPU = struct {
                 const tile_y: u8 = @truncate(adjusted_y & 7);
                 tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
 
+                // const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
                 const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
@@ -462,13 +462,13 @@ pub const GPU = struct {
                     tile_line = self.read_vram16(addr);
                 }
             } else if (self.lcdc.bg_window_enable) {
-                y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
-                const tile_y = y % 8;
+                const y_coord = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
+                const tile_y = y_coord % 8;
 
-                const temp_x = x +% self.background_viewport.scx;
-                tile_x = @truncate(temp_x % 8);
+                const x_coord = ((@as(u16, self.background_viewport.scx) / 8) + x) & 31;
+                tile_x = @truncate(x_coord % 8);
 
-                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8)); // & 31?
+                const tile_index = self.read_vram(bg_tile_map_base + (((@as(u16, y_coord) / 8) * 32) & 0x3FF) + (x_coord)); // & 31?
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
