@@ -285,7 +285,7 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     MBC1_RAM_ENABLE_START...MBC1_RAM_ENABLE_END => {
-                        std.debug.print("ram enabled set {}\n", .{0x0A});
+                        // std.debug.print("ram enabled set {}\n", .{0x0A});
                         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
                     },
                     MBC1_ROM_BANK_NUMBER_START...MBC1_ROM_BANK_NUMBER_END => {
@@ -294,16 +294,16 @@ pub const MBC = struct {
                         // 0 is set to 1, looking at all 5 bits
                         masked_bank = if (masked_bank == 0) 1 else masked_bank;
                         masked_bank = masked_bank & 0b11111;
-                        std.debug.print("rom_bank {} set\n", .{masked_bank});
+                        // std.debug.print("rom_bank {} set\n", .{masked_bank});
                         self.rom_bank = masked_bank;
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
                         self.ram_bank = byte & 0x03;
-                        std.debug.print("ram_bank {} set\n", .{self.ram_bank});
+                        // std.debug.print("ram_bank {} set\n", .{self.ram_bank});
                     },
                     MBC1_ROM_RAM_MODE_SELECT_START...MBC1_ROM_RAM_MODE_SELECT_END => {
                         self.banking_mode = byte & 0x01;
-                        std.debug.print("banking_mode {} set\n", .{self.banking_mode});
+                        // std.debug.print("banking_mode {} set\n", .{self.banking_mode});
                     },
                     else => {},
                 }

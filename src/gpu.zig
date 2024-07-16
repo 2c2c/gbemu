@@ -310,6 +310,11 @@ pub const GPU = struct {
                     }
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
+                    std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
+                        @as(u8, @bitCast(self.bgp)),
+                        @as(u8, @bitCast(self.obp[0])),
+                        @as(u8, @bitCast(self.obp[1])),
+                    });
                 }
             },
         }
