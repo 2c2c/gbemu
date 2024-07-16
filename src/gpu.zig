@@ -1,5 +1,6 @@
 const std = @import("std");
 const IERegister = @import("ie_register.zig").IERegister;
+const cpu = @import("cpu.zig");
 
 pub const BACKGROUND_WIDTH: usize = 256;
 pub const BACKGROUND_HEIGHT: usize = 256;
@@ -311,6 +312,13 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
+                    cpu.log.print("scx {} scy {} ly {}\n", .{
+                        self.background_viewport.scx,
+                        self.background_viewport.scy,
+                        self.ly,
+                    }) catch unreachable;
+                    cpu.buf.flush() catch unreachable;
+
                     // std.debug.print("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
                     //     @as(u8, @bitCast(self.bgp)),
                     //     @as(u8, @bitCast(self.obp[0])),
@@ -542,10 +550,10 @@ pub const GPU = struct {
                 y = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
                 const tile_y = y % 8;
 
-                const temp_x = x +% self.background_viewport.scx;
-                tile_x = @truncate(temp_x % 8);
+                const temp_x = self.background_viewport.scx +% x;
+                tile_x = @truncate((x +% self.background_viewport.scx) % 8);
 
-                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + (temp_x / 8));
+                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + ((temp_x / 8) & 31));
                 if (tile_base == 0x8000) {
                     tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
                 } else {
@@ -560,6 +568,13 @@ pub const GPU = struct {
                 }
             }
 
+            // std.debug.print("x {} y {} scx {} scy {} ly {}\n", .{
+            //     x,
+            //     y,
+            //     self.background_viewport.scx,
+            //     self.background_viewport.scy,
+            //     self.ly,
+            // });
             const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
             const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
             const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);

@@ -102,6 +102,8 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         gb.frame();
         frame += 1;
 
+        cpu_.buf.flush() catch unreachable;
+
         while (timer.read() < hz_60_nanos) {}
 
         // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
