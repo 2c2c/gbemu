@@ -2015,6 +2015,7 @@ pub const CPU = struct {
         return false;
     }
     pub fn step(self: *CPU) u64 {
+        log.debug("step: {}\n", .{self.pc});
         self.pending_t_cycles = 0;
         var frame_cycles: u64 = 0;
         var current_cycles = self.clock.t_cycles;
@@ -2030,7 +2031,6 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
 
-        // gameboy_doctor_print(self);
         beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
             self.halt_state = HaltState.Enabled;
@@ -2688,6 +2688,7 @@ fn beeg_print(self: *CPU) void {
     //     return;
     // }
     log.debug("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+        // std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         self.registers.A,
         @as(u8, @bitCast(self.registers.F)),
         self.registers.B,

@@ -313,13 +313,13 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
-                    // log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
-                    //     self.background_viewport.scx,
-                    //     self.background_viewport.scy,
-                    //     self.ly,
-                    //     self.window_position.wx,
-                    //     self.window_position.wy,
-                    // });
+                    log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
+                        self.background_viewport.scx,
+                        self.background_viewport.scy,
+                        self.ly,
+                        self.window_position.wx,
+                        self.window_position.wy,
+                    });
 
                     // log.debug("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
                     //     @as(u8, @bitCast(self.bgp)),

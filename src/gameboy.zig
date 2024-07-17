@@ -71,10 +71,6 @@ pub const Gameboy = struct {
 
     pub fn frame(self: *Gameboy) void {
         const cycles_per_frame = CPU_SPEED_HZ / 60;
-        // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
-        // _ = hz_60_nanos; // autofix
-        // var timer = try std.time.Timer.start();
-        // _ = timer; // autofix
         var frame_cycles: u64 = 0;
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
@@ -99,6 +95,7 @@ pub const Gameboy = struct {
 
                 // std.debug.print("gb.timer {} gb.bus.timer {}\n", .{ self.timer.tac, self.memory_bus.timer.tac });
                 self.memory_bus.update_if_flags(interrupt_flags);
+                std.time.sleep(500);
             }
 
             // need to track unspent cycles in CPU
