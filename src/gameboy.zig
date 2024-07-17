@@ -21,38 +21,31 @@ pub const Gameboy = struct {
     alloc: std.mem.Allocator,
 
     pub fn new(filename: []u8, alloc: std.mem.Allocator) !Gameboy {
-        const mbc__ = try alloc.create(cartridge.MBC);
-        const mbc_ = try cartridge.MBC.new(filename, alloc);
-        mbc__.* = mbc_;
+        const mbc_ = try alloc.create(cartridge.MBC);
+        mbc_.* = try cartridge.MBC.new(filename, alloc);
 
-        const gpu__ = try alloc.create(gpu.GPU);
-        const gpu_ = gpu.GPU.new();
-        gpu__.* = gpu_;
+        const gpu_ = try alloc.create(gpu.GPU);
+        gpu_.* = gpu.GPU.new();
 
-        const joypad__ = try alloc.create(joypad.Joypad);
-        const joypad_ = joypad.Joypad.new();
-        joypad__.* = joypad_;
+        const joypad_ = try alloc.create(joypad.Joypad);
+        joypad_.* = joypad.Joypad.new();
 
-        const timer__ = try alloc.create(timer.Timer);
-        var timer_ = timer.Timer.new();
-        timer_.tac.frequency = timer.Frequency.Hz4096;
-
-        timer__.* = timer_;
+        const timer_ = try alloc.create(timer.Timer);
+        timer_.* = timer.Timer.new();
+        timer_.*.tac.frequency = timer.Frequency.Hz4096;
 
         const mb = try alloc.create(memory_bus.MemoryBus);
-        const memory_bus_ = memory_bus.MemoryBus.new(mbc__, gpu__, timer__, joypad__);
-        mb.* = memory_bus_;
+        mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, timer_, joypad_);
 
-        const cpu__ = try alloc.create(cpu.CPU);
-        const cpu_ = cpu.CPU.new(mb);
-        cpu__.* = cpu_;
+        const cpu_ = try alloc.create(cpu.CPU);
+        cpu_.* = cpu.CPU.new(mb);
 
         return Gameboy{
-            .mbc = mbc__,
-            .cpu = cpu__,
-            .gpu = gpu__,
-            .joypad = joypad__,
-            .timer = timer__,
+            .mbc = mbc_,
+            .cpu = cpu_,
+            .gpu = gpu_,
+            .joypad = joypad_,
+            .timer = timer_,
             .memory_bus = mb,
 
             .alloc = alloc,
@@ -95,7 +88,7 @@ pub const Gameboy = struct {
 
                 // std.debug.print("gb.timer {} gb.bus.timer {}\n", .{ self.timer.tac, self.memory_bus.timer.tac });
                 self.memory_bus.update_if_flags(interrupt_flags);
-                std.time.sleep(500);
+                std.time.sleep(55000);
             }
 
             // need to track unspent cycles in CPU

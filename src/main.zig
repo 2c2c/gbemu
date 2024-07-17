@@ -5,10 +5,9 @@ const draw = @import("draw.zig");
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
-const test_allocator = std.testing.allocator;
 
 pub const std_options: std.Options = .{
-    .log_level = std.log.Level.info,
+    // .log_level = std.log.Level.info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .gb, .level = .info },
         .{ .scope = .cpu, .level = .debug },
