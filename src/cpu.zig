@@ -9,7 +9,13 @@ const GPU = gpu.GPU;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const log = std.log.scoped(.cpu);
+const stderr = std.io.getStdErr();
+pub var buf = std.io.bufferedWriter(stderr.writer());
+
+/// for some reason stdlog is double writing everything. i cant sensibly debug halt instructions with that going on so use this for now
+pub const buflog = buf.writer();
+
+// const log = std.log.scoped(.cpu);
 
 const HaltState = enum {
     SwitchedOn,
@@ -475,21 +481,21 @@ const Instruction = union(enum) {
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
-            // 1. 0xD3: This is an invalid/unused opcode on the Game Boy.
-            // 2. 0xDB: This is an invalid/unused opcode on the Game Boy.
-            // 3. 0xDD: This is an invalid/unused opcode on the Game Boy.
-            // 4. 0xE3: This is an invalid/unused opcode on the Game Boy.
-            // 5. 0xE4: This is an invalid/unused opcode on the Game Boy.
-            // 6. 0xEB: This is an invalid/unused opcode on the Game Boy.
-            // 7. 0xEC: This is an invalid/unused opcode on the Game Boy.
-            // 8. 0xED: This is an invalid/unused opcode on the Game Boy.
-            // 9. 0xF4: This is an invalid/unused opcode on the Game Boy.
-            // 10. 0xFC: This is an invalid/unused opcode on the Game Boy.
-            // 11. 0xFD: This is an invalid/unused opcode on the Game Boy.
-            else => {
-                log.err("Invalid instruction byte: 0x{x}", .{byte});
-                return Instruction.NOP;
-            },
+            0xD3 => unreachable,
+            0xDB => unreachable,
+            0xDD => unreachable,
+            0xE3 => unreachable,
+            0xE4 => unreachable,
+            0xEB => unreachable,
+            0xEC => unreachable,
+            0xED => unreachable,
+            0xF4 => unreachable,
+            0xFC => unreachable,
+            0xFD => unreachable,
+            // else => {
+            //     buflog.print("Invalid instruction byte: 0x{x}", .{byte}) catch unreachable;
+            //     return Instruction.NOP;
+            // },
         };
         return inst;
     }
@@ -1966,10 +1972,10 @@ pub const CPU = struct {
             }
 
             if (self.ime == IME.Enabled) {
-                log.debug("IME.Enabled PC=0x{x}\n", .{self.pc});
-                log.debug("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
-                log.debug("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
-                log.debug("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
+                buflog.print("IME.Enabled PC=0x{x}\n", .{self.pc}) catch unreachable;
+                buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
+                buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
+                buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
                 self.ime = IME.Disabled;
                 self.push(self.pc);
                 self.halt_state = HaltState.Disabled;
@@ -1977,32 +1983,32 @@ pub const CPU = struct {
                 // 20 cycles for interrupts
                 // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
-                    log.debug("HANDLING VBLANK\n", .{});
+                    buflog.print("HANDLING VBLANK\n", .{}) catch unreachable;
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
-                    log.debug("HANDLING LCDSTAT\n", .{});
+                    buflog.print("HANDLING LCDSTAT\n", .{}) catch unreachable;
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
-                    log.debug("HANDLING TIMER\n", .{});
+                    buflog.print("HANDLING TIMER\n", .{}) catch unreachable;
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
-                    // log.debug("HANDLING SERIAL\n", .{}) ;
+                    // buflog.print("HANDLING SERIAL\n", .{}) ;
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    // log.debug("HANDLING JOYPAD\n", .{}) ;
+                    // buflog.print("HANDLING JOYPAD\n", .{}) ;
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
                     self.clock.t_cycles += 20;
                 }
-                // log.debug("INTERRUPT TO PC=0x{x}\n", .{self.pc});
+                // buflog.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
 
                 return true;
             }
@@ -2015,7 +2021,6 @@ pub const CPU = struct {
         return false;
     }
     pub fn step(self: *CPU) u64 {
-        log.debug("step: {}\n", .{self.pc});
         self.pending_t_cycles = 0;
         var frame_cycles: u64 = 0;
         var current_cycles = self.clock.t_cycles;
@@ -2644,50 +2649,11 @@ pub const CPU = struct {
     }
 };
 
-/// Prints state of cpu that can be diffed against using gameboy_doctor
-/// just pipe GBEMU | gameboy_doctor
-fn gameboy_doctor_print(self: *CPU) void {
-    log.debug("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
-        self.registers.A,
-        @as(u8, @bitCast(self.registers.F)),
-        self.registers.B,
-        self.registers.C,
-        self.registers.D,
-        self.registers.E,
-        self.registers.H,
-        self.registers.L,
-        self.sp,
-        self.pc,
-        self.bus.read_byte(self.pc),
-        self.bus.read_byte(self.pc +% 1),
-        self.bus.read_byte(self.pc +% 2),
-        self.bus.read_byte(self.pc +% 3),
-    });
-
-    std.debug.print("A:{x:0>2} F:{x:0>2} B:{x:0>2} C:{x:0>2} D:{x:0>2} E:{x:0>2} H:{x:0>2} L:{x:0>2} SP:{x:0>4} PC:{x:0>4} PCMEM:{x:0>2},{x:0>2},{x:0>2},{x:0>2}\n", .{
-        self.registers.A,
-        @as(u8, @bitCast(self.registers.F)),
-        self.registers.B,
-        self.registers.C,
-        self.registers.D,
-        self.registers.E,
-        self.registers.H,
-        self.registers.L,
-        self.sp,
-        self.pc,
-        self.bus.read_byte(self.pc),
-        self.bus.read_byte(self.pc +% 1),
-        self.bus.read_byte(self.pc +% 2),
-        self.bus.read_byte(self.pc +% 3),
-    });
-    return;
-}
-
 fn beeg_print(self: *CPU) void {
     // if (self.pc <= 0x100) {
     //     return;
     // }
-    log.debug("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+    buflog.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         // std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         self.registers.A,
         @as(u8, @bitCast(self.registers.F)),
@@ -2703,7 +2669,7 @@ fn beeg_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 1),
         self.bus.read_byte(self.pc +% 2),
         self.bus.read_byte(self.pc +% 3),
-    });
+    }) catch unreachable;
 
     // log.debug("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
     //     self.registers.A,

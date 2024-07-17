@@ -1,7 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.mbc);
 
-//
 pub const FULL_ROM_START = 0x0000;
 pub const FULL_ROM_END = 0x7FFF;
 
@@ -14,8 +13,6 @@ pub const ROM_BANK_N_END = 0x7FFF;
 pub const RAM_BANK_START = 0xA000;
 pub const RAM_BANK_END = 0xBFFF;
 
-// register address spaces for MBCs
-// MBC1
 const MBC1_RAM_ENABLE_START = 0x0000;
 const MBC1_RAM_ENABLE_END = 0x1FFF;
 
@@ -28,14 +25,12 @@ const MBC1_RAM_BANK_NUMBER_END = 0x5FFF;
 const MBC1_ROM_RAM_MODE_SELECT_START = 0x6000;
 const MBC1_ROM_RAM_MODE_SELECT_END = 0x7FFF;
 
-// MBC2
 const MBC2_RAM_ENABLE_START = 0x0000;
 const MBC2_RAM_ENABLE_END = 0x00FF;
 
 const MBC2_ROM_BANK_NUMBER_START = 0x2100;
 const MBC2_ROM_BANK_NUMBER_END = 0x21FF;
 
-// MBC3
 const MBC3_RAM_RTC_ENABLE_START = 0x0000;
 const MBC3_RAM_RTC_ENABLE_END = 0x1FFF;
 
@@ -48,7 +43,6 @@ const MBC3_RAM_RTC_SELECT_END = 0x5FFF;
 const MBC3_RTC_LATCH_CLOCK_DATA_START = 0x6000;
 const MBC3_RTC_LATCH_CLOCK_DATA_END = 0x7FFF;
 
-// MBC5
 const MBC5_RAM_ENABLE_START = 0x0000;
 const MBC5_RAM_ENABLE_END = 0x1FFF;
 
@@ -294,16 +288,16 @@ pub const MBC = struct {
                         // 0 is set to 1, looking at all 5 bits
                         masked_bank = if (masked_bank == 0) 1 else masked_bank;
                         masked_bank = masked_bank & 0b11111;
-                        // log.debug("rom_bank {} set\n", .{masked_bank});
+                        log.debug("rom_bank {} set\n", .{masked_bank});
                         self.rom_bank = masked_bank;
                     },
                     MBC1_RAM_BANK_NUMBER_START...MBC1_RAM_BANK_NUMBER_END => {
                         self.ram_bank = byte & 0x03;
-                        // log.debug("ram_bank {} set\n", .{self.ram_bank});
+                        log.debug("ram_bank {} set\n", .{self.ram_bank});
                     },
                     MBC1_ROM_RAM_MODE_SELECT_START...MBC1_ROM_RAM_MODE_SELECT_END => {
                         self.banking_mode = byte & 0x01;
-                        // log.debug("banking_mode {} set\n", .{self.banking_mode});
+                        log.debug("banking_mode {} set\n", .{self.banking_mode});
                     },
                     else => {},
                 }
@@ -467,7 +461,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                        // log.info("rom bank: {} full_addr 0x{x:0>15}\n", .{ self.rom_bank, full_address });
+                        log.info("read ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
 
                         return self.ram[full_address];
                     },
@@ -548,6 +542,7 @@ pub const MBC = struct {
                         .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                     };
                     const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
+                    log.info("write ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
                     self.ram[full_address] = value;
                 }
             },

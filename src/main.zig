@@ -12,7 +12,7 @@ pub const std_options: std.Options = .{
         .{ .scope = .gb, .level = .info },
         .{ .scope = .cpu, .level = .debug },
         .{ .scope = .gpu, .level = .info },
-        .{ .scope = .mbc, .level = .info },
+        .{ .scope = .mbc, .level = .debug },
         .{ .scope = .timer, .level = .info },
         .{ .scope = .joy, .level = .info },
         .{ .scope = .bus, .level = .info },
