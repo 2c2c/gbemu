@@ -223,7 +223,9 @@ pub const MemoryBus = struct {
         return blk: {
             switch (io_addr) {
                 0xFF00 => {
-                    break :blk self.joypad.joyp.unpressed;
+                    // break :blk self.joypad.joyp.unpressed;
+                    // masking the front bits to 11 fixes a load screen issue in the game Donkey Kong
+                    break :blk 0b1100_0000 | @as(u8, (@bitCast(self.joypad.joyp)));
                 },
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
