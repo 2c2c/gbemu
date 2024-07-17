@@ -88,7 +88,6 @@ pub const Gameboy = struct {
 
                 // std.debug.print("gb.timer {} gb.bus.timer {}\n", .{ self.timer.tac, self.memory_bus.timer.tac });
                 self.memory_bus.update_if_flags(interrupt_flags);
-                std.time.sleep(55000);
             }
 
             // need to track unspent cycles in CPU
