@@ -9,6 +9,12 @@ const ie_register = @import("ie_register.zig");
 
 const log = std.log.scoped(.gameboy);
 
+const stderr = std.io.getStdErr();
+pub var buf = std.io.bufferedWriter(stderr.writer());
+
+/// for some reason stdlog is double writing everything. i cant sensibly debug halt instructions with that going on so use this for now
+pub const buflog = buf.writer();
+
 const CPU_SPEED_HZ = 4194304;
 pub const Gameboy = struct {
     mbc: *cartridge.MBC,
@@ -38,7 +44,7 @@ pub const Gameboy = struct {
         mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, timer_, joypad_);
 
         const cpu_ = try alloc.create(cpu.CPU);
-        cpu_.* = cpu.CPU.new(mb);
+        cpu_.* = cpu.CPU.new(mb, mbc_);
 
         return Gameboy{
             .mbc = mbc_,
@@ -68,7 +74,17 @@ pub const Gameboy = struct {
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
         while (true) {
-            joypad.Joypad.update_joyp_keys(self);
+            const enable_joypad_interrupt = joypad.Joypad.update_joyp_keys(self);
+            const joypad_interrupt_flag = ie_register.IERegister{
+                .enable_timer = false,
+                .enable_vblank = false,
+                .enable_lcd_stat = false,
+                .enable_serial = false,
+                .enable_joypad = enable_joypad_interrupt,
+            };
+            self.memory_bus.update_if_flags(joypad_interrupt_flag);
+            // buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.memory_bus.interrupt_flag))}) catch unreachable;
+            // buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.memory_bus.interrupt_enable))}) catch unreachable;
             var cpu_cycles_spent = self.cpu.step();
             frame_cycles += cpu_cycles_spent;
 

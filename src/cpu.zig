@@ -1,11 +1,13 @@
 const std = @import("std");
-const MemoryBus = @import("memory_bus.zig").MemoryBus;
-
-const Joypad = @import("joypad.zig").Joypad;
-const timer = @import("timer.zig");
-const IERegister = @import("ie_register.zig").IERegister;
 const gpu = @import("gpu.zig");
+const timer = @import("timer.zig");
+
 const GPU = gpu.GPU;
+const MemoryBus = @import("memory_bus.zig").MemoryBus;
+const MBC = @import("cartridge.zig").MBC;
+const Joypad = @import("joypad.zig").Joypad;
+const IERegister = @import("ie_register.zig").IERegister;
+
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
@@ -596,10 +598,12 @@ pub const Clock = packed union {
 };
 
 pub const CPU = struct {
+    bus: *MemoryBus,
+    mbc: *MBC,
+
     registers: Registers,
     pc: u16,
     sp: u16,
-    bus: *MemoryBus,
     halt_state: HaltState,
     is_stopped: bool,
     ime: IME,
@@ -1962,6 +1966,8 @@ pub const CPU = struct {
     }
 
     pub fn handle_interrupt(self: *CPU) bool {
+        buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
+        buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
         if (self.bus.has_interrupt()) {
             // log.debug("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
@@ -1974,8 +1980,6 @@ pub const CPU = struct {
             if (self.ime == IME.Enabled) {
                 buflog.print("IME.Enabled PC=0x{x}\n", .{self.pc}) catch unreachable;
                 buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
-                buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
-                buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
                 self.ime = IME.Disabled;
                 self.push(self.pc);
                 self.halt_state = HaltState.Disabled;
@@ -2003,7 +2007,7 @@ pub const CPU = struct {
                     self.pc = @intFromEnum(ISR.Serial);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    // buflog.print("HANDLING JOYPAD\n", .{}) ;
+                    buflog.print("HANDLING JOYPAD\n", .{}) catch unreachable;
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
                     self.clock.t_cycles += 20;
@@ -2036,8 +2040,9 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
 
-        // beeg_print(self);
+        beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
+            buflog.print("halt\n", .{}) catch unreachable;
             self.halt_state = HaltState.Enabled;
             self.clock.t_cycles += 4;
         } else {
@@ -2609,8 +2614,11 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(bus: *MemoryBus) CPU {
+    pub fn new(bus: *MemoryBus, mbc: *MBC) CPU {
         const cpu: CPU = CPU{
+            .bus = bus,
+            .mbc = mbc,
+
             .registers = Registers{
                 .A = 0x01,
                 .B = 0x00,
@@ -2623,7 +2631,6 @@ pub const CPU = struct {
             },
             .pc = 0x0100,
             .sp = 0xFFFE,
-            .bus = bus,
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,
@@ -2653,8 +2660,9 @@ fn beeg_print(self: *CPU) void {
     // if (self.pc <= 0x100) {
     //     return;
     // }
-    buflog.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
-        // std.debug.print("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+    buflog.print("rom:{} ram:{} A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+        self.mbc.rom_bank,
+        self.mbc.ram_bank,
         self.registers.A,
         @as(u8, @bitCast(self.registers.F)),
         self.registers.B,
@@ -2670,6 +2678,7 @@ fn beeg_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 2),
         self.bus.read_byte(self.pc +% 3),
     }) catch unreachable;
+    buf.flush() catch unreachable;
 
     // log.debug("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
     //     self.registers.A,
