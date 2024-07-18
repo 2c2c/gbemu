@@ -68,14 +68,28 @@ pub const Joypad = struct {
         };
     }
 
-    pub fn update_joyp_keys(gb: *Gameboy) void {
+    pub fn update_joyp_keys(gb: *Gameboy) bool {
         // log.debug("Updating joypad keys\n", .{});
+        var old_bits: u4 = undefined;
         switch (gb.joypad.joyp.select) {
-            .Both => gb.joypad.joyp.unpressed = ~(gb.joypad.button.bits | gb.joypad.dpad.bits),
-            .Action => gb.joypad.joyp.unpressed = ~gb.joypad.button.bits,
-            .Direction => gb.joypad.joyp.unpressed = ~gb.joypad.dpad.bits,
-            .None => gb.joypad.joyp.unpressed = 0xF,
+            .Both => {
+                old_bits = gb.joypad.joyp.unpressed;
+                gb.joypad.joyp.unpressed = ~(gb.joypad.button.bits | gb.joypad.dpad.bits);
+            },
+            .Action => {
+                old_bits = gb.joypad.joyp.unpressed;
+                gb.joypad.joyp.unpressed = ~gb.joypad.button.bits;
+            },
+            .Direction => {
+                old_bits = gb.joypad.joyp.unpressed;
+                gb.joypad.joyp.unpressed = ~gb.joypad.dpad.bits;
+            },
+            .None => {
+                old_bits = gb.joypad.joyp.unpressed;
+                gb.joypad.joyp.unpressed = 0xF;
+            },
         }
-        // log.debug("writing joypad keys to joyp: 0b{b:0>8}\n", .{@as(u8, @bitCast(cpu.bus.joypad.joyp))});
+        const fire_interrupt = old_bits == 0xF and (gb.joypad.joyp.unpressed != 0xF);
+        return fire_interrupt;
     }
 };

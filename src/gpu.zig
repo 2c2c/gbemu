@@ -23,6 +23,12 @@ pub const OAM_SIZE: usize = OAM_END - OAM_BEGIN + 1;
 
 const log = std.log.scoped(.gpu);
 
+const stderr = std.io.getStdErr();
+pub var buf = std.io.bufferedWriter(stderr.writer());
+
+/// for some reason stdlog is double writing everything. i cant sensibly debug halt instructions with that going on so use this for now
+pub const buflog = buf.writer();
+
 pub const TilePixelValue = enum(u2) {
     /// white
     Zero,
@@ -313,13 +319,13 @@ pub const GPU = struct {
                     self.stat.ppu_mode = 0b00;
                     self.render_scanline();
 
-                    log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
-                        self.background_viewport.scx,
-                        self.background_viewport.scy,
-                        self.ly,
-                        self.window_position.wx,
-                        self.window_position.wy,
-                    });
+                    // log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
+                    //     self.background_viewport.scx,
+                    //     self.background_viewport.scy,
+                    //     self.ly,
+                    //     self.window_position.wx,
+                    //     self.window_position.wy,
+                    // });
 
                     // log.debug("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
                     //     @as(u8, @bitCast(self.bgp)),
@@ -329,6 +335,8 @@ pub const GPU = struct {
                 }
             },
         }
+        buflog.print("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode }) catch unreachable;
+        buf.flush() catch unreachable;
         return updated_flags;
     }
 
