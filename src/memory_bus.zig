@@ -12,66 +12,6 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const log = std.log.scoped(.bus);
 
-const RomSize = enum(u8) {
-    _32KB = 0x00,
-    _64KB = 0x01,
-    _128KB = 0x02,
-    _256KB = 0x03,
-    _512KB = 0x04,
-    _1MB = 0x05,
-    _2MB = 0x06,
-    _4MB = 0x07,
-    _1_1MB = 0x52,
-    _1_2MB = 0x53,
-    _1_5MB = 0x54,
-};
-
-const RamSize = enum(u8) {
-    _None = 0x00,
-    _2KB = 0x01,
-    _8KB = 0x02,
-    _32KB = 0x03,
-};
-
-/// this isnt consistent
-// 0x0134 - 0x0143
-const Title = extern struct {
-    // 0x0134 - 0x013E
-    title: [11]u8,
-    // 0x013F - 0x0142
-    manufacturer_code: [4]u8,
-    // 0x0143
-    cgb_flag: u8,
-};
-
-const GameBoyRomHeader = extern struct {
-    // 0x0100 - 0x0103
-    entry_point: [4]u8,
-    // 0x0104 - 0x0133
-    nintendo_logo: [48]u8,
-    // 0x0134 - 0x0143
-    title: Title,
-    // 0x0144 - 0x0145
-    new_licensee_code: [2]u8,
-    // 0x0146
-    sgb_flag: u8,
-    // 0x0147
-    cartridge_type: u8,
-    // 0x0148
-    rom_size: RomSize,
-    // 0x0149
-    ram_size: RamSize,
-    // 0x014A
-    destination_code: u8,
-    // 0x014B
-    old_licensee_code: u8,
-    // 0x014C
-    mask_rom_version: u8,
-    // 0x014D
-    header_checksum: u8,
-    // 0x014E - 0x014F
-    global_checksum: [2]u8,
-};
 pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
@@ -121,7 +61,7 @@ pub const MemoryBus = struct {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
                     // 0x0000...0x00FF => {
-                    //     // std.log.debug("Attempted read from boot rom\n", .{});
+                    //     // log.debug("Attempted read from boot rom\n", .{});
                     //     return self.memory[address];
                     // },
                     0x0000...0x7FFF => {
@@ -131,7 +71,7 @@ pub const MemoryBus = struct {
                 }
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
-                // std.log.debug("Vram byte read\n", .{});
+                // log.debug("Vram byte read\n", .{});
                 return self.gpu.read_vram(address);
             },
             // external ram
@@ -147,7 +87,7 @@ pub const MemoryBus = struct {
                 return self.memory[address];
             },
             0xFEA0...0xFEFF => {
-                // std.log.debug("Attempted read from unusable memory\n", .{});
+                // log.debug("Attempted read from unusable memory\n", .{});
             },
             0xFF00...0xFF7F => {
                 return self.read_io(address);
@@ -164,7 +104,7 @@ pub const MemoryBus = struct {
     pub fn write_byte(self: *MemoryBus, address: u16, byte: u8) void {
         switch (address) {
             0x0000...0x7FFF => {
-                // std.log.debug("Attempted write to rom\n", .{});
+                // log.debug("Attempted write to rom\n", .{});
                 self.mbc.handle_register(address, byte);
                 return;
             },
@@ -173,7 +113,7 @@ pub const MemoryBus = struct {
                 return;
             },
             cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
-                // std.log.debug("Attempted write to external ram\n", .{});
+                // log.debug("Attempted write to external ram\n", .{});
                 self.mbc.write_ram(address, byte);
                 return;
             },
@@ -187,7 +127,7 @@ pub const MemoryBus = struct {
                 return;
             },
             0xFEA0...0xFEFF => {
-                // std.log.debug("Attempted write to unusable memory\n", .{});
+                // log.debug("Attempted write to unusable memory\n", .{});
                 // self.memory[address] = byte;
                 return;
             },
@@ -225,6 +165,8 @@ pub const MemoryBus = struct {
                 0xFF00 => {
                     // break :blk self.joypad.joyp.unpressed;
                     // masking the front bits to 11 fixes a load screen issue in the game Donkey Kong
+                    // need to validate this lines up with explainer here
+                    // https://www.reddit.com/r/EmuDev/comments/5bgcw1/gb_lcd_disableenable_behavior/
                     break :blk 0b1100_0000 | @as(u8, (@bitCast(self.joypad.joyp)));
                 },
                 0xFF01 => break :blk 0x00,
@@ -261,13 +203,13 @@ pub const MemoryBus = struct {
                     // possibly need to not overwrite the lower 4 bits
                     self.joypad.joyp.select = @enumFromInt((byte >> 4) & 0b11);
                 },
-                // 0xFF01 => break :blk,
-                // 0xFF02 => break :blk,
-                0xFF01 => std.log.debug("{c}", .{byte}),
-                0xFF02 => std.log.debug("{c}", .{byte}),
+                0xFF01 => break :blk,
+                0xFF02 => break :blk,
+                // 0xFF01 => log.debug("{c}", .{byte}),
+                // 0xFF02 => log.debug("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.clock_update(@bitCast(@as(u64, 0)));
-                    std.log.debug("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
+                    log.debug("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
                 },
                 0xFF05 => {
                     if (!self.timer.tima_reload_cycle) {
@@ -276,14 +218,14 @@ pub const MemoryBus = struct {
                     if (self.timer.tima_cycles_till_interrupt > 0) {
                         self.timer.tima_cycles_till_interrupt = 0;
                     }
-                    std.log.debug("tima {}\n", .{self.timer.tima});
+                    log.debug("tima {}\n", .{self.timer.tima});
                 },
                 0xFF06 => {
                     if (self.timer.tima_reload_cycle) {
                         self.timer.tima = byte;
                     }
                     self.timer.tma = byte;
-                    std.log.debug("tma {}\n", .{self.timer.tima});
+                    log.debug("tma {}\n", .{self.timer.tima});
                 },
                 0xFF07 => {
                     const new_tac: timer.Tac = @bitCast(byte);
@@ -291,10 +233,10 @@ pub const MemoryBus = struct {
                     self.timer.check_falling_edge(self.timer.prev_bit, new_enabled_bit);
 
                     self.timer.tac = new_tac;
-                    std.log.debug("tac {}\n", .{self.timer.tima});
+                    log.debug("tac {}\n", .{self.timer.tima});
 
                     self.timer.prev_bit = new_enabled_bit;
-                    // std.log.debug("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
+                    // log.debug("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
                 },
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
