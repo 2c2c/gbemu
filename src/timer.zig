@@ -46,10 +46,11 @@ pub const Timer = struct {
     /// interally div is just the upper 8 bits of a 16bit counter (measured in t-cycles)
     /// most of the docs related to this will be in terms of m-cycles, and talk about 14bits
     /// better accuracy to track this and handle the actual bit logic used by the hardware
-    internal_clock: cpu.Clock,
+    ///
     /// FF04
     /// 16384Hz increment. writing to it sets to 0. continuing from stop resets to 0
-    div: u8,
+    /// internal_clock.bits.div
+    internal_clock: cpu.Clock,
 
     /// FF05
     /// increases at rate of TAC frequency
@@ -68,7 +69,6 @@ pub const Timer = struct {
     pub fn new() Timer {
         return Timer{
             .tac = @bitCast(@as(u8, 0)),
-            .div = 0,
             .tima = 0,
             .tima_reload_cycle = false,
             .tima_cycles_till_interrupt = 0,

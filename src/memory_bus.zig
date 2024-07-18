@@ -229,7 +229,7 @@ pub const MemoryBus = struct {
                 },
                 0xFF01 => break :blk 0x00,
                 0xFF02 => break :blk 0x00,
-                0xFF04 => break :blk self.timer.div,
+                0xFF04 => break :blk self.timer.internal_clock.bits.div,
                 0xFF05 => break :blk self.timer.tima,
                 0xFF06 => break :blk self.timer.tma,
                 0xFF07 => break :blk @bitCast(self.timer.tac),
@@ -377,9 +377,9 @@ pub const MemoryBus = struct {
                 },
                 0xFF50 => {
                     // disable boot rom
-                    for (0x00..0x100) |i| {
-                        self.memory[i] = 0;
-                    }
+                    // for (0x00..0x100) |i| {
+                    //     self.memory[i] = 0;
+                    // }
                 },
                 0xFFFF => {
                     self.interrupt_enable = @bitCast(byte);
