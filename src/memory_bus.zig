@@ -12,6 +12,11 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const log = std.log.scoped(.bus);
 
+const WRAM_BEGIN: u16 = 0xC000;
+const WRAM_END: u16 = 0xDFFF;
+const ECHO_RAM_BEGIN: u16 = 0xE000;
+const ECHO_RAM_END: u16 = 0xFDFF;
+
 pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
@@ -78,10 +83,11 @@ pub const MemoryBus = struct {
             cartridge.RAM_BANK_START...cartridge.RAM_BANK_END => {
                 return self.mbc.read_ram(address);
             },
-            0xC000...0xFDFF => {
-                // wram eram
-                // self.memory[address] = byte;
+            WRAM_BEGIN...WRAM_END => {
                 return self.memory[address];
+            },
+            ECHO_RAM_BEGIN...ECHO_RAM_END => {
+                return self.memory[address - 0x2000];
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
                 return self.memory[address];
@@ -117,9 +123,12 @@ pub const MemoryBus = struct {
                 self.mbc.write_ram(address, byte);
                 return;
             },
-            0xC000...0xFDFF => {
-                // self.memory[address] = byte;
+            WRAM_BEGIN...WRAM_END => {
                 self.memory[address] = byte;
+                return;
+            },
+            ECHO_RAM_BEGIN...ECHO_RAM_END => {
+                self.memory[address - 0x2000] = byte;
                 return;
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
