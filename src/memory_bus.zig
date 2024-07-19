@@ -84,20 +84,14 @@ pub const MemoryBus = struct {
                 return self.mbc.read_ram(address);
             },
             WRAM_BEGIN...WRAM_END => {
-                log.debug("WRAM READ 0x{x}\n", .{address});
                 return self.memory[address];
             },
-            // ECHO_RAM_BEGIN...ECHO_RAM_END => {},
             ECHO_RAM_BEGIN...ECHO_RAM_END => {
                 log.debug("ECHO RAM READ 0x{x}\n", .{address});
-                // return self.memory[address & 0x0FFF];
                 const new_addr = WRAM_BEGIN + (address & 0x1FFF);
                 log.debug("new_addr 0x{x}\n", .{new_addr});
                 return self.memory[new_addr];
             },
-            // ECHO_RAM_BEGIN...ECHO_RAM_END => {
-            //     return self.memory[address - 0x2000];
-            // },
             gpu.OAM_BEGIN...gpu.OAM_END => {
                 return self.memory[address];
             },
@@ -133,23 +127,16 @@ pub const MemoryBus = struct {
                 return;
             },
             WRAM_BEGIN...WRAM_END => {
-                log.debug("WRAM WRITE 0x{x} byte 0x{x}\n", .{ address, byte });
                 self.memory[address] = byte;
                 return;
             },
-            // ECHO_RAM_BEGIN...ECHO_RAM_END => {},
             ECHO_RAM_BEGIN...ECHO_RAM_END => {
                 log.debug("ECHO RAM WRITE 0x{x} byte 0x{x}\n", .{ address, byte });
-                // self.memory[address & 0x0FFF] = byte;
                 const new_addr = WRAM_BEGIN + (address & 0x1FFF);
                 log.debug("new_addr 0x{x}\n", .{new_addr});
                 self.memory[new_addr] = byte;
                 return;
             },
-            // ECHO_RAM_BEGIN...ECHO_RAM_END => {
-            //     self.memory[address - 0x2000] = byte;
-            //     return;
-            // },
             gpu.OAM_BEGIN...gpu.OAM_END => {
                 self.gpu.write_oam(address, byte);
                 return;
