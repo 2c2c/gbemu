@@ -17,9 +17,9 @@ pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
 // const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
 //
-pub const OAM_BEGIN: usize = 0xFE00;
-pub const OAM_END: usize = 0xFE9F;
-pub const OAM_SIZE: usize = OAM_END - OAM_BEGIN + 1;
+pub const OAM_BEGIN: u16 = 0xFE00;
+pub const OAM_END: u16 = 0xFE9F;
+// pub const OAM_SIZE: u16 = OAM_END - OAM_BEGIN + 1;
 
 const log = std.log.scoped(.gpu);
 
@@ -335,8 +335,8 @@ pub const GPU = struct {
                 }
             },
         }
-        buflog.print("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode }) catch unreachable;
-        buf.flush() catch unreachable;
+        // buflog.print("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode }) catch unreachable;
+        // buf.flush() catch unreachable;
         return updated_flags;
     }
 

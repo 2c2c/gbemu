@@ -1966,8 +1966,8 @@ pub const CPU = struct {
     }
 
     pub fn handle_interrupt(self: *CPU) bool {
-        buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
-        buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
+        // buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
+        // buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
         if (self.bus.has_interrupt()) {
             // log.debug("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
@@ -1978,8 +1978,8 @@ pub const CPU = struct {
             }
 
             if (self.ime == IME.Enabled) {
-                buflog.print("IME.Enabled PC=0x{x}\n", .{self.pc}) catch unreachable;
-                buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
+                // buflog.print("IME.Enabled PC=0x{x}\n", .{self.pc}) catch unreachable;
+                // buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
                 self.ime = IME.Disabled;
                 self.push(self.pc);
                 self.halt_state = HaltState.Disabled;
@@ -2040,9 +2040,9 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         current_cycles = self.clock.t_cycles;
 
-        beeg_print(self);
+        // beeg_print(self);
         if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
-            buflog.print("halt\n", .{}) catch unreachable;
+            // buflog.print("halt\n", .{}) catch unreachable;
             self.halt_state = HaltState.Enabled;
             self.clock.t_cycles += 4;
         } else {

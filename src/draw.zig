@@ -97,12 +97,12 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
             }
         }
 
-        const hz_60_nanos: u64 = std.time.ns_per_s / 60;
-        var timer = try std.time.Timer.start();
+        // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
+        // var timer = try std.time.Timer.start();
         gb.frame();
         frame += 1;
 
-        while (timer.read() < hz_60_nanos) {}
+        // while (timer.read() < hz_60_nanos) {}
 
         // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 

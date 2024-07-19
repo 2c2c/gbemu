@@ -15,7 +15,7 @@ pub const std_options: std.Options = .{
         .{ .scope = .mbc, .level = .debug },
         .{ .scope = .timer, .level = .info },
         .{ .scope = .joy, .level = .info },
-        .{ .scope = .bus, .level = .info },
+        .{ .scope = .bus, .level = .debug },
     },
 };
 
