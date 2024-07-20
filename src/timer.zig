@@ -141,3 +141,7 @@ pub const Timer = struct {
         }
     }
 };
+
+pub fn is_falling_edge(old_bit: u1, new_bit: u1) bool {
+    return old_bit == 1 and new_bit == 0;
+}

@@ -1,10 +1,11 @@
 const std = @import("std");
 const SDL = @import("sdl2");
 const gpu = @import("gpu.zig");
-const cpu_ = @import("cpu.zig");
+const cpu = @import("cpu.zig");
+const apu = @import("apu.zig");
 const time = @import("std").time;
 
-const CPU = cpu_.CPU;
+const CPU = cpu.CPU;
 const Gameboy = @import("gameboy.zig").Gameboy;
 
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -13,9 +14,12 @@ const test_allocator = std.testing.allocator;
 
 const CPU_SPEED_HZ = 4194304;
 
-const SCALE = 2;
+const SCALE = 3;
 
 pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
+    var gb = try Gameboy.new(filename, alloc);
+    defer gb.deinit();
+
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
         sdlPanic();
     defer SDL.SDL_Quit();
@@ -49,11 +53,10 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
     const title = try alloc.alloc(u8, 256);
     defer alloc.free(title);
 
-    var gb = try Gameboy.new(filename, alloc);
-    defer gb.deinit();
     var frame: u128 = 0;
 
     mainLoop: while (true) {
+        // var timer = try std.time.Timer.start();
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) > 0) {
             switch (ev.type) {
@@ -98,11 +101,8 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         }
 
         // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
-        // var timer = try std.time.Timer.start();
         gb.frame();
         frame += 1;
-
-        // while (timer.read() < hz_60_nanos) {}
 
         // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 
@@ -113,25 +113,13 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
+        // while (timer.read() < hz_60_nanos) {}
     }
 }
 
 fn sdlPanic() noreturn {
     const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
     @panic(std.mem.sliceTo(str, 0));
-}
-
-fn print_canvas(cpu: *CPU) void {
-    for (0..gpu.DRAW_HEIGHT) |y| {
-        for (0..gpu.DRAW_WIDTH) |x| {
-            std.debug.print("0x{x:0>2}{x:0>2}{x:0>2}", .{
-                cpu.bus.gpu.canvas[y * x + 0],
-                cpu.bus.gpu.canvas[y * x + 1],
-                cpu.bus.gpu.canvas[y * x + 2],
-            });
-        }
-        std.debug.print("\n", .{});
-    }
 }
 
 test "test" {

@@ -23,12 +23,6 @@ pub const OAM_END: u16 = 0xFE9F;
 
 const log = std.log.scoped(.gpu);
 
-const stderr = std.io.getStdErr();
-pub var buf = std.io.bufferedWriter(stderr.writer());
-
-/// for some reason stdlog is double writing everything. i cant sensibly debug halt instructions with that going on so use this for now
-pub const buflog = buf.writer();
-
 pub const TilePixelValue = enum(u2) {
     /// white
     Zero,
@@ -335,8 +329,7 @@ pub const GPU = struct {
                 }
             },
         }
-        // buflog.print("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode }) catch unreachable;
-        // buf.flush() catch unreachable;
+        // log.debug("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
         return updated_flags;
     }
 

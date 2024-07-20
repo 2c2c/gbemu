@@ -7,6 +7,8 @@ const MBC = cartridge.MBC;
 const IERegister = @import("ie_register.zig").IERegister;
 const gpu = @import("gpu.zig");
 const GPU = gpu.GPU;
+const apu = @import("apu.zig");
+const APU = apu.APU;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
@@ -21,6 +23,7 @@ pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
     gpu: *GPU,
+    apu: *APU,
     joypad: *joypad.Joypad,
     timer: *timer.Timer,
     mbc: *MBC,
@@ -28,7 +31,7 @@ pub const MemoryBus = struct {
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
-    pub fn new(mbc_: *MBC, gpu_: *GPU, timer_: *timer.Timer, joypad_: *joypad.Joypad) MemoryBus {
+    pub fn new(mbc_: *MBC, gpu_: *GPU, apu_: *APU, timer_: *timer.Timer, joypad_: *joypad.Joypad) MemoryBus {
         var memory = [_]u8{0} ** 0x10000;
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
@@ -36,6 +39,7 @@ pub const MemoryBus = struct {
             .memory = memory,
 
             .gpu = gpu_,
+            .apu = apu_,
             .joypad = joypad_,
             .timer = timer_,
             .mbc = mbc_,
@@ -187,6 +191,7 @@ pub const MemoryBus = struct {
                 0xFF06 => break :blk self.timer.tma,
                 0xFF07 => break :blk @bitCast(self.timer.tac),
                 0xFF0F => break :blk @bitCast(self.interrupt_flag),
+                0xFF10...0xFF3F => break :blk self.apu.read_apu_register(io_addr),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
                 // 0xFF41 => break :blk @as(u8, @bitCast(self.gpu.stat)) | 0b1100_0000,
@@ -220,7 +225,7 @@ pub const MemoryBus = struct {
                 // 0xFF02 => log.debug("{c}", .{byte}),
                 0xFF04 => {
                     self.timer.clock_update(@bitCast(@as(u64, 0)));
-                    log.debug("div reset 0b{b}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
+                    log.debug("div reset 0b{b:0>8}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
                 },
                 0xFF05 => {
                     if (!self.timer.tima_reload_cycle) {
@@ -252,29 +257,9 @@ pub const MemoryBus = struct {
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
                 },
-                // sound
-                0xFF10 => {},
-                0xFF11 => {},
-                0xFF12 => {},
-                0xFF13 => {},
-                0xFF14 => {},
-                0xFF16 => {},
-                0xFF17 => {},
-                0xFF18 => {},
-                0xFF19 => {},
-                0xFF1A => {},
-                0xFF1B => {},
-                0xFF1C => {},
-                0xFF1D => {},
-                0xFF1E => {},
-                0xFF20 => {},
-                0xFF21 => {},
-                0xFF22 => {},
-                0xFF23 => {},
-                0xFF24 => {},
-                0xFF25 => {},
-                0xFF26 => {},
-                0xFF30...0xFF3F => {},
+                0xFF10...0xFF3F => {
+                    self.apu.write_apu_register(io_addr, byte);
+                },
                 0xFF40 => {
                     self.gpu.lcdc = @bitCast(byte);
                     if (!self.gpu.lcdc.lcd_enable) {

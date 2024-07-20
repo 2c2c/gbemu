@@ -11,13 +11,7 @@ const IERegister = @import("ie_register.zig").IERegister;
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const stderr = std.io.getStdErr();
-pub var buf = std.io.bufferedWriter(stderr.writer());
-
-/// for some reason stdlog is double writing everything. i cant sensibly debug halt instructions with that going on so use this for now
-pub const buflog = buf.writer();
-
-// const log = std.log.scoped(.cpu);
+const log = std.log.scoped(.cpu);
 
 const HaltState = enum {
     SwitchedOn,
@@ -494,10 +488,6 @@ const Instruction = union(enum) {
             0xF4 => unreachable,
             0xFC => unreachable,
             0xFD => unreachable,
-            // else => {
-            //     buflog.print("Invalid instruction byte: 0x{x}", .{byte}) catch unreachable;
-            //     return Instruction.NOP;
-            // },
         };
         return inst;
     }
@@ -1970,8 +1960,8 @@ pub const CPU = struct {
     }
 
     pub fn handle_interrupt(self: *CPU) bool {
-        // buflog.print("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))}) catch unreachable;
-        // buflog.print("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))}) catch unreachable;
+        // log.debug("IF=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_flag))});
+        // log.debug("IE=0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.interrupt_enable))});
         if (self.bus.has_interrupt()) {
             // log.debug("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
@@ -1980,46 +1970,43 @@ pub const CPU = struct {
             }
 
             if (self.ime == IME.Enabled) {
-                // buflog.print("IME.Enabled PC=0x{x}\n", .{self.pc}) catch unreachable;
-                // buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
+                log.debug("IME.Enabled PC=0x{x}\n", .{self.pc});
+                log.debug("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
                 self.ime = IME.Disabled;
                 self.push(self.pc);
 
                 // 20 cycles for interrupts
                 // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
-                    buflog.print("HANDLING VBLANK\n", .{}) catch unreachable;
+                    log.debug("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
-                    buflog.print("HANDLING LCDSTAT\n", .{}) catch unreachable;
+                    log.debug("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
-                    buflog.print("HANDLING TIMER\n", .{}) catch unreachable;
+                    log.debug("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
-                    // buflog.print("HANDLING SERIAL\n", .{}) ;
+                    log.debug("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
                     self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    buflog.print("HANDLING JOYPAD\n", .{}) catch unreachable;
+                    log.debug("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
                     self.clock.t_cycles += 20;
                 }
-                // buflog.print("INTERRUPT TO PC=0x{x}\n", .{self.pc});
-
                 return true;
             }
         }
         if (self.ime == IME.EILagCycle) {
-            // log.debug("IME.EILagCycle -> IME.Enabled at PC=0x{x}\n", .{self.pc});
             self.ime = IME.Enabled;
         }
 
@@ -2029,11 +2016,14 @@ pub const CPU = struct {
         self.pending_t_cycles = 0;
         const current_cycles = self.clock.t_cycles;
 
-        _ = self.handle_interrupt();
+        const ran_interrupt = self.handle_interrupt();
+        if (ran_interrupt) {
+            self.pending_t_cycles = self.clock.t_cycles - current_cycles;
+            return self.pending_t_cycles;
+        }
 
-        // beeg_print(self);
+        beeg_print(self);
         if (self.halt_state == HaltState.Enabled) {
-            // buflog.print("halt\n", .{}) catch unreachable;
             self.clock.t_cycles += 4;
         } else {
             var instruction_byte = self.bus.read_byte(self.pc);
@@ -2534,7 +2524,30 @@ pub const CPU = struct {
             PrefixTarget.HLI => {
                 const value = self.bus.read_byte(self.registers.get_HL());
                 const new_value = op(self, value, args);
-                self.bus.write_byte(self.registers.get_HL(), new_value);
+                // I wrote the generalizing code for bit/res/set long before I was aware of MBC banking
+                // this lead to a nasty bug:
+                //
+                // The generic code handle_prefix_instruction that we're in
+                // takes a bit/res/set op, calls it, and writes its result to register/memory
+                //
+                // bit is different in that it really just modifies flags, so I had it just take and return the same value,
+                // so I could reuse the same general code.
+                //
+                // with MBC banking implemented this is a problem. certain address ranges, when written to, are instead used to bank into different sections of the ROM.
+                //
+                // in the case of kirby dreamland:
+                //
+                // _LABEL_1A6E_:
+                // ROM00:1A6E      bit 3, [hl]                     BC=0000 DE=C470 HL=38C1 AF=00A0 SP=FFF4 PC=1A6E
+                // ROM00:1A70      jr z, _LABEL_1A79_              BC=0000 DE=C470 HL=38C1 AF=00A0 SP=FFF4 PC=1A70
+                //
+                // was writing whatever value was at 0x38C1 back into 0x38C1. MBC treats writes from 0x2000 - 0x3FFF as a bank range set. Whatever value was written
+                // was interpretted as setting the bank ROM to 1 where it should have been 6, causing a crash/freeze after the level intro.
+                //
+                // this check is a quick jank fix for this
+                if (op != bit) {
+                    self.bus.write_byte(self.registers.get_HL(), new_value);
+                }
                 self.clock.t_cycles += args.hl_cycles;
             },
         }
@@ -2649,7 +2662,7 @@ fn beeg_print(self: *CPU) void {
     // if (self.pc <= 0x100) {
     //     return;
     // }
-    buflog.print("rom:{} ram:{} A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
+    log.debug("rom:{} ram:{} A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
         self.mbc.rom_bank,
         self.mbc.ram_bank,
         self.registers.A,
@@ -2666,8 +2679,7 @@ fn beeg_print(self: *CPU) void {
         self.bus.read_byte(self.pc +% 1),
         self.bus.read_byte(self.pc +% 2),
         self.bus.read_byte(self.pc +% 3),
-    }) catch unreachable;
-    buf.flush() catch unreachable;
+    });
 
     // log.debug("A: {X:0>2} F: {X:0>2} B: {X:0>2} C: {X:0>2} D: {X:0>2} E: {X:0>2} H: {X:0>2} L: {X:0>2} SP: {X:0>4} PC: 00:{X:0>4} ({X:0>2} {X:0>2} {X:0>2} {X:0>2})\n", .{
     //     self.registers.A,

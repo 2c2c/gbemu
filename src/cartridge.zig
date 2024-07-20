@@ -279,7 +279,7 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     MBC1_RAM_ENABLE_START...MBC1_RAM_ENABLE_END => {
-                        // log.debug("ram enabled set {}\n", .{0x0A});
+                        log.debug("ram enabled set {}\n", .{0x0A});
                         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
                     },
                     MBC1_ROM_BANK_NUMBER_START...MBC1_ROM_BANK_NUMBER_END => {
@@ -373,7 +373,6 @@ pub const MBC = struct {
                         const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
                         // log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
-                        // return self.rom[address];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
                         const mbc1_address = MBC1RomAddress{
@@ -462,7 +461,7 @@ pub const MBC = struct {
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
                         const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                        log.info("read ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
+                        log.debug("read ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
 
                         return self.ram[full_address];
                     },
@@ -542,7 +541,7 @@ pub const MBC = struct {
                     .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                 };
                 const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
-                log.info("write ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
+                log.debug("write ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
                 self.ram[full_address] = value;
             },
             .MBC5, .MBC5_RAM, .MBC5_RAM_BATTERY, .MBC5_RUMBLE, .MBC5_RUMBLE_RAM, .MBC5_RUMBLE_RAM_BATTERY => {

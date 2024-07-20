@@ -7,16 +7,26 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const expect = std.testing.expect;
 
 pub const std_options: std.Options = .{
-    // .log_level = std.log.Level.info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .gb, .level = .info },
-        .{ .scope = .cpu, .level = .debug },
-        .{ .scope = .gpu, .level = .debug },
-        .{ .scope = .mbc, .level = .debug },
+        .{ .scope = .cpu, .level = .info },
+        .{ .scope = .gpu, .level = .info },
+        .{ .scope = .apu, .level = .debug },
+        .{ .scope = .mbc, .level = .info },
         .{ .scope = .timer, .level = .info },
         .{ .scope = .joy, .level = .info },
-        .{ .scope = .bus, .level = .debug },
+        .{ .scope = .bus, .level = .info },
     },
+    // .log_scope_levels = &[_]std.log.ScopeLevel{
+    //     .{ .scope = .gb, .level = .err },
+    //     .{ .scope = .cpu, .level = .err },
+    //     .{ .scope = .gpu, .level = .err },
+    //     .{ .scope = .apu, .level = .err },
+    //     .{ .scope = .mbc, .level = .err },
+    //     .{ .scope = .timer, .level = .err },
+    //     .{ .scope = .joy, .level = .err },
+    //     .{ .scope = .bus, .level = .err },
+    // },
 };
 
 pub fn main() !void {
