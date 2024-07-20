@@ -87,9 +87,7 @@ pub const MemoryBus = struct {
                 return self.memory[address];
             },
             ECHO_RAM_BEGIN...ECHO_RAM_END => {
-                log.debug("ECHO RAM READ 0x{x}\n", .{address});
                 const new_addr = WRAM_BEGIN + (address & 0x1FFF);
-                log.debug("new_addr 0x{x}\n", .{new_addr});
                 return self.memory[new_addr];
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
@@ -131,9 +129,7 @@ pub const MemoryBus = struct {
                 return;
             },
             ECHO_RAM_BEGIN...ECHO_RAM_END => {
-                log.debug("ECHO RAM WRITE 0x{x} byte 0x{x}\n", .{ address, byte });
                 const new_addr = WRAM_BEGIN + (address & 0x1FFF);
-                log.debug("new_addr 0x{x}\n", .{new_addr});
                 self.memory[new_addr] = byte;
                 return;
             },

@@ -2026,19 +2026,12 @@ pub const CPU = struct {
         return false;
     }
     pub fn step(self: *CPU) u64 {
-        if (self.pc == 0x5D02) {
-            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
-            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
-            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
-            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
-            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
-        }
         self.pending_t_cycles = 0;
         const current_cycles = self.clock.t_cycles;
 
         _ = self.handle_interrupt();
 
-        beeg_print(self);
+        // beeg_print(self);
         if (self.halt_state == HaltState.Enabled) {
             // buflog.print("halt\n", .{}) catch unreachable;
             self.clock.t_cycles += 4;
