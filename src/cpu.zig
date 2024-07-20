@@ -630,26 +630,30 @@ pub const CPU = struct {
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
+            // Instruction.HALT => {
+            //     if (self.ime == IME.Disabled and self.bus.has_interrupt()) {
+            //         // fix halt bug sometime
+            //         // self.halt_state = HaltState.Bugged;
+            //         // break :blk self.pc + 1;
+            //         // FIXME:
+            //         self.pc = self.pc +% 1;
+            //         self.clock.t_cycles += 4;
+            //         self.halt_state = HaltState.Enabled;
+            //         if (self.halt_state == HaltState.Enabled) {
+            //             self.halt_state = HaltState.Enabled;
+            //         }
+            //     } else {
+            //         self.pc = self.pc +% 1;
+            //         self.clock.t_cycles += 4;
+            //         self.halt_state = HaltState.Enabled;
+            //         if (self.halt_state == HaltState.Enabled) {
+            //             self.halt_state = HaltState.Enabled;
+            //         }
+            //     }
+            // },
             Instruction.HALT => {
-                if (self.ime == IME.Disabled and self.bus.has_interrupt()) {
-                    // fix halt bug sometime
-                    // self.halt_state = HaltState.Bugged;
-                    // break :blk self.pc + 1;
-                    // FIXME:
-                    self.pc = self.pc +% 1;
-                    self.clock.t_cycles += 4;
-                    self.halt_state = HaltState.Enabled;
-                    if (self.halt_state == HaltState.Enabled) {
-                        self.halt_state = HaltState.Enabled;
-                    }
-                } else {
-                    self.pc = self.pc +% 1;
-                    self.clock.t_cycles += 4;
-                    self.halt_state = HaltState.Enabled;
-                    if (self.halt_state == HaltState.Enabled) {
-                        self.halt_state = HaltState.Enabled;
-                    }
-                }
+                self.halt_state = HaltState.Enabled;
+                self.pc +%= 1;
             },
             Instruction.CALL => |jt| {
                 const jump_condition = jmpBlk: {
@@ -1972,9 +1976,7 @@ pub const CPU = struct {
             // log.debug("HAS AN INTERRUPT PC=0x{x}\n", .{self.pc});
 
             if (self.halt_state == HaltState.Enabled or self.halt_state == HaltState.SwitchedOn) {
-                // log.debug("IE/IF set while in halt, setting HaltState.Disabled\n", .{});
                 self.halt_state = HaltState.Disabled;
-                self.pc +%= 1;
             }
 
             if (self.ime == IME.Enabled) {
@@ -1982,7 +1984,6 @@ pub const CPU = struct {
                 // buflog.print("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc}) catch unreachable;
                 self.ime = IME.Disabled;
                 self.push(self.pc);
-                self.halt_state = HaltState.Disabled;
 
                 // 20 cycles for interrupts
                 // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
@@ -2025,25 +2026,21 @@ pub const CPU = struct {
         return false;
     }
     pub fn step(self: *CPU) u64 {
-        self.pending_t_cycles = 0;
-        var frame_cycles: u64 = 0;
-        var current_cycles = self.clock.t_cycles;
-
-        const ran_interrupt = self.handle_interrupt();
-        if (ran_interrupt) {
-            self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-            frame_cycles = self.pending_t_cycles;
-            return frame_cycles;
+        if (self.pc == 0x5D02) {
+            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
+            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
+            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
+            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
+            buflog.print("PC=0x5D03\n", .{}) catch unreachable;
         }
-
-        // TODO: reworked how components tick, cleanup this area
         self.pending_t_cycles = 0;
-        current_cycles = self.clock.t_cycles;
+        const current_cycles = self.clock.t_cycles;
 
-        // beeg_print(self);
-        if (self.halt_state == HaltState.SwitchedOn or self.halt_state == HaltState.Enabled) {
+        _ = self.handle_interrupt();
+
+        beeg_print(self);
+        if (self.halt_state == HaltState.Enabled) {
             // buflog.print("halt\n", .{}) catch unreachable;
-            self.halt_state = HaltState.Enabled;
             self.clock.t_cycles += 4;
         } else {
             var instruction_byte = self.bus.read_byte(self.pc);
@@ -2059,9 +2056,8 @@ pub const CPU = struct {
             }
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
-        frame_cycles += self.pending_t_cycles;
 
-        return frame_cycles;
+        return self.pending_t_cycles;
     }
 
     fn jump(self: *CPU, should_jump: bool) u16 {
