@@ -100,7 +100,6 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
             }
         }
 
-        // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
         gb.frame();
         frame += 1;
 
@@ -113,6 +112,7 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         _ = SDL.SDL_RenderClear(renderer);
         _ = SDL.SDL_RenderCopy(renderer, texture, null, null);
         SDL.SDL_RenderPresent(renderer);
+        // const hz_60_nanos: u64 = std.time.ns_per_s / 60;
         // while (timer.read() < hz_60_nanos) {}
     }
 }

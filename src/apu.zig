@@ -4,7 +4,7 @@ const SDL = @import("sdl2");
 
 const log = std.log.scoped(.apu);
 
-pub const SDL_BUFFER_SIZE = 2400;
+pub const SDL_BUFFER_SIZE = 2048;
 pub const SAMPLE_RATE = 48000;
 pub const CPU_SPEED_HZ = 4194304;
 
@@ -244,6 +244,7 @@ pub const APU = struct {
         apu.reset_registers();
         return apu;
     }
+
     pub fn step(self: *APU, clock: cpu.Clock) void {
         var apu_sample_left: f32 = 0;
         var apu_sample_right: f32 = 0;
@@ -266,10 +267,10 @@ pub const APU = struct {
 
             self.internal_clock = clock;
 
-            // const ch1_out = self.channel_1.step(self);
-            const ch1_out: f32 = 0;
-            const ch2_out = self.channel_2.step(self);
-            // const ch2_out: f32 = 0;
+            const ch1_out = self.channel_1.step(self);
+            // const ch1_out: f32 = 0;
+            // const ch2_out = self.channel_2.step(self);
+            const ch2_out: f32 = 0;
             // const ch3_out = self.channel_3.step(self);
             const ch3_out: f32 = 0;
             // const ch4_out = self.channel_4.step(self);
@@ -303,7 +304,7 @@ pub const APU = struct {
         count += 1;
         self.audio_buffer_downsample_count += SAMPLE_RATE;
         if (self.audio_buffer_downsample_count >= CPU_SPEED_HZ) {
-            log.debug("count = {}", .{count});
+            // log.debug("count = {}", .{count});
             count = 0;
             // log.debug("filled audio buffer", .{});
             self.audio_buffer_downsample_count -= CPU_SPEED_HZ;
@@ -314,9 +315,12 @@ pub const APU = struct {
             self.audio_buffer[self.audio_buffer_count] = apu_sample_right;
             self.audio_buffer_count += 1;
 
-            if (self.audio_buffer_count >= SDL_BUFFER_SIZE) {
+            if (self.audio_buffer_count == SDL_BUFFER_SIZE) {
                 self.audio_buffer_count = 0;
+                const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
+                log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_BUFFER_SIZE * 2) {
+                    log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
                 // log.debug("audio buffer::", .{});
@@ -589,7 +593,7 @@ pub const APU = struct {
                 if (self.channel_3.nr34.trigger and self.channel_3.dac_enabled) {
                     self.channel_3.enabled = true;
                     // ?
-                    self.channel_3.current_sample = 1;
+                    self.channel_3.current_sample = 0;
                     self.channel_3.length_timer = 256 - @as(u16, self.channel_3.nr31.initial_length_timer);
                     self.channel_3.timer = (2048 - freq) * 2;
                 }
