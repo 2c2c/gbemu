@@ -323,7 +323,7 @@ pub const APU = struct {
                 // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
                 // log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
-                    // log.debug("waiting", .{});
+                    log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
                 self.sdl_total_ticks = SDL.SDL_GetTicks();
