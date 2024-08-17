@@ -4,7 +4,7 @@ const SDL = @import("sdl2");
 
 const log = std.log.scoped(.apu);
 
-pub const SDL_BUFFER_SIZE = 1024;
+pub const SDL_SAMPLE_SIZE = 2048;
 pub const SAMPLE_RATE = 48000;
 pub const CPU_SPEED_HZ = 4194304;
 
@@ -155,7 +155,7 @@ pub const APU = struct {
 
     audio_buffer_downsample_count: usize,
     audio_buffer_count: usize,
-    audio_buffer: [SDL_BUFFER_SIZE * 2]f32,
+    audio_buffer: [SDL_SAMPLE_SIZE * 2]f32,
 
     length_step: bool,
     envelope_step: bool,
@@ -181,7 +181,7 @@ pub const APU = struct {
             .freq = SAMPLE_RATE,
             .format = SDL.AUDIO_F32SYS,
             .channels = 2,
-            .samples = SDL_BUFFER_SIZE,
+            .samples = SDL_SAMPLE_SIZE,
             .callback = null,
             .padding = 0,
             .size = 0,
@@ -205,7 +205,7 @@ pub const APU = struct {
             .sdl_audio_device = audio_device,
             .audio_buffer_downsample_count = 0,
             .audio_buffer_count = 0,
-            .audio_buffer = [_]f32{0} ** (SDL_BUFFER_SIZE * 2),
+            .audio_buffer = [_]f32{0} ** (SDL_SAMPLE_SIZE * 2),
             .nr52 = NR52{
                 .channel_1 = false,
                 .channel_2 = false,
@@ -268,13 +268,13 @@ pub const APU = struct {
             self.internal_clock = clock;
 
             const ch1_out = self.channel_1.step(self);
+            // const ch2_out = self.channel_2.step(self);
+            // const ch3_out = self.channel_3.step(self);
+            // const ch4_out = self.channel_4.step(self);
             // const ch1_out: f32 = 0;
-            const ch2_out = self.channel_2.step(self);
-            // const ch2_out: f32 = 0;
-            const ch3_out = self.channel_3.step(self);
-            // const ch3_out: f32 = 0;
-            const ch4_out = self.channel_4.step(self);
-            // const ch4_out: f32 = 0;
+            const ch2_out: f32 = 0;
+            const ch3_out: f32 = 0;
+            const ch4_out: f32 = 0;
 
             const apu_sample_ch1_left = if (self.nr51.left_channel_1) ch1_out / 4 else 0;
             const apu_sample_ch2_left = if (self.nr51.left_channel_2) ch2_out / 4 else 0;
@@ -315,15 +315,15 @@ pub const APU = struct {
             self.audio_buffer[self.audio_buffer_count] = apu_sample_right;
             self.audio_buffer_count += 1;
 
-            if (self.audio_buffer_count == SDL_BUFFER_SIZE) {
+            if (self.audio_buffer_count == SDL_SAMPLE_SIZE) {
                 self.audio_buffer_count = 0;
-                const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
-                log.debug("queued_audio_size = {}", .{queued_audio_size});
-                while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_BUFFER_SIZE * 8) {
-                    log.debug("waiting", .{});
+                // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
+                // log.debug("queued_audio_size = {}", .{queued_audio_size});
+                while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
+                    // log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
-                const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_BUFFER_SIZE * 8);
+                const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_SAMPLE_SIZE * 8);
                 // log.debug("audio buffer::", .{});
                 // log.debug("{any}", .{self.audio_buffer});
                 var minf = std.math.floatMax(f32);
@@ -420,7 +420,7 @@ pub const APU = struct {
         self.audio_buffer_count = 0;
         self.audio_buffer_downsample_count = 0;
 
-        self.audio_buffer = std.mem.zeroes([SDL_BUFFER_SIZE * 2]f32);
+        self.audio_buffer = std.mem.zeroes([SDL_SAMPLE_SIZE * 2]f32);
 
         self.frame_sequence = 0;
     }
