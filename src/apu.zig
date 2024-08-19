@@ -4,8 +4,9 @@ const SDL = @import("sdl2");
 
 const log = std.log.scoped(.apu);
 
-pub const SDL_SAMPLE_SIZE = 2048;
-pub const SAMPLE_RATE = 48000;
+pub const SDL_SAMPLE_SIZE = 512;
+// pub const SAMPLE_RATE = 48000;
+pub const SAMPLE_RATE = 48000 * 4;
 pub const CPU_SPEED_HZ = 4194304;
 
 pub var count: u64 = 0;
@@ -181,7 +182,7 @@ pub const APU = struct {
         // defer SDL.SDL_Quit();
 
         var audio_spec: SDL.SDL_AudioSpec = .{
-            .freq = SAMPLE_RATE,
+            .freq = 48000,
             .format = SDL.AUDIO_F32SYS,
             .channels = 2,
             .samples = SDL_SAMPLE_SIZE,
