@@ -263,10 +263,12 @@ pub const APU = struct {
 
             var new_clock = self.internal_clock;
             new_clock.t_cycles += 4;
-            div_ticks += 1;
+            if (new_clock.bits.lower_clock == 0) {
+                div_ticks += 1;
+            }
 
-            const old_bit = (self.internal_clock.bits.div >> 6) & 1;
-            const new_bit = (new_clock.bits.div >> 6) & 1;
+            const old_bit = (self.internal_clock.bits.div >> 4) & 1;
+            const new_bit = (new_clock.bits.div >> 4) & 1;
 
             if (old_bit == 1 and new_bit == 0) {
                 self.frame_sequence += 1;
@@ -283,13 +285,13 @@ pub const APU = struct {
 
             self.internal_clock = new_clock;
 
-            // const ch1_out = self.channel_1.step(self);
-            // const ch2_out = self.channel_2.step(self);
-            // const ch3_out = self.channel_3.step(self);
+            const ch1_out = self.channel_1.step(self);
+            const ch2_out = self.channel_2.step(self);
+            const ch3_out = self.channel_3.step(self);
             const ch4_out = self.channel_4.step(self);
-            const ch1_out: f32 = 0;
-            const ch2_out: f32 = 0;
-            const ch3_out: f32 = 0;
+            // const ch1_out: f32 = 0;
+            // const ch2_out: f32 = 0;
+            // const ch3_out: f32 = 0;
             // const ch4_out: f32 = 0;
 
             const apu_sample_ch1_left = if (self.nr51.left_channel_1) ch1_out / 4 else 0;
@@ -335,7 +337,7 @@ pub const APU = struct {
                 const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
                 log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
-                    log.debug("waiting", .{});
+                    // log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
                 self.sdl_total_ticks = SDL.SDL_GetTicks();
@@ -555,7 +557,7 @@ pub const APU = struct {
                     self.channel_1.ch1_frequency = self.channel_1.frequency;
                     self.channel_1.ch1_shadow_frequency = self.channel_1.frequency;
                     self.channel_1.ch1_sweep_timer = if (self.channel_1.nr10.sweep_pace == 0) 8 else self.channel_1.nr10.sweep_pace;
-                    self.channel_1.ch1_sweep_enable = if (self.channel_1.nr10.sweep_pace != 0 or self.channel_1.nr10.sweep_step == 0) true else false;
+                    self.channel_1.ch1_sweep_enable = if (self.channel_1.nr10.sweep_pace > 0 or self.channel_1.nr10.sweep_step > 0) true else false;
                 }
             },
             0xFF15 => {},
@@ -640,7 +642,7 @@ pub const APU = struct {
                     self.channel_4.length_timer = 64 - @as(u16, self.channel_4.nr41.initial_length_timer);
                     self.channel_4.volume = self.channel_4.nr42.env_initial_volume;
                     self.channel_4.envelope_timer = self.channel_4.nr42.env_sweep_pace;
-                    self.channel_4.lsfr = 0;
+                    self.channel_4.lsfr = ~@as(u16, 0);
                 }
             },
             0xFF24 => {
@@ -787,13 +789,13 @@ const Channel1 = struct {
                 // unsure if I need an enabled flag instead of using pace
                 if (self.ch1_sweep_enable and self.nr10.sweep_pace > 0) {
                     var new_freq: u16 = self.ch1_shadow_frequency >> self.nr10.sweep_pace;
-                    if (!self.nr10.sweep_direction) {
-                        new_freq -%= self.ch1_shadow_frequency;
+                    if (self.nr10.sweep_direction) {
+                        new_freq = self.ch1_shadow_frequency -% new_freq;
                     } else {
-                        new_freq +%= self.ch1_shadow_frequency;
+                        new_freq = self.ch1_shadow_frequency +% new_freq;
                     }
 
-                    if (new_freq > 2048 or new_freq == 0) {
+                    if (new_freq >= 2048 or new_freq == 0) {
                         self.enabled = false;
                     }
 
