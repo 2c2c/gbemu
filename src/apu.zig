@@ -389,15 +389,16 @@ pub const APU = struct {
         self.channel_1.nr12 = @bitCast(@as(u8, 0xF3));
         self.channel_1.nr13 = @bitCast(@as(u8, 0xFF));
         self.channel_1.nr14 = @bitCast(@as(u8, 0xBF));
-        self.channel_1.ch1_volume = 0;
-        self.channel_1.ch1_duty_pos = 0;
+
+        self.channel_1.volume = 0;
+        self.channel_1.duty_pos = 0;
+        self.channel_1._frequency = 0;
         self.channel_1.frequency = 0;
-        self.channel_1.ch1_frequency = 0;
-        self.channel_1.ch1_shadow_frequency = 0;
-        self.channel_1.ch1_sweep_timer = 0;
-        self.channel_1.ch1_sweep_enable = false;
-        self.channel_1.ch1_envelope_timer = 0;
-        self.channel_1.ch1_length_timer = 0;
+        self.channel_1.shadow_frequency = 0;
+        self.channel_1.sweep_timer = 0;
+        self.channel_1.sweep_enable = false;
+        self.channel_1.envelope_timer = 0;
+        self.channel_1.length_timer = 0;
         self.channel_1.enabled = false;
 
         self.channel_2.nr21 = @bitCast(@as(u8, 0x3F));
@@ -550,14 +551,14 @@ pub const APU = struct {
                 if (self.channel_1.nr14.trigger) {
                     // log.info("TRIGGER write nr14 {b:0>8}\n", .{byte});
                     self.channel_1.enabled = true;
-                    self.channel_1.ch1_envelope_timer = self.channel_1.nr12.env_sweep_pace;
-                    self.channel_1.ch1_length_timer = 64 - @as(u16, self.channel_1.nr11.sound_length);
-                    self.channel_1.ch1_volume = self.channel_1.nr12.env_initial_volume;
-                    self.channel_1.frequency = @as(u16, self.channel_1.nr14.period_high) << 8 | self.channel_1.nr13.period_low;
-                    self.channel_1.ch1_frequency = self.channel_1.frequency;
-                    self.channel_1.ch1_shadow_frequency = self.channel_1.frequency;
-                    self.channel_1.ch1_sweep_timer = if (self.channel_1.nr10.sweep_pace == 0) 8 else self.channel_1.nr10.sweep_pace;
-                    self.channel_1.ch1_sweep_enable = if (self.channel_1.nr10.sweep_pace > 0 or self.channel_1.nr10.sweep_step > 0) true else false;
+                    self.channel_1.envelope_timer = self.channel_1.nr12.env_sweep_pace;
+                    self.channel_1.length_timer = 64 - @as(u16, self.channel_1.nr11.sound_length);
+                    self.channel_1.volume = self.channel_1.nr12.env_initial_volume;
+                    self.channel_1._frequency = @as(u16, self.channel_1.nr14.period_high) << 8 | self.channel_1.nr13.period_low;
+                    self.channel_1.frequency = self.channel_1._frequency;
+                    self.channel_1.shadow_frequency = self.channel_1._frequency;
+                    self.channel_1.sweep_timer = if (self.channel_1.nr10.sweep_pace == 0) 8 else self.channel_1.nr10.sweep_pace;
+                    self.channel_1.sweep_enable = if (self.channel_1.nr10.sweep_pace > 0 or self.channel_1.nr10.sweep_step > 0) true else false;
                 }
             },
             0xFF15 => {},
@@ -661,7 +662,7 @@ pub const APU = struct {
                 } else {
                     self.nr52.audio_on = true;
                     self.frame_sequence = 0;
-                    self.channel_1.ch1_duty_pos = 0;
+                    self.channel_1.duty_pos = 0;
                     self.channel_2.duty_pos = 0;
                     self.channel_3.current_sample = 0;
                 }
@@ -683,27 +684,27 @@ const Channel1 = struct {
     nr13: NR13,
     nr14: NR14,
 
+    _frequency: u16,
     frequency: u16,
-    ch1_frequency: u16,
-    ch1_shadow_frequency: u16,
+    shadow_frequency: u16,
 
     ch1_timer: u16,
-    ch1_envelope_timer: u16,
-    ch1_length_timer: u16,
-    ch1_sweep_timer: u16,
-    ch1_sweep_enable: bool,
+    envelope_timer: u16,
+    length_timer: u16,
+    sweep_timer: u16,
+    sweep_enable: bool,
 
-    ch1_volume: u4,
-    ch1_duty_pos: u16,
+    volume: u4,
+    duty_pos: u16,
 
     pub fn new() Channel1 {
         return Channel1{
             .enabled = false,
             .ch1_timer = 0,
-            .ch1_envelope_timer = 0,
-            .ch1_length_timer = 0,
-            .ch1_volume = 0,
-            .ch1_duty_pos = 0,
+            .envelope_timer = 0,
+            .length_timer = 0,
+            .volume = 0,
+            .duty_pos = 0,
             .nr10 = NR10{
                 .sweep_step = 0,
                 .sweep_direction = false,
@@ -728,11 +729,11 @@ const Channel1 = struct {
                 .length_enable = false,
                 .trigger = false,
             },
+            ._frequency = 0,
             .frequency = 0,
-            .ch1_frequency = 0,
-            .ch1_shadow_frequency = 0,
-            .ch1_sweep_timer = 0,
-            .ch1_sweep_enable = false,
+            .shadow_frequency = 0,
+            .sweep_timer = 0,
+            .sweep_enable = false,
         };
     }
 
@@ -746,13 +747,13 @@ const Channel1 = struct {
         // log.debug("before self.duty_pos = {}", .{self.ch1_duty_pos});
         self.ch1_timer -%= 1;
         if (self.ch1_timer == 0) {
-            self.ch1_timer = (2048 - self.ch1_frequency);
-            self.ch1_duty_pos = (self.ch1_duty_pos + 1) % 8;
+            self.ch1_timer = (2048 - self.frequency);
+            self.duty_pos = (self.duty_pos + 1) % 8;
         }
         // log.debug("after self.duty_pos = {}", .{self.ch1_duty_pos});
 
         // tune by volume?
-        const amp = DutyCycles[self.nr11.wave_pattern_duty][self.ch1_duty_pos];
+        const amp = DutyCycles[self.nr11.wave_pattern_duty][self.duty_pos];
 
         // log.debug("DutyCycles[{}][{}] = {}", .{
         //     .duty = self.nr11.wave_pattern_duty,
@@ -761,38 +762,39 @@ const Channel1 = struct {
         // });
 
         if (apu.length_step and self.nr14.length_enable) {
-            self.ch1_length_timer -%= 1;
-            if (self.ch1_length_timer == 0) {
+            self.length_timer -%= 1;
+            if (self.length_timer == 0) {
                 self.enabled = false;
             }
         }
 
         // TODO: setup env int volume to ch1_volume during trigger event
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
-            self.ch1_envelope_timer -%= 1;
-            if (self.ch1_envelope_timer == self.nr12.env_sweep_pace) {
-                self.ch1_envelope_timer = self.nr12.env_sweep_pace;
-                if (self.nr12.env_direction and self.ch1_volume != 0xF) {
-                    self.ch1_volume += 1;
+            self.envelope_timer -%= 1;
+            if (self.envelope_timer == self.nr12.env_sweep_pace) {
+                self.envelope_timer = self.nr12.env_sweep_pace;
+                if (self.nr12.env_direction and self.volume != 0xF) {
+                    self.volume += 1;
                 }
-                if (!self.nr12.env_direction and self.ch1_volume != 0x0) {
-                    self.ch1_volume -= 1;
+                if (!self.nr12.env_direction and self.volume != 0x0) {
+                    self.volume -= 1;
                 }
             }
         }
 
         if (apu.sweep_step) {
-            self.ch1_sweep_timer -%= 1;
-            if (self.ch1_sweep_timer == 0) {
-                self.ch1_sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
+            self.sweep_timer -%= 1;
+            if (self.sweep_timer == 0) {
+                self.sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
 
                 // unsure if I need an enabled flag instead of using pace
-                if (self.ch1_sweep_enable and self.nr10.sweep_pace > 0) {
-                    var new_freq: u16 = self.ch1_shadow_frequency >> self.nr10.sweep_pace;
+                if (self.sweep_enable and self.nr10.sweep_pace > 0) {
+                    var new_freq: u16 = self.shadow_frequency >> self.nr10.sweep_pace;
+
                     if (self.nr10.sweep_direction) {
-                        new_freq = self.ch1_shadow_frequency -% new_freq;
+                        new_freq = self.shadow_frequency -% new_freq;
                     } else {
-                        new_freq = self.ch1_shadow_frequency +% new_freq;
+                        new_freq = self.shadow_frequency +% new_freq;
                     }
 
                     if (new_freq >= 2048 or new_freq == 0) {
@@ -800,14 +802,14 @@ const Channel1 = struct {
                     }
 
                     if (self.enabled and apu.sweep_step) {
-                        self.ch1_frequency = new_freq;
-                        self.ch1_shadow_frequency = new_freq;
+                        self.frequency = new_freq;
+                        self.shadow_frequency = new_freq;
                     }
                 }
             }
         }
 
-        return dac_volume_convert(amp * self.ch1_volume);
+        return dac_volume_convert(amp * self.volume);
     }
 };
 
