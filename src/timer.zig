@@ -89,7 +89,7 @@ pub const Timer = struct {
                 self.tima_reload_cycle = true;
             }
         }
-        const new_clock = cpu.Clock{ .t_cycles = self.internal_clock.t_cycles + 4 };
+        const new_clock = cpu.Clock{ .t_cycles = self.internal_clock.t_cycles + 1 };
         self.clock_update(new_clock);
 
         // std.debug.print("clock 0b{b>0:16} div {} tima {} tma {} tac {}\n", .{

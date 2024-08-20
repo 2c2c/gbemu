@@ -4,7 +4,8 @@ const SDL = @import("sdl2");
 
 const log = std.log.scoped(.apu);
 
-pub const SDL_SAMPLE_SIZE = 512;
+pub var div_ticks: u64 = 0;
+pub const SDL_SAMPLE_SIZE = 2048;
 // pub const SAMPLE_RATE = 48000;
 pub const SAMPLE_RATE = 48000 * 4;
 pub const CPU_SPEED_HZ = 4194304;
@@ -251,6 +252,7 @@ pub const APU = struct {
     }
 
     pub fn step(self: *APU, clock: cpu.Clock) void {
+        _ = clock; // autofix
         var apu_sample_left: f32 = 0;
         var apu_sample_right: f32 = 0;
 
@@ -259,8 +261,12 @@ pub const APU = struct {
             self.sweep_step = false;
             self.envelope_step = false;
 
-            const old_bit = (self.internal_clock.bits.div >> 4) & 1;
-            const new_bit = (clock.bits.div >> 4) & 1;
+            var new_clock = self.internal_clock;
+            new_clock.t_cycles += 4;
+            div_ticks += 1;
+
+            const old_bit = (self.internal_clock.bits.div >> 6) & 1;
+            const new_bit = (new_clock.bits.div >> 6) & 1;
 
             if (old_bit == 1 and new_bit == 0) {
                 self.frame_sequence += 1;
@@ -268,18 +274,23 @@ pub const APU = struct {
                 self.length_step = if (self.frame_sequence % 2 == 0) true else false;
                 self.sweep_step = if (self.frame_sequence % 4 == 0) true else false;
                 self.envelope_step = if (self.frame_sequence % 8 == 0) true else false;
+
+                log.debug("old_clock {b:0>8}", .{self.internal_clock.bits.div});
+                log.debug("new_clock {b:0>8}", .{new_clock.bits.div});
+                log.debug("div_ticks = {}", .{div_ticks});
+                div_ticks = 0;
             }
 
-            self.internal_clock = clock;
+            self.internal_clock = new_clock;
 
-            const ch1_out = self.channel_1.step(self);
+            // const ch1_out = self.channel_1.step(self);
             // const ch2_out = self.channel_2.step(self);
             // const ch3_out = self.channel_3.step(self);
-            // const ch4_out = self.channel_4.step(self);
-            // const ch1_out: f32 = 0;
+            const ch4_out = self.channel_4.step(self);
+            const ch1_out: f32 = 0;
             const ch2_out: f32 = 0;
             const ch3_out: f32 = 0;
-            const ch4_out: f32 = 0;
+            // const ch4_out: f32 = 0;
 
             const apu_sample_ch1_left = if (self.nr51.left_channel_1) ch1_out / 4 else 0;
             const apu_sample_ch2_left = if (self.nr51.left_channel_2) ch2_out / 4 else 0;
@@ -321,8 +332,8 @@ pub const APU = struct {
             // when the audio buffer is filled, we queue it to the audio device
             if (self.audio_buffer_count == SDL_SAMPLE_SIZE * 2) {
                 self.audio_buffer_count = 0;
-                // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
-                // log.debug("queued_audio_size = {}", .{queued_audio_size});
+                const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
+                log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
                     log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
@@ -733,7 +744,7 @@ const Channel1 = struct {
         // log.debug("before self.duty_pos = {}", .{self.ch1_duty_pos});
         self.ch1_timer -%= 1;
         if (self.ch1_timer == 0) {
-            self.ch1_timer = (2048 - self.ch1_frequency) * 4;
+            self.ch1_timer = (2048 - self.ch1_frequency);
             self.ch1_duty_pos = (self.ch1_duty_pos + 1) % 8;
         }
         // log.debug("after self.duty_pos = {}", .{self.ch1_duty_pos});
@@ -847,7 +858,7 @@ const Channel2 = struct {
         }
 
         const freq: u16 = @as(u16, self.nr24.period_high) << 8 | @as(u16, self.nr23.period_low);
-        const initial_freq = (2048 - freq) * 4;
+        const initial_freq = (2048 - freq);
         self.timer -%= 1;
         if (self.timer == 0) {
             self.timer = initial_freq;
@@ -954,7 +965,8 @@ const Channel3 = struct {
         }
 
         const freq: u16 = @as(u16, self.nr34.period_high) << 8 | @as(u16, self.nr33.period_low);
-        const initial_freq = (2048 - freq) * 2;
+        const initial_freq = (2048 - freq) / 2;
+        // const initial_freq = (2048 - freq);
         self.timer -%= 1;
         if (self.timer == 0) {
             self.timer = initial_freq;
@@ -1065,7 +1077,7 @@ const Channel4 = struct {
 
         self.timer -%= 1;
         if (self.timer == 0) {
-            self.timer = self.freq();
+            self.timer = self.freq() / 8;
 
             const lsfr_bit0 = self.lsfr & 1;
             const lsfr_bit1 = (self.lsfr >> 1) & 1;
@@ -1121,5 +1133,9 @@ fn sdlPanic() noreturn {
 }
 
 fn dac_volume_convert(amp: u4) f32 {
-    return (@as(f32, @floatFromInt(amp)) / 7.5) - 1.0;
+    const normalized_value = @as(f32, @floatFromInt(amp)) / 15.0; // Normalize to 0.0 - 1.0 range
+    return (normalized_value * 2.0) - 1.0; // Scale to -1.0 - 1.0 range
 }
+// fn dac_volume_convert(amp: u4) f32 {
+//     return (@as(f32, @floatFromInt(amp)) / 7.5) - 1.0;
+// }
