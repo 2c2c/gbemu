@@ -768,10 +768,9 @@ const Channel1 = struct {
             }
         }
 
-        // TODO: setup env int volume to ch1_volume during trigger event
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
             self.envelope_timer -%= 1;
-            if (self.envelope_timer == self.nr12.env_sweep_pace) {
+            if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr12.env_sweep_pace;
                 if (self.nr12.env_direction and self.volume != 0xF) {
                     self.volume += 1;
@@ -886,16 +885,7 @@ const Channel2 = struct {
             }
         }
 
-        // log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr22.env_sweep_pace });
-        // if (apu.envelope_step) {
-        //     log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr22.env_sweep_pace });
-        // }
-        // log.debug("nr22 {b:0>8}", .{@as(u8, @bitCast(self.nr22))});
-        // if (self.nr22.env_sweep_pace != 0) {
-        //     log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr22.env_sweep_pace });
-        // }
         if (apu.envelope_step and self.nr22.env_sweep_pace != 0) {
-            // log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr22.env_sweep_pace });
             self.envelope_timer -%= 1;
             if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr22.env_sweep_pace;
