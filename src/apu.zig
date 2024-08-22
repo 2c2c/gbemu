@@ -559,6 +559,7 @@ pub const APU = struct {
                     self.channel_1.shadow_frequency = self.channel_1._frequency;
                     self.channel_1.sweep_timer = if (self.channel_1.nr10.sweep_pace == 0) 8 else self.channel_1.nr10.sweep_pace;
                     self.channel_1.sweep_enable = if (self.channel_1.nr10.sweep_pace > 0 or self.channel_1.nr10.sweep_step > 0) true else false;
+                    self.channel_1.timer = (2048 - self.channel_1.frequency);
                 }
             },
             0xFF15 => {},
@@ -587,7 +588,7 @@ pub const APU = struct {
                     self.channel_2.enabled = true;
                     self.channel_2.length_timer = 64 - @as(u16, self.channel_2.nr21.sound_length);
                     self.channel_2.volume = self.channel_2.nr22.env_initial_volume;
-                    self.channel_2.timer = (2048 - freq) * 4;
+                    self.channel_2.timer = (2048 - freq);
                     self.channel_2.envelope_timer = self.channel_2.nr22.env_sweep_pace;
                 }
             },
@@ -620,7 +621,7 @@ pub const APU = struct {
                     // ?
                     self.channel_3.current_sample = 0;
                     self.channel_3.length_timer = 256 - @as(u16, self.channel_3.nr31.initial_length_timer);
-                    self.channel_3.timer = (2048 - freq) * 2;
+                    self.channel_3.timer = (2048 - freq) / 2;
                 }
             },
             0xFF20 => {
@@ -639,7 +640,7 @@ pub const APU = struct {
                 self.channel_4.nr44 = @bitCast(byte | 0b0011_1111);
                 if (self.channel_4.nr44.trigger) {
                     self.channel_4.enabled = true;
-                    self.channel_4.timer = self.channel_4.freq();
+                    self.channel_4.timer = self.channel_4.freq() / 4;
                     self.channel_4.length_timer = 64 - @as(u16, self.channel_4.nr41.initial_length_timer);
                     self.channel_4.volume = self.channel_4.nr42.env_initial_volume;
                     self.channel_4.envelope_timer = self.channel_4.nr42.env_sweep_pace;
@@ -688,7 +689,7 @@ const Channel1 = struct {
     frequency: u16,
     shadow_frequency: u16,
 
-    ch1_timer: u16,
+    timer: u16,
     envelope_timer: u16,
     length_timer: u16,
     sweep_timer: u16,
@@ -700,7 +701,7 @@ const Channel1 = struct {
     pub fn new() Channel1 {
         return Channel1{
             .enabled = false,
-            .ch1_timer = 0,
+            .timer = 0,
             .envelope_timer = 0,
             .length_timer = 0,
             .volume = 0,
@@ -745,9 +746,9 @@ const Channel1 = struct {
 
         // log.debug("enabled ch1 step", .{});
         // log.debug("before self.duty_pos = {}", .{self.ch1_duty_pos});
-        self.ch1_timer -%= 1;
-        if (self.ch1_timer == 0) {
-            self.ch1_timer = (2048 - self.frequency);
+        self.timer -%= 1;
+        if (self.timer == 0) {
+            self.timer = (2048 - self.frequency);
             self.duty_pos = (self.duty_pos + 1) % 8;
         }
         // log.debug("after self.duty_pos = {}", .{self.ch1_duty_pos});
@@ -771,7 +772,7 @@ const Channel1 = struct {
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
             self.envelope_timer -%= 1;
             if (self.envelope_timer == 0) {
-                self.envelope_timer = self.nr12.env_sweep_pace;
+                self.envelope_timer = self.nr12.env_sweep_pace / 4;
                 if (self.nr12.env_direction and self.volume != 0xF) {
                     self.volume += 1;
                 }
@@ -1071,7 +1072,7 @@ const Channel4 = struct {
 
         self.timer -%= 1;
         if (self.timer == 0) {
-            self.timer = self.freq() / 8;
+            self.timer = self.freq() / 4;
 
             const lsfr_bit0 = self.lsfr & 1;
             const lsfr_bit1 = (self.lsfr >> 1) & 1;
