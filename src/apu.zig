@@ -6,8 +6,8 @@ const log = std.log.scoped(.apu);
 
 pub var div_ticks: u64 = 0;
 pub const SDL_SAMPLE_SIZE = 2048;
-// pub const SAMPLE_RATE = 48000;
-pub const SAMPLE_RATE = 48000 * 4;
+pub const SAMPLE_RATE = 48000;
+// pub const SAMPLE_RATE = 48000 * 4;
 pub const CPU_SPEED_HZ = 4194304;
 
 pub var count: u64 = 0;
@@ -262,7 +262,7 @@ pub const APU = struct {
             self.envelope_step = false;
 
             var new_clock = self.internal_clock;
-            new_clock.t_cycles += 4;
+            new_clock.t_cycles += 1;
             if (new_clock.bits.lower_clock == 0) {
                 div_ticks += 1;
             }
