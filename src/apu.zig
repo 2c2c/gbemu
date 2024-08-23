@@ -277,9 +277,9 @@ pub const APU = struct {
                 self.sweep_step = if (self.frame_sequence % 4 == 0) true else false;
                 self.envelope_step = if (self.frame_sequence % 8 == 0) true else false;
 
-                log.debug("old_clock {b:0>8}", .{self.internal_clock.bits.div});
-                log.debug("new_clock {b:0>8}", .{new_clock.bits.div});
-                log.debug("div_ticks = {}", .{div_ticks});
+                // log.debug("old_clock {b:0>8}", .{self.internal_clock.bits.div});
+                // log.debug("new_clock {b:0>8}", .{new_clock.bits.div});
+                // log.debug("div_ticks = {}", .{div_ticks});
                 div_ticks = 0;
             }
 
@@ -334,16 +334,16 @@ pub const APU = struct {
             // when the audio buffer is filled, we queue it to the audio device
             if (self.audio_buffer_count == SDL_SAMPLE_SIZE * 2) {
                 self.audio_buffer_count = 0;
-                const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
-                log.debug("queued_audio_size = {}", .{queued_audio_size});
+                // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
+                // log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
                     // log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
                 self.sdl_total_ticks = SDL.SDL_GetTicks();
-                const ticks = self.sdl_total_ticks - prev_sdl_ticks;
-                prev_sdl_ticks = self.sdl_total_ticks;
-                log.debug("sdl_ticks = {}, ticks = {} count = {}\n ", .{ self.sdl_total_ticks, ticks, count });
+                // const ticks = self.sdl_total_ticks - prev_sdl_ticks;
+                // prev_sdl_ticks = self.sdl_total_ticks;
+                // log.debug("sdl_ticks = {}, ticks = {} count = {}\n ", .{ self.sdl_total_ticks, ticks, count });
 
                 // sample size * 2 channels * 4 bytes per float
                 const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_SAMPLE_SIZE * 8);
@@ -512,16 +512,16 @@ pub const APU = struct {
 
     pub fn write_apu_register(self: *APU, addr: u16, byte: u8) void {
         // if audio is off and addr isnt equal to waveram or nrx1 addresses we skip
-        if (!(self.nr52.audio_on or
-            addr == 0xFF26 or
-            addr >= 0xFF30 and addr <= 0xFF3F or
-            addr == 0xFF11 or
-            addr == 0xFF16 or
-            addr == 0xFF1B or
-            addr == 0xFF20))
-        {
-            return;
-        }
+        // if (!(self.nr52.audio_on or
+        //     addr == 0xFF26 or
+        //     addr >= 0xFF30 and addr <= 0xFF3F or
+        //     addr == 0xFF11 or
+        //     addr == 0xFF16 or
+        //     addr == 0xFF1B or
+        //     addr == 0xFF20))
+        // {
+        //     return;
+        // }
 
         switch (addr) {
             0xFF10 => {
@@ -770,14 +770,17 @@ const Channel1 = struct {
         }
 
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
+            log.debug("envelope_timer {}", .{self.envelope_timer});
             self.envelope_timer -%= 1;
             if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr12.env_sweep_pace;
                 if (self.nr12.env_direction and self.volume != 0xF) {
                     self.volume += 1;
+                    log.debug("volume increase {}", .{self.volume});
                 }
                 if (!self.nr12.env_direction and self.volume != 0x0) {
                     self.volume -= 1;
+                    log.debug("volume decrease {}", .{self.volume});
                 }
             }
         }
@@ -787,9 +790,8 @@ const Channel1 = struct {
             if (self.sweep_timer == 0) {
                 self.sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
 
-                // unsure if I need an enabled flag instead of using pace
                 if (self.sweep_enable and self.nr10.sweep_pace > 0) {
-                    var new_freq: u16 = self.shadow_frequency >> self.nr10.sweep_pace;
+                    var new_freq: u16 = self.shadow_frequency >> self.nr10.sweep_step;
 
                     if (self.nr10.sweep_direction) {
                         new_freq = self.shadow_frequency -% new_freq;

@@ -75,6 +75,7 @@ pub const Gameboy = struct {
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
         const prev_ticks = self.apu.sdl_total_ticks;
+        _ = prev_ticks; // autofix
         while (true) {
             const enable_joypad_interrupt = joypad.Joypad.update_joyp_keys(self);
             const joypad_interrupt_flag = ie_register.IERegister{
@@ -106,10 +107,10 @@ pub const Gameboy = struct {
             }
 
             if (frame_cycles >= cycles_per_frame) {
-                log.debug("frame_cycles {}", .{frame_cycles});
+                // log.debug("frame_cycles {}", .{frame_cycles});
                 break;
             }
         }
-        log.debug("apu sdl ticks {}", .{self.apu.sdl_total_ticks - prev_ticks});
+        // log.debug("apu sdl ticks {}", .{self.apu.sdl_total_ticks - prev_ticks});
     }
 };
