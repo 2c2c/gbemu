@@ -1,6 +1,35 @@
 const std = @import("std");
 const cpu = @import("cpu.zig");
-const SDL = @import("sdl2");
+const builtin = @import("builtin");
+const have_sdl = builtin.cpu.arch != .wasm32;
+const SDL = if (have_sdl) @import("sdl2") else struct {
+    pub const SDL_INIT_AUDIO: u32 = 0;
+    pub const AUDIO_F32SYS: u16 = 0;
+    pub const SDL_AudioDeviceID = u32;
+    pub const SDL_AudioSpec = extern struct {
+        freq: c_int,
+        format: u16,
+        channels: u8,
+        samples: u16,
+        callback: ?*const anyopaque,
+        padding: u32,
+        size: u32,
+        silence: u8,
+        userdata: ?*anyopaque,
+    };
+    pub fn SDL_Init(flags: u32) c_int { _ = flags; return 0; }
+    pub fn SDL_OpenAudioDevice(dev: ?[*:0]const u8, iscapture: c_int, desired: *SDL_AudioSpec, obtained: ?*SDL_AudioSpec, allowed_changes: c_int) SDL_AudioDeviceID {
+        _ = .{ dev, iscapture, desired, obtained, allowed_changes };
+        return 1;
+    }
+    pub fn SDL_PauseAudioDevice(dev: SDL_AudioDeviceID, pause_on: c_int) void { _ = .{ dev, pause_on }; }
+    pub fn SDL_GetAudioDeviceStatus(dev: SDL_AudioDeviceID) c_int { _ = dev; return 0; }
+    pub fn SDL_GetQueuedAudioSize(dev: SDL_AudioDeviceID) usize { _ = dev; return 0; }
+    pub fn SDL_Delay(ms: u32) void { _ = ms; }
+    pub fn SDL_GetTicks() u32 { return 0; }
+    pub fn SDL_QueueAudio(dev: SDL_AudioDeviceID, data: *const anyopaque, len: usize) c_int { _ = .{ dev, data, len }; return 0; }
+    pub fn SDL_GetError() ?[*:0]const u8 { return null; }
+};
 
 const log = std.log.scoped(.apu);
 
@@ -178,7 +207,7 @@ pub const APU = struct {
 
     pub fn new() APU {
         if (SDL.SDL_Init(SDL.SDL_INIT_AUDIO) < 0) {
-            sdlPanic();
+    if (have_sdl) sdlPanic();
         }
         // defer SDL.SDL_Quit();
 
@@ -193,17 +222,13 @@ pub const APU = struct {
             .silence = 0,
             .userdata = null,
         };
-        const audio_device = SDL.SDL_OpenAudioDevice(
-            null,
-            0,
-            &audio_spec,
-            null,
-            0,
-        );
-        log.debug("audio_device = {}", .{audio_device});
-        SDL.SDL_PauseAudioDevice(audio_device, 0);
-        const status = SDL.SDL_GetAudioDeviceStatus(audio_device);
-        log.debug("status = {}", .{status});
+        const audio_device = SDL.SDL_OpenAudioDevice(null, 0, &audio_spec, null, 0);
+        if (have_sdl) {
+            log.debug("audio_device = {}", .{audio_device});
+            SDL.SDL_PauseAudioDevice(audio_device, 0);
+            const status = SDL.SDL_GetAudioDeviceStatus(audio_device);
+            log.debug("status = {}", .{status});
+        }
 
         var apu = APU{
             .sdl_total_ticks = 0,
@@ -337,18 +362,19 @@ pub const APU = struct {
                 // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
                 // log.debug("queued_audio_size = {}", .{queued_audio_size});
                 while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
-                    // log.debug("waiting", .{});
                     SDL.SDL_Delay(1);
                 }
-                self.sdl_total_ticks = SDL.SDL_GetTicks();
+                if (have_sdl) self.sdl_total_ticks = SDL.SDL_GetTicks();
                 // const ticks = self.sdl_total_ticks - prev_sdl_ticks;
                 // prev_sdl_ticks = self.sdl_total_ticks;
                 // log.debug("sdl_ticks = {}, ticks = {} count = {}\n ", .{ self.sdl_total_ticks, ticks, count });
 
                 // sample size * 2 channels * 4 bytes per float
                 const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_SAMPLE_SIZE * 8);
-                // log.debug("audio buffer::", .{});
-                // log.debug("{any}", .{self.audio_buffer});
+                if (have_sdl) {
+                    // log.debug("audio buffer::", .{});
+                    // log.debug("{any}", .{self.audio_buffer});
+                }
                 var minf = std.math.floatMax(f32);
                 var maxf = std.math.floatMin(f32);
 
@@ -1125,8 +1151,12 @@ const Channel4 = struct {
 };
 
 fn sdlPanic() noreturn {
-    const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
-    @panic(std.mem.sliceTo(str, 0));
+    if (have_sdl) {
+        const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
+        @panic(std.mem.sliceTo(str, 0));
+    } else {
+        @panic("SDL not available (wasm build)");
+    }
 }
 
 fn dac_volume_convert(amp: u4) f32 {

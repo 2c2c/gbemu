@@ -254,7 +254,7 @@ pub const GPU = struct {
             return updated_flags;
         }
 
-        self.cycles += cycles;
+    self.cycles +%= @as(usize, @intCast(cycles));
 
         switch (self.stat.ppu_mode) {
             // Horizontal blank

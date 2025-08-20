@@ -58,6 +58,42 @@ pub const Gameboy = struct {
         };
     }
 
+    /// Alternate constructor used by WebAssembly build: initialize from an in-memory ROM slice.
+    pub fn newFromRomBytes(rom_bytes: []const u8, alloc: std.mem.Allocator) !Gameboy {
+        const mbc_ = try alloc.create(cartridge.MBC);
+        mbc_.* = try cartridge.MBC.newFromRomBytes(rom_bytes, alloc);
+
+        const gpu_ = try alloc.create(gpu.GPU);
+        gpu_.* = gpu.GPU.new();
+
+        const apu_ = try alloc.create(apu.APU);
+        apu_.* = apu.APU.new();
+
+        const joypad_ = try alloc.create(joypad.Joypad);
+        joypad_.* = joypad.Joypad.new();
+
+        const timer_ = try alloc.create(timer.Timer);
+        timer_.* = timer.Timer.new();
+        timer_.*.tac.frequency = timer.Frequency.Hz4096;
+
+        const mb = try alloc.create(memory_bus.MemoryBus);
+        mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, apu_, timer_, joypad_);
+
+        const cpu_ = try alloc.create(cpu.CPU);
+        cpu_.* = cpu.CPU.new(mb, mbc_);
+
+        return Gameboy{
+            .mbc = mbc_,
+            .cpu = cpu_,
+            .gpu = gpu_,
+            .apu = apu_,
+            .joypad = joypad_,
+            .timer = timer_,
+            .memory_bus = mb,
+            .alloc = alloc,
+        };
+    }
+
     pub fn deinit(self: *Gameboy) void {
         self.mbc.deinit();
         self.alloc.destroy(self.mbc);

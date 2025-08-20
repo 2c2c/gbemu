@@ -57,4 +57,23 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // WebAssembly (wasm32) build (headless core + JS glue)
+    // We intentionally do NOT link SDL for the wasm target. The wasm entrypoint lives in src/web.zig
+    // and exposes a small C ABI / export surface that the JS loader (web/emu.js) will use.
+    const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+    const wasm = b.addExecutable(.{
+        .name = "gbemu_wasm",
+        .root_source_file = .{ .cwd_relative = "src/web.zig" },
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    wasm.rdynamic = true;
+    // No _start symbol required; exports are called from JS.
+    wasm.entry = .disabled;
+    // Provide a define so code can detect Web build without relying solely on arch.
+    wasm.root_module.addCMacro("GBEMU_WASM", "1");
+    const install_wasm = b.addInstallArtifact(wasm, .{});
+    const wasm_step = b.step("wasm", "Build & install WebAssembly module (gbemu_wasm.wasm)");
+    wasm_step.dependOn(&install_wasm.step);
 }

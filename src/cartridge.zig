@@ -610,6 +610,27 @@ pub const MBC = struct {
         };
     }
 
+    pub fn newFromRomBytes(rom_source: []const u8, alloc: std.mem.Allocator) !MBC {
+        // Copy ROM bytes into owned allocation, mirroring new() semantics
+        const rom = try alloc.dupe(u8, rom_source);
+        const header = get_game_rom_metadata(rom);
+        const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+        return MBC{
+            .filename = &[_]u8{}, // empty filename when loaded from memory
+            .header = header,
+            .rom = rom,
+            .ram = ram,
+            .rom_bank = 1,
+            .ram_bank = 0,
+            .ram_enabled = false,
+            .banking_mode = 0,
+            .mbc_type = header.cartridge_type,
+            .rom_size = header.rom_size,
+            .ram_size = header.ram_size,
+            .alloc = alloc,
+        };
+    }
+
     // lives for entire program, no need to worry about this
     pub fn deinit(self: *MBC) void {
         self.alloc.free(self.ram);

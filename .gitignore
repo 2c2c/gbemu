@@ -4,6 +4,12 @@ zig-cache
 main
 main.o
 *gb
+.DS_Store
+# WebAssembly build artifacts / scratch outputs
+*.wasm
+*.wasm.o
+*.o
+# If you want to keep local test ROMs out of commits remove the exception; games already ignored.
 .vscode
 dump*
 EpicLog*
@@ -12,3 +18,5 @@ Blarg*
 games
 DUMP*
 emutrace*
+
+# Keep source files (e.g., web.zig) committed; patterns above only affect compiled outputs.
