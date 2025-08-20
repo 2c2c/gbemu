@@ -105,7 +105,10 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
 
         // std.debug.print("frame_cycles {} timer {} \n", .{ frame_cycles, timer.read() / std.time.ms_per_s });
 
-        _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {}", .{ frame, frame / 60 }) catch unreachable;
+        // Use precise frame timing (frame * FRAME_CYCLES / CPU_HZ)
+        const consts = @import("constants.zig");
+        const secs: f64 = (@as(f64, @floatFromInt(frame)) * @as(f64, consts.FRAME_CYCLES)) / @as(f64, consts.CPU_HZ);
+        _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {d:.2}", .{ frame, secs }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
         _ = SDL.SDL_UpdateTexture(texture, null, &gb.gpu.canvas, gpu.DRAW_WIDTH * 3);
 

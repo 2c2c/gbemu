@@ -8,21 +8,17 @@ const fileInput = document.getElementById('romfile');
 function log(msg){ logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; }
 
 async function init(){
-  // Cache-busting query param to ensure we load the freshly built wasm.
-  const resp = await fetch('../zig-out/bin/gbemu_wasm.wasm?v=' + Date.now(), { cache: 'no-store' });
+  const resp = await fetch('../zig-out/bin/gbemu_wasm.wasm');
   const bytes = await resp.arrayBuffer();
-  log('Fetched wasm bytes: '+ bytes.byteLength);
-  const inst = await WebAssembly.instantiate(bytes, { env: { } });
+  const inst = await WebAssembly.instantiate(bytes, { env: {
+    // Provide microseconds (truncate) as BigInt
+    host_now_us: () => {
+      const ms = performance.now();
+      return BigInt(Math.floor(ms * 1000));
+    },
+  }});
   wasm = inst.instance.exports;
   memory = inst.instance.exports.memory;
-  // Log exports for debugging
-  log('Exports: ' + Object.keys(wasm).join(', '));
-  if(!wasm.gb_init){
-    // Attempt to find a function whose name contains 'gb_init'
-    for(const k of Object.keys(wasm)){
-      if(/gb.?init/i.test(k) && typeof wasm[k]==='function'){ wasm.gb_init = wasm[k]; log('Mapped '+k+' -> gb_init'); break; }
-    }
-  }
   // width/height may be exported either as functions or globals depending on optimization.
   function resolveExport(val){
     if(typeof val === 'function') return val();
@@ -61,13 +57,54 @@ fileInput.addEventListener('change', async e=>{
   const data = new Uint8Array(await file.arrayBuffer());
   const ptr = alloc(data.length);
   new Uint8Array(memory.buffer, ptr, data.length).set(data);
-  if(typeof wasm.gb_init !== 'function'){ log('gb_init export not found (exports logged above)'); return; }
   const res = wasm.gb_init(ptr, data.length);
   if(res!==0){ log('gb_init failed'); return; }
+  const err = wasm.gb_last_error_code ? wasm.gb_last_error_code() : 0;
+  if(err!==0){
+    let msg = 'Unknown error';
+    if(err===1) msg = 'Unsupported MBC type (web build)';
+    log('Cartridge error: '+msg+' (code '+err+')');
+    return;
+  }
+  // Diagnostics: log cartridge metadata
+  if(wasm.gb_cart_type){
+    const type = wasm.gb_cart_type();
+    const romBytes = wasm.gb_cart_rom_size_bytes ? wasm.gb_cart_rom_size_bytes() : 0;
+    const ramBytes = wasm.gb_cart_ram_size_bytes ? wasm.gb_cart_ram_size_bytes() : 0;
+    log(`Cart type=0x${type.toString(16)} ROM=${romBytes} bytes RAM=${ramBytes} bytes`);
+    // Start periodic frame counter logging
+    if(wasm.gb_frame_count){
+      setInterval(()=>{
+        const fc = wasm.gb_frame_count();
+        log('Frames executed: '+fc + (wasm.gb_cpu_pc? ' PC=0x'+ wasm.gb_cpu_pc().toString(16):''));
+      }, 1000);
+    }
+  }
   pauseBtn.disabled = false; paused=false; startLoop();
 });
 
 pauseBtn.addEventListener('click', ()=>{ if(!paused){ cancelAnimationFrame(animationId); pauseBtn.textContent='Resume'; paused=true; } else { paused=false; pauseBtn.textContent='Pause'; startLoop(); }});
+
+// Developer keyboard shortcuts
+window.addEventListener('keydown', e=>{
+  if(!wasm) return;
+  if(e.code==='KeyP' && e.metaKey){ // Cmd+P toggle pacing
+    const enabled = pacingToggle(); e.preventDefault();
+  }
+  if(e.code==='KeyF' && e.metaKey){ // Cmd+F force one frame
+    if(wasm.gb_force_frame){ wasm.gb_force_frame(); const fbPtr = wasm.gb_frame ? wasm.gb_frame():0; if(fbPtr) drawFrame(fbPtr); }
+    e.preventDefault();
+  }
+});
+
+function pacingToggle(){
+  if(!wasm || !wasm.gb_set_pacing) return false;
+  // Query current by flipping and seeing result; store state locally.
+  pacingToggle.state = !(pacingToggle.state ?? true);
+  wasm.gb_set_pacing(pacingToggle.state ? 1:0);
+  log('Pacing ' + (pacingToggle.state? 'enabled':'disabled'));
+  return pacingToggle.state;
+}
 
 function startLoop(){ pauseBtn.textContent='Pause'; function frame(){ if(paused) return; const fbPtr = wasm.gb_frame(); if(fbPtr){ drawFrame(fbPtr); } animationId = requestAnimationFrame(frame); } frame(); startAudioPull(); }
 

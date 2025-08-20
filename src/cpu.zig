@@ -599,6 +599,12 @@ pub const CPU = struct {
     ime: IME,
     pending_t_cycles: u64,
     clock: Clock,
+    // opcode fetch logging
+    fetch_log_pcs: [256]u16,
+    fetch_log_opcodes: [256]u8,
+    fetch_log_index: u16,
+    last_opcode: u8,
+
     fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.debug("Instruction {}\n", .{instruction}) ;
         // halt bug isnt needed to pass blargg fully i think
@@ -2027,6 +2033,11 @@ pub const CPU = struct {
             self.clock.t_cycles += 4;
         } else {
             var instruction_byte = self.bus.read_byte(self.pc);
+            // debug log fetch
+            self.fetch_log_pcs[self.fetch_log_index & 0xFF] = self.pc;
+            self.fetch_log_opcodes[self.fetch_log_index & 0xFF] = instruction_byte;
+            self.fetch_log_index +%= 1;
+            self.last_opcode = instruction_byte;
             const prefixed = instruction_byte == 0xCB;
             if (prefixed) {
                 instruction_byte = self.bus.read_byte(self.pc +% 1);
@@ -2042,6 +2053,11 @@ pub const CPU = struct {
 
         return self.pending_t_cycles;
     }
+
+    pub fn debug_current_opcode(self: *CPU) u8 { return self.last_opcode; }
+    pub fn debug_fetch_log_index(self: *CPU) u16 { return self.fetch_log_index; }
+    pub fn debug_fetch_log_pcs_ptr(self: *CPU) [*]const u16 { return &self.fetch_log_pcs; }
+    pub fn debug_fetch_log_opcodes_ptr(self: *CPU) [*]const u8 { return &self.fetch_log_opcodes; }
 
     fn jump(self: *CPU, should_jump: bool) u16 {
         if (should_jump) {
@@ -2399,6 +2415,17 @@ pub const CPU = struct {
         return new_value;
     }
 
+    fn shift_left_arithmetic(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
+        const carry = value >> 7;
+        const new_value = value << 1;
+        self.registers.F = .{
+            .zero = new_value == 0,
+            .subtract = false,
+            .half_carry = false,
+            .carry = carry == 1,
+        };
+        return new_value;
+    }
     fn shift_left_arithmetic(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
         const carry = value >> 7;
         const new_value = value << 1;

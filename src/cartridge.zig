@@ -1,5 +1,12 @@
 const std = @import("std");
 const log = std.log.scoped(.mbc);
+// Minimal error tracking for web build: store last error code (0 = OK)
+pub var last_error_code: u32 = 0;
+pub fn clear_last_error() void { last_error_code = 0; }
+pub fn set_error(code: u32) void { last_error_code = code; }
+// Error codes:
+// 0 = OK
+// 1 = Unsupported MBC type
 
 pub const FULL_ROM_START = 0x0000;
 pub const FULL_ROM_END = 0x7FFF;
@@ -253,11 +260,27 @@ pub const MBC3RTCAddress = packed struct {
     rtc_register: u3,
 };
 
+// Minimal RTC representation (seconds, minutes, hours, day counter low/high)
+const RTC = struct {
+    latched: bool,
+    latch_seconds: u8,
+    latch_minutes: u8,
+    latch_hours: u8,
+    latch_day_low: u8,
+    latch_day_high: u8, // bit 0: day high, bit 6: halt, bit 7: day carry
+
+    pub fn init() RTC {
+        return .{ .latched = false, .latch_seconds = 0, .latch_minutes = 0, .latch_hours = 0, .latch_day_low = 0, .latch_day_high = 0 };
+    }
+};
+
 pub const MBC = struct {
     filename: []u8,
     header: GameBoyRomHeader,
     rom: []u8,
     ram: []u8,
+    // Minimal RTC snapshot for MBC3
+    rtc: ?RTC,
 
     rom_bank: u16,
     ram_bank: u8,
@@ -353,6 +376,11 @@ pub const MBC = struct {
         }
     }
 
+    fn rom_address_mask(self: *const MBC, full_address: usize) usize {
+        // Use modulo to support non power-of-two ROM sizes (e.g., 1.1MB variants)
+        return full_address % self.rom.len;
+    }
+
     pub fn read_rom(self: *const MBC, address: u16) u8 {
         switch (self.mbc_type) {
             MBCCartridgeType.ROM_ONLY => {
@@ -370,7 +398,7 @@ pub const MBC = struct {
                             .rom_bank = 0,
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
-                        const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
+                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(mbc1_address)))));
                         // log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
@@ -380,7 +408,7 @@ pub const MBC = struct {
                             .rom_bank = @truncate(self.rom_bank),
                             .ram_bank = @truncate(self.ram_bank),
                         };
-                        const full_address = @as(u21, @bitCast(mbc1_address)) & (self.rom.len - 1);
+                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(mbc1_address)))));
                         // log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
@@ -406,7 +434,7 @@ pub const MBC = struct {
                             .rom_bank_low = @truncate(self.rom_bank),
                             .rom_bank_high = @truncate(self.rom_bank >> 8),
                         };
-                        const full_address = @as(u23, @bitCast(mbc5_address)) & (self.rom.len - 1);
+                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u23, @bitCast(mbc5_address)))));
                         // log.debug("ram bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
                         return self.rom[full_address];
                     },
@@ -430,7 +458,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .rom_bank = @truncate(self.rom_bank),
                         };
-                        const full_address = @as(u21, @bitCast(mbc3_address)) & (self.rom.len - 1);
+                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(mbc3_address)))));
                         return self.rom[full_address];
                     },
                     else => {
@@ -438,7 +466,11 @@ pub const MBC = struct {
                     },
                 }
             },
-            else => unreachable,
+            else => {
+                // Unsupported MBC type for ROM read
+                set_error(1);
+                return 0xFF;
+            },
         }
     }
 
@@ -460,7 +492,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                         };
-                        const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
+                        const full_address = (@as(usize, @intCast(@as(u15, @bitCast(mbc1_address))))) % self.ram.len;
                         log.debug("read ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
 
                         return self.ram[full_address];
@@ -486,7 +518,7 @@ pub const MBC = struct {
                             .base = @truncate(address),
                             .ram_bank = @truncate(self.ram_bank),
                         };
-                        const full_address = @as(u17, @bitCast(mbc5_address)) & (self.ram.len - 1);
+                        const full_address = (@as(usize, @intCast(@as(u17, @bitCast(mbc5_address))))) % self.ram.len;
                         // log.debug("ram bank: {} full_addr 0x{x}\n", .{ self.ram_bank, full_address });
                         return self.ram[full_address];
                     },
@@ -511,7 +543,7 @@ pub const MBC = struct {
                                 .base = @truncate(address),
                                 .ram_bank = @truncate(self.ram_bank),
                             };
-                            const full_address = @as(u15, @bitCast(mbc3_address)) & (self.ram.len - 1);
+                            const full_address = (@as(usize, @intCast(@as(u15, @bitCast(mbc3_address))))) % self.ram.len;
                             return self.ram[full_address];
                         } else {
                             // RTC register access
@@ -524,7 +556,10 @@ pub const MBC = struct {
                     },
                 }
             },
-            else => unreachable,
+            else => {
+                set_error(1);
+                return 0xFF;
+            },
         }
     }
 
@@ -540,7 +575,7 @@ pub const MBC = struct {
                     .base = @truncate(address),
                     .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
                 };
-                const full_address = @as(u15, @bitCast(mbc1_address)) & (self.ram.len - 1);
+                    const full_address = (@as(usize, @intCast(@as(u15, @bitCast(mbc1_address))))) % self.ram.len;
                 log.debug("write ram bank: {} full_addr 0x{x:0>15}\n", .{ self.ram_bank, full_address });
                 self.ram[full_address] = value;
             },
@@ -549,7 +584,7 @@ pub const MBC = struct {
                     .base = @truncate(address),
                     .ram_bank = @truncate(self.ram_bank),
                 };
-                const full_address = @as(u17, @bitCast(mbc5_address)) & (self.ram.len - 1);
+                const full_address = (@as(usize, @intCast(@as(u17, @bitCast(mbc5_address))))) % self.ram.len;
                 self.ram[full_address] = value;
             },
             .MBC3, .MBC3_RAM, .MBC3_RAM_BATTERY, .MBC3_TIMER_BATTERY, .MBC3_TIMER_RAM_BATTERY => {
@@ -558,7 +593,7 @@ pub const MBC = struct {
                         .base = @truncate(address),
                         .ram_bank = @truncate(self.ram_bank),
                     };
-                    const full_address = @as(u15, @bitCast(mbc3_address)) & (self.ram.len - 1);
+                    const full_address = (@as(usize, @intCast(@as(u15, @bitCast(mbc3_address))))) % self.ram.len;
                     self.ram[full_address] = value;
                 } else {
                     // RTC register access
@@ -582,7 +617,8 @@ pub const MBC = struct {
         });
         const header = get_game_rom_metadata(rom);
 
-        const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+    const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+    @memset(ram, 0);
 
         log.info("cartridge type: {}, size {}, rom size: {}, rom bytes: {}, rom banks: {}, ram size: {}\n", .{
             header.cartridge_type,
@@ -598,6 +634,7 @@ pub const MBC = struct {
             .header = header,
             .rom = rom,
             .ram = ram,
+            .rtc = if (header.cartridge_type == .MBC3 or header.cartridge_type == .MBC3_RAM or header.cartridge_type == .MBC3_RAM_BATTERY or header.cartridge_type == .MBC3_TIMER_BATTERY or header.cartridge_type == .MBC3_TIMER_RAM_BATTERY) RTC.init() else null,
             .rom_bank = 1,
             .ram_bank = 0,
             .ram_enabled = false,
@@ -615,11 +652,13 @@ pub const MBC = struct {
         const rom = try alloc.dupe(u8, rom_source);
         const header = get_game_rom_metadata(rom);
         const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+        @memset(ram, 0);
         return MBC{
             .filename = &[_]u8{}, // empty filename when loaded from memory
             .header = header,
             .rom = rom,
             .ram = ram,
+            .rtc = if (header.cartridge_type == .MBC3 or header.cartridge_type == .MBC3_RAM or header.cartridge_type == .MBC3_RAM_BATTERY or header.cartridge_type == .MBC3_TIMER_BATTERY or header.cartridge_type == .MBC3_TIMER_RAM_BATTERY) RTC.init() else null,
             .rom_bank = 1,
             .ram_bank = 0,
             .ram_enabled = false,

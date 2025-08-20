@@ -1,5 +1,6 @@
 const std = @import("std");
 const cartridge = @import("cartridge.zig");
+const consts = @import("constants.zig");
 const cpu = @import("cpu.zig");
 const gpu = @import("gpu.zig");
 const apu = @import("apu.zig");
@@ -106,7 +107,8 @@ pub const Gameboy = struct {
     }
 
     pub fn frame(self: *Gameboy) void {
-        const cycles_per_frame = CPU_SPEED_HZ / 60;
+        // Use shared constant for frame cycles
+        const cycles_per_frame: u64 = consts.FRAME_CYCLES;
         var frame_cycles: u64 = 0;
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
