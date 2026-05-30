@@ -692,9 +692,9 @@ pub const GPU = struct {
                 const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
 
                 for (0..8) |x| {
-                    const draw_x = @as(usize, @intCast(object.x)) + x;
+                    const draw_x: i16 = object.x + @as(i16, @intCast(x));
                     if (draw_x >= 0 and draw_x < SCREEN_WIDTH) {
-                        const buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, draw_x) * 3;
+                        const buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, @intCast(draw_x)) * 3;
                         const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
                         const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
                         const high: u8 = @as(u8, @truncate(tile_line >> 8));
@@ -767,8 +767,11 @@ pub const GPU = struct {
         // objects are 4 bytes, select the byte and switch on which part of the object to update
         const byte = (addr - OAM_BEGIN) % 4;
         switch (byte) {
-            0 => self.objects[object_index].y = value -% 0x10,
-            1 => self.objects[object_index].x = value -% 0x08,
+            // Signed subtraction: sprites partially off the top/left have negative on-screen
+            // positions (OAM stores Y+16, X+8). Doing this in u8 wrapped -8 to 248, so the
+            // off-edge half was culled / pushed off-screen.
+            0 => self.objects[object_index].y = @as(i16, value) - 0x10,
+            1 => self.objects[object_index].x = @as(i16, value) - 0x08,
             2 => self.objects[object_index].tile_index = value,
             3 => self.objects[object_index].attributes = @bitCast(value),
             else => {},

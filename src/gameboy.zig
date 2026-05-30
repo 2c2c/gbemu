@@ -107,13 +107,15 @@ pub const Gameboy = struct {
     }
 
     pub fn frame(self: *Gameboy) void {
-        // Use shared constant for frame cycles
-        const cycles_per_frame: u64 = consts.FRAME_CYCLES;
+        // Run until the PPU finishes a visible frame (enters VBlank), so the canvas holds one
+        // complete, consistent frame when the host reads it. A fixed cycle count does not align
+        // with VBlank, so the host would display a composite of two PPU frames whose scroll
+        // (SCX/SCY) differs -> a horizontal tear partway down the screen while scrolling.
+        // Safety cap for when the LCD is off (no VBlank is generated) so we can't spin forever.
         var frame_cycles: u64 = 0;
+        const max_cycles: u64 = consts.FRAME_CYCLES * 2;
         // std.debug.print("joyp state: 0b{b:0>8}\n", .{@as(u8, @bitCast(self.bus.joypad.joyp))});
 
-        const prev_ticks = self.apu.sdl_total_ticks;
-        _ = prev_ticks; // autofix
         while (true) {
             const enable_joypad_interrupt = joypad.Joypad.update_joyp_keys(self);
             const joypad_interrupt_flag = ie_register.IERegister{
@@ -127,10 +129,12 @@ pub const Gameboy = struct {
             var cpu_cycles_spent = self.cpu.step();
             frame_cycles += cpu_cycles_spent;
 
+            var hit_vblank = false;
             while (cpu_cycles_spent > 0) : (cpu_cycles_spent -= 1) {
                 const enable_timer_flag = self.timer.step();
                 _ = self.apu.step(self.cpu.clock);
                 const gpu_interrupt_requests = self.gpu.step(1);
+                if (gpu_interrupt_requests.vblank) hit_vblank = true;
 
                 const interrupt_flags = ie_register.IERegister{
                     .enable_timer = enable_timer_flag,
@@ -144,11 +148,9 @@ pub const Gameboy = struct {
                 self.memory_bus.update_if_flags(interrupt_flags);
             }
 
-            if (frame_cycles >= cycles_per_frame) {
-                // log.debug("frame_cycles {}", .{frame_cycles});
+            if (hit_vblank or frame_cycles >= max_cycles) {
                 break;
             }
         }
-        // log.debug("apu sdl ticks {}", .{self.apu.sdl_total_ticks - prev_ticks});
     }
 };
