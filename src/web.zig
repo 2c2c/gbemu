@@ -40,6 +40,8 @@ fn allocator() std.mem.Allocator { return arena_state.allocator(); }
 fn sliceFrom(ptr: [*]u8, len: usize) []u8 { return ptr[0..len]; }
 
 export fn gb_init(rom_ptr: [*]u8, rom_len: usize) i32 {
+    // Clear any error from a previous load so gb_last_error_code() reflects this call.
+    cartridge_mod.clear_last_error();
     if (gb_opt) |_| {
         // Already initialized; destroy previous instance & arena contents
         var gb_ref = gb_opt.?;
@@ -116,21 +118,23 @@ export fn gb_input(button: u32, action: u32) void {
 export fn gb_width() u32 { return gpu.DRAW_WIDTH; }
 export fn gb_height() u32 { return gpu.DRAW_HEIGHT; }
 
-// Minimal stub for audio: expose a ring buffer of interleaved f32 L,R samples that JS can pull.
-// We reuse the existing APU buffer (SDL dependent) later; for now we expose silence until APU is abstracted.
-// Audio pull model: JS calls gb_audio_available(); if >0 then gb_audio_read to obtain pointer + frame count.
+// Audio pull model (return-value based, so JS never has to allocate wasm pointers):
+//   const frames = gb_audio_available();   // stereo frames ready
+//   if (frames > 0) { const ptr = gb_audio_ptr(); read frames*2 f32 at ptr; gb_audio_consume(); }
+// NOTE: the earlier out-param gb_audio_read() required JS to allocate scratch pointers via its
+// own bump allocator, which could alias the Zig-owned ROM/heap and corrupt emulator state.
 export fn gb_audio_available() usize {
     if (gb_opt) |*gb| return gb.apu.audio_buffer_count / 2; // stereo frames
     return 0;
 }
-export fn gb_audio_read(buffer_ptr_out: *[*]const f32, frames_out: *usize) void {
-    if (gb_opt) |*gb| {
-        buffer_ptr_out.* = &gb.apu.audio_buffer;
-        frames_out.* = gb.apu.audio_buffer_count / 2;
-        gb.apu.audio_buffer_count = 0; // reset after consumption
-    } else {
-        frames_out.* = 0;
-    }
+// Pointer to the interleaved L,R f32 sample buffer. Only valid when gb_audio_available() > 0.
+export fn gb_audio_ptr() ?[*]const f32 {
+    if (gb_opt) |*gb| return &gb.apu.audio_buffer;
+    return null;
+}
+// Mark the buffered samples as consumed (reset the producer's write index).
+export fn gb_audio_consume() void {
+    if (gb_opt) |*gb| gb.apu.audio_buffer_count = 0;
 }
 
 // Optional: expose a very lightweight performance counter for JS profiling.

@@ -7,6 +7,7 @@ pub fn set_error(code: u32) void { last_error_code = code; }
 // Error codes:
 // 0 = OK
 // 1 = Unsupported MBC type
+// 2 = ROM too small / not a valid Game Boy ROM
 
 pub const FULL_ROM_START = 0x0000;
 pub const FULL_ROM_END = 0x7FFF;
@@ -648,6 +649,13 @@ pub const MBC = struct {
     }
 
     pub fn newFromRomBytes(rom_source: []const u8, alloc: std.mem.Allocator) !MBC {
+        // Guard against truncated / non-ROM input before slicing the header (0x100..0x150).
+        // Without this, a short buffer is an out-of-bounds slice that traps the whole
+        // wasm instance instead of failing gracefully back to JS.
+        if (rom_source.len < 0x150) {
+            set_error(2);
+            return error.RomTooSmall;
+        }
         // Copy ROM bytes into owned allocation, mirroring new() semantics
         const rom = try alloc.dupe(u8, rom_source);
         const header = get_game_rom_metadata(rom);

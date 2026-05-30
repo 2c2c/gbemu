@@ -351,49 +351,49 @@ pub const APU = struct {
             count = 0;
             self.audio_buffer_downsample_count -= CPU_SPEED_HZ;
 
-            self.audio_buffer[self.audio_buffer_count] = apu_sample_left;
-            self.audio_buffer_count += 1;
-            self.audio_buffer[self.audio_buffer_count] = apu_sample_right;
-            self.audio_buffer_count += 1;
-
-            // when the audio buffer is filled, we queue it to the audio device
-            if (self.audio_buffer_count == SDL_SAMPLE_SIZE * 2) {
-                self.audio_buffer_count = 0;
-                // const queued_audio_size = SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device);
-                // log.debug("queued_audio_size = {}", .{queued_audio_size});
-                while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
-                    SDL.SDL_Delay(1);
+            if (!have_sdl) {
+                // Web build: the JS side drains this buffer on its own clock (gb_audio_consume).
+                // Append a stereo sample only if there is room; if JS briefly falls behind, drop
+                // new samples rather than wrap and overwrite unconsumed ones (which corrupts
+                // playback / causes static). No mid-stream reset here — only the consumer resets.
+                if (self.audio_buffer_count + 2 <= SDL_SAMPLE_SIZE * 2) {
+                    self.audio_buffer[self.audio_buffer_count] = apu_sample_left;
+                    self.audio_buffer[self.audio_buffer_count + 1] = apu_sample_right;
+                    self.audio_buffer_count += 2;
                 }
-                if (have_sdl) self.sdl_total_ticks = SDL.SDL_GetTicks();
-                // const ticks = self.sdl_total_ticks - prev_sdl_ticks;
-                // prev_sdl_ticks = self.sdl_total_ticks;
-                // log.debug("sdl_ticks = {}, ticks = {} count = {}\n ", .{ self.sdl_total_ticks, ticks, count });
+            } else {
+                self.audio_buffer[self.audio_buffer_count] = apu_sample_left;
+                self.audio_buffer_count += 1;
+                self.audio_buffer[self.audio_buffer_count] = apu_sample_right;
+                self.audio_buffer_count += 1;
 
-                // sample size * 2 channels * 4 bytes per float
-                const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_SAMPLE_SIZE * 8);
-                if (have_sdl) {
-                    // log.debug("audio buffer::", .{});
-                    // log.debug("{any}", .{self.audio_buffer});
-                }
-                var minf = std.math.floatMax(f32);
-                var maxf = std.math.floatMin(f32);
+                // when the audio buffer is filled, we queue it to the audio device
+                if (self.audio_buffer_count == SDL_SAMPLE_SIZE * 2) {
+                    self.audio_buffer_count = 0;
+                    while (SDL.SDL_GetQueuedAudioSize(self.sdl_audio_device) > SDL_SAMPLE_SIZE * 8) {
+                        SDL.SDL_Delay(1);
+                    }
+                    if (have_sdl) self.sdl_total_ticks = SDL.SDL_GetTicks();
 
-                for (self.audio_buffer) |sample| {
-                    minf = @min(minf, sample);
-                    maxf = @max(maxf, sample);
-                }
+                    // sample size * 2 channels * 4 bytes per float
+                    const res = SDL.SDL_QueueAudio(self.sdl_audio_device, &self.audio_buffer, SDL_SAMPLE_SIZE * 8);
+                    var minf = std.math.floatMax(f32);
+                    var maxf = std.math.floatMin(f32);
 
-                // clamp check
-                if (minf < -1 or maxf > 1) {
-                    log.debug("min = {}, max = {}", .{ minf, maxf });
-                }
-                // log.debug("min = {}, max = {}", .{ minf, maxf });
-                // log.debug("device_id = {}", .{self.sdl_audio_device});
+                    for (self.audio_buffer) |sample| {
+                        minf = @min(minf, sample);
+                        maxf = @max(maxf, sample);
+                    }
 
-                if (res < 0) {
-                    sdlPanic();
+                    // clamp check
+                    if (minf < -1 or maxf > 1) {
+                        log.debug("min = {}, max = {}", .{ minf, maxf });
+                    }
+
+                    if (res < 0) {
+                        sdlPanic();
+                    }
                 }
-                // log.debug("res = {}", .{res});
             }
         }
 
@@ -789,7 +789,7 @@ const Channel1 = struct {
         // });
 
         if (apu.length_step and self.nr14.length_enable) {
-            self.length_timer -%= 1;
+            if (self.length_timer > 0) self.length_timer -= 1;
             if (self.length_timer == 0) {
                 self.enabled = false;
             }
@@ -797,7 +797,7 @@ const Channel1 = struct {
 
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
             log.debug("envelope_timer {}", .{self.envelope_timer});
-            self.envelope_timer -%= 1;
+            if (self.envelope_timer > 0) self.envelope_timer -= 1;
             if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr12.env_sweep_pace;
                 if (self.nr12.env_direction and self.volume != 0xF) {
@@ -812,7 +812,7 @@ const Channel1 = struct {
         }
 
         if (apu.sweep_step) {
-            self.sweep_timer -%= 1;
+            if (self.sweep_timer > 0) self.sweep_timer -= 1;
             if (self.sweep_timer == 0) {
                 self.sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
 
@@ -908,14 +908,14 @@ const Channel2 = struct {
         // });
 
         if (apu.length_step and self.nr24.length_enable) {
-            self.length_timer -%= 1;
+            if (self.length_timer > 0) self.length_timer -= 1;
             if (self.length_timer == 0) {
                 self.enabled = false;
             }
         }
 
         if (apu.envelope_step and self.nr22.env_sweep_pace != 0) {
-            self.envelope_timer -%= 1;
+            if (self.envelope_timer > 0) self.envelope_timer -= 1;
             if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr22.env_sweep_pace;
                 if (self.nr22.env_direction and self.volume != 0xF) {
@@ -1018,7 +1018,7 @@ const Channel3 = struct {
         // });
 
         if (apu.length_step and self.nr34.length_enable) {
-            self.length_timer -%= 1;
+            if (self.length_timer > 0) self.length_timer -= 1;
             if (self.length_timer == 0) {
                 self.enabled = false;
             }
@@ -1125,7 +1125,7 @@ const Channel4 = struct {
         // log.debug("amp = {}", .{amp});
 
         if (apu.length_step and self.nr44.length_enable) {
-            self.length_timer -%= 1;
+            if (self.length_timer > 0) self.length_timer -= 1;
             if (self.length_timer == 0) {
                 self.enabled = false;
             }
@@ -1133,7 +1133,7 @@ const Channel4 = struct {
 
         if (apu.envelope_step and self.nr42.env_sweep_pace != 0) {
             // log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr42.env_sweep_pace });
-            self.envelope_timer -%= 1;
+            if (self.envelope_timer > 0) self.envelope_timer -= 1;
             if (self.envelope_timer == 0) {
                 self.envelope_timer = self.nr42.env_sweep_pace;
                 if (self.nr42.env_direction and self.volume != 0xF) {

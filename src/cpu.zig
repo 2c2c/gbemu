@@ -477,17 +477,10 @@ const Instruction = union(enum) {
             0xFB => return Instruction.EI, // Enable interrupts
             0xFE => return Instruction{ .CP = ArithmeticTarget.D8 },
             0xFF => return Instruction{ .RST = RstLocation.Rst38 },
-            0xD3 => unreachable,
-            0xDB => unreachable,
-            0xDD => unreachable,
-            0xE3 => unreachable,
-            0xE4 => unreachable,
-            0xEB => unreachable,
-            0xEC => unreachable,
-            0xED => unreachable,
-            0xF4 => unreachable,
-            0xFC => unreachable,
-            0xFD => unreachable,
+            // Undefined opcodes (hard-lock the CPU on real hardware). Return null so step()
+            // panics on them in both Debug and Release, instead of `unreachable` which only
+            // traps in Debug and is undefined behavior in Release.
+            0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return null,
         };
         return inst;
     }
@@ -2046,7 +2039,9 @@ pub const CPU = struct {
             if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
                 break :blk self.execute(instruction);
             } else {
-                std.debug.panic("Unknown instruction for 0x{s}{x}\n", .{ if (prefixed) "cb" else "", instruction_byte });
+                // Decode returned null only for undefined opcodes (the prefixed CB table is
+                // complete). Real hardware hard-locks here; we panic in both Debug and Release.
+                std.debug.panic("Illegal/undefined opcode 0x{x} at PC 0x{x}\n", .{ instruction_byte, self.pc });
             }
         }
         self.pending_t_cycles = self.clock.t_cycles - current_cycles;
@@ -2426,17 +2421,6 @@ pub const CPU = struct {
         };
         return new_value;
     }
-    fn shift_left_arithmetic(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
-        const carry = value >> 7;
-        const new_value = value << 1;
-        self.registers.F = .{
-            .zero = new_value == 0,
-            .subtract = false,
-            .half_carry = false,
-            .carry = carry == 1,
-        };
-        return new_value;
-    }
 
     fn shift_right_arithmetic(self: *CPU, value: u8, _: PrefixExtendedArgs) u8 {
         const carry = value & 1;
@@ -2665,6 +2649,10 @@ pub const CPU = struct {
             .ime = IME.Disabled,
             .pending_t_cycles = 0,
             .clock = .{ .t_cycles = 0 },
+            .fetch_log_pcs = [_]u16{0} ** 256,
+            .fetch_log_opcodes = [_]u8{0} ** 256,
+            .fetch_log_index = 0,
+            .last_opcode = 0,
         };
         return cpu;
     }

@@ -62,11 +62,16 @@ pub fn build(b: *std.Build) void {
     // We intentionally do NOT link SDL for the wasm target. The wasm entrypoint lives in src/web.zig
     // and exposes a small C ABI / export surface that the JS loader (web/emu.js) will use.
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+    // Default the wasm module to ReleaseFast. In Debug, safety checks compile to
+    // @trap and panic/log are no-ops (see src/web.zig), so the first real ROM aborts
+    // with an opaque `unreachable` and a dead instance. Honor an explicit non-Debug
+    // -Doptimize (e.g. ReleaseSmall) if the user passes one.
+    const wasm_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseFast else optimize;
     const wasm = b.addExecutable(.{
         .name = "gbemu_wasm",
         .root_source_file = .{ .cwd_relative = "src/web.zig" },
         .target = wasm_target,
-        .optimize = optimize,
+        .optimize = wasm_optimize,
     });
     wasm.rdynamic = true;
     // No _start symbol required; exports are called from JS.

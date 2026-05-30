@@ -58,12 +58,12 @@ fileInput.addEventListener('change', async e=>{
   const ptr = alloc(data.length);
   new Uint8Array(memory.buffer, ptr, data.length).set(data);
   const res = wasm.gb_init(ptr, data.length);
-  if(res!==0){ log('gb_init failed'); return; }
   const err = wasm.gb_last_error_code ? wasm.gb_last_error_code() : 0;
-  if(err!==0){
+  if(res!==0 || err!==0){
     let msg = 'Unknown error';
     if(err===1) msg = 'Unsupported MBC type (web build)';
-    log('Cartridge error: '+msg+' (code '+err+')');
+    else if(err===2) msg = 'ROM too small / not a valid Game Boy ROM';
+    log('gb_init failed: '+msg+' (code '+err+')');
     return;
   }
   // Diagnostics: log cartridge metadata
@@ -75,6 +75,7 @@ fileInput.addEventListener('change', async e=>{
     // Start periodic frame counter logging
     if(wasm.gb_frame_count){
       setInterval(()=>{
+        if(paused) return; // stop appending while paused so the log can be copied
         const fc = wasm.gb_frame_count();
         log('Frames executed: '+fc + (wasm.gb_cpu_pc? ' PC=0x'+ wasm.gb_cpu_pc().toString(16):''));
       }, 1000);
@@ -118,24 +119,30 @@ function drawFrame(fbPtr){
 }
 
 // Audio pulling
-let audioCtx; let audioInterval=null;
+let audioCtx; let audioInterval=null; let nextAudioTime=0;
+const AUDIO_LEAD = 0.05; // seconds of scheduling lead to absorb timer jitter
 function startAudioPull(){
   if(audioInterval) return;
   audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)({sampleRate:48000});
   audioInterval = setInterval(()=>{
     if(!wasm) return;
-    const frames = wasm.gb_audio_available();
-    if(frames===0) return;
-    const ptrOut = alloc(4); const framesOut = alloc(4);
-    wasm.gb_audio_read(ptrOut, framesOut);
-    const u32 = new Uint32Array(memory.buffer);
-    const audioPtr = u32[ptrOut/4];
-    const frameCount = u32[framesOut/4];
+    const frameCount = wasm.gb_audio_available();
     if(frameCount===0) return;
+    const audioPtr = wasm.gb_audio_ptr();
+    if(!audioPtr) return;
     const samples = new Float32Array(memory.buffer, audioPtr, frameCount*2);
     const buf = audioCtx.createBuffer(2, frameCount, 48000);
-    for(let i=0;i<frameCount;i++){ buf.getChannelData(0)[i]=samples[i*2]; buf.getChannelData(1)[i]=samples[i*2+1]; }
-    const src = audioCtx.createBufferSource(); src.buffer = buf; src.connect(audioCtx.destination); src.start();
+    const L = buf.getChannelData(0), R = buf.getChannelData(1);
+    for(let i=0;i<frameCount;i++){ L[i]=samples[i*2]; R[i]=samples[i*2+1]; }
+    wasm.gb_audio_consume();
+    // Schedule each chunk to start exactly where the previous one ended, so successive
+    // buffers play gaplessly (firing them "now" causes ~60 clicks/sec = static). If we
+    // fall behind real time (underrun), resync with a small lead.
+    const now = audioCtx.currentTime;
+    if(nextAudioTime < now) nextAudioTime = now + AUDIO_LEAD;
+    const src = audioCtx.createBufferSource(); src.buffer = buf; src.connect(audioCtx.destination);
+    src.start(nextAudioTime);
+    nextAudioTime += buf.duration;
   }, 16);
 }
 
