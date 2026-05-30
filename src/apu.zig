@@ -556,12 +556,18 @@ pub const APU = struct {
             },
             0xFF11 => {
                 // log.debug("write nr11 {b:0>8}\n", .{byte});
-                self.channel_1.nr11 = @bitCast(byte | 0b0011_1111);
+                // Store the written value as-is. The 0b0011_1111 mask is a READ-side quirk
+                // (sound_length bits read back as 1); applying it on WRITE forced sound_length
+                // to 63, so any length-enabled note died after one tick (silent SFX, e.g. SML stomp).
+                self.channel_1.nr11 = @bitCast(byte);
             },
             0xFF12 => {
                 // log.debug("write nr12 {b:0>8}\n", .{byte});
                 self.channel_1.nr12 = @bitCast(byte);
-                if (self.channel_1.nr12.env_initial_volume == 0xF and self.channel_1.nr12.env_direction) {
+                // DAC is off when NR12's upper 5 bits are 0 (volume 0, direction down); that
+                // disables the channel. Games use this to silence a note (e.g. SML ends its
+                // jump sweep with NR12=0) — without it the channel rings until re-triggered.
+                if (self.channel_1.nr12.env_initial_volume == 0 and !self.channel_1.nr12.env_direction) {
                     self.channel_1.enabled = false;
                 }
             },
@@ -569,11 +575,17 @@ pub const APU = struct {
             0xFF13 => {
                 // log.debug("write nr13 {b:0>8}\n", .{byte});
                 self.channel_1.nr13 = @bitCast(byte);
+                // Keep the live playing frequency in sync with the register (low 8 bits) so
+                // mid-note frequency writes take effect without a re-trigger. SML drives its
+                // SFX pitch sweeps (jump, stomp) this way rather than via the hardware sweep.
+                self.channel_1.frequency = (self.channel_1.frequency & 0x0700) | @as(u16, byte);
             },
             0xFF14 => {
                 // log.debug("write nr14 {b:0>8}\n", .{byte});
                 //   sweep_period                = (NR10 >> 4) & 0x07;
                 self.channel_1.nr14 = @bitCast(byte | 0b0011_1000);
+                // Sync live frequency high bits (see NR13 note above).
+                self.channel_1.frequency = (self.channel_1.frequency & 0x00FF) | (@as(u16, self.channel_1.nr14.period_high) << 8);
                 if (self.channel_1.nr14.trigger) {
                     // log.info("TRIGGER write nr14 {b:0>8}\n", .{byte});
                     self.channel_1.enabled = true;
@@ -590,12 +602,14 @@ pub const APU = struct {
             },
             0xFF15 => {},
             0xFF16 => {
-                self.channel_2.nr21 = @bitCast(byte | 0b0011_1111);
+                // See NR11 note: don't OR the length bits on write (read-only quirk).
+                self.channel_2.nr21 = @bitCast(byte);
             },
             0xFF17 => {
                 // log.info("write nr22 {b:0>8}\n", .{byte});
                 self.channel_2.nr22 = @bitCast(byte);
-                if (self.channel_2.nr22.env_initial_volume == 0xF and self.channel_2.nr22.env_direction) {
+                // DAC off (upper 5 bits of NR22 zero) disables the channel. See NR12 note.
+                if (self.channel_2.nr22.env_initial_volume == 0 and !self.channel_2.nr22.env_direction) {
                     self.channel_2.enabled = false;
                 }
             },
@@ -651,11 +665,13 @@ pub const APU = struct {
                 }
             },
             0xFF20 => {
-                self.channel_4.nr41 = @bitCast(byte | 0b0011_1111);
+                // See NR11 note: don't OR the length bits on write (read-only quirk).
+                self.channel_4.nr41 = @bitCast(byte);
             },
             0xFF21 => {
                 self.channel_4.nr42 = @bitCast(byte);
-                if (self.channel_4.nr42.env_initial_volume == 0xF and self.channel_4.nr42.env_direction) {
+                // DAC off (upper 5 bits of NR42 zero) disables the channel. See NR12 note.
+                if (self.channel_4.nr42.env_initial_volume == 0 and !self.channel_4.nr42.env_direction) {
                     self.channel_4.enabled = false;
                 }
             },
