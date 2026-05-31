@@ -1,4 +1,6 @@
-// passes all of mooneye besides div_write and rapid_toggle. seems like div_write should work, dunno
+// Passes all 13 mooneye acceptance/timer tests. (div_write/rapid_toggle were
+// fixed by re-evaluating the real timer mux bit on TAC writes in memory_bus.zig;
+// tima/tma_write_reloading by counting the reload delay per T-cycle in step().)
 const std = @import("std");
 const cpu = @import("cpu.zig");
 
@@ -82,7 +84,11 @@ pub const Timer = struct {
     pub fn step(self: *Timer) bool {
         self.tima_reload_cycle = false;
         if (self.tima_cycles_till_interrupt > 0) {
-            self.tima_cycles_till_interrupt -= 4;
+            // step() runs once per T-cycle, so count down per T-cycle. The hardware
+            // delays the TIMA=TMA reload + interrupt by 4 T-cycles after overflow;
+            // decrementing by 4 collapsed that window to 1 cycle and broke the
+            // tima/tma_write_reloading quirks.
+            self.tima_cycles_till_interrupt -= 1;
             if (self.tima_cycles_till_interrupt == 0) {
                 // interrupt
                 self.tima = self.tma;

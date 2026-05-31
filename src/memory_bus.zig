@@ -31,6 +31,12 @@ pub const MemoryBus = struct {
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
 
+    // Serial output capture — side channel for headless test harnesses (blargg
+    // writes its pass/fail text to serial). Does not affect emulation state.
+    serial_sb: u8,
+    serial_out: [1024]u8,
+    serial_len: usize,
+
     pub fn new(mbc_: *MBC, gpu_: *GPU, apu_: *APU, timer_: *timer.Timer, joypad_: *joypad.Joypad) MemoryBus {
         var memory: [0x10000]u8 = @splat(0);
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
@@ -46,6 +52,10 @@ pub const MemoryBus = struct {
 
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
+
+            .serial_sb = 0,
+            .serial_out = @splat(0),
+            .serial_len = 0,
         };
     }
 
@@ -184,7 +194,7 @@ pub const MemoryBus = struct {
                     // https://www.reddit.com/r/EmuDev/comments/5bgcw1/gb_lcd_disableenable_behavior/
                     break :blk 0b1100_0000 | @as(u8, (@bitCast(self.joypad.joyp)));
                 },
-                0xFF01 => break :blk 0x00,
+                0xFF01 => break :blk self.serial_sb,
                 0xFF02 => break :blk 0x00,
                 0xFF04 => break :blk self.timer.internal_clock.bits.div,
                 0xFF05 => break :blk self.timer.tima,
@@ -219,10 +229,15 @@ pub const MemoryBus = struct {
                     // possibly need to not overwrite the lower 4 bits
                     self.joypad.joyp.select = @enumFromInt((byte >> 4) & 0b11);
                 },
-                0xFF01 => break :blk,
-                0xFF02 => break :blk,
-                // 0xFF01 => log.debug("{c}", .{byte}),
-                // 0xFF02 => log.debug("{c}", .{byte}),
+                // Serial: capture output for headless test harnesses (blargg writes
+                // its pass/fail text here). Side channel only — emulation unchanged.
+                0xFF01 => self.serial_sb = byte,
+                0xFF02 => {
+                    if ((byte & 0x80) != 0 and self.serial_len < self.serial_out.len) {
+                        self.serial_out[self.serial_len] = self.serial_sb;
+                        self.serial_len += 1;
+                    }
+                },
                 0xFF04 => {
                     self.timer.clock_update(@bitCast(@as(u64, 0)));
                     log.debug("div reset 0b{b:0>8}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
@@ -244,15 +259,15 @@ pub const MemoryBus = struct {
                     log.debug("tma {}\n", .{self.timer.tima});
                 },
                 0xFF07 => {
-                    const new_tac: timer.Tac = @bitCast(byte);
-                    const new_enabled_bit = @intFromBool(new_tac.enabled);
-                    self.timer.check_falling_edge(self.timer.prev_bit, new_enabled_bit);
-
-                    self.timer.tac = new_tac;
-                    log.debug("tac {}\n", .{self.timer.tima});
-
-                    self.timer.prev_bit = new_enabled_bit;
-                    // log.debug("self.timer.tac 0b{b:0>8}\n", .{@as(u8, @bitCast(self.timer.tac))});
+                    // Writing TAC can glitch the timer: the multiplexer output is
+                    // (selected DIV bit) AND (enable), not just the enable bit. Set
+                    // the new TAC, then re-evaluate that output against the *unchanged*
+                    // internal counter via clock_update so a 1->0 transition produces
+                    // the hardware's spurious TIMA increment (and prev_bit is left
+                    // holding the real bit). The old code used only the enable bit,
+                    // which broke rapid_toggle and corrupted prev_bit for div_write.
+                    self.timer.tac = @bitCast(byte);
+                    self.timer.clock_update(self.timer.internal_clock);
                 },
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);
