@@ -758,13 +758,18 @@ pub const APU = struct {
                 self.nr51 = @bitCast(byte);
             },
             0xFF26 => {
-                const enabled = (byte & 0x80) == 1;
+                // NR52 bit 7 = master audio enable. (Was `& 0x80 == 1`, which is always false:
+                // `byte & 0x80` is 0 or 0x80, never 1 — so enabling the APU wrongly hit the
+                // reset/off path. Bits 0-3 are read-only channel status.)
+                const enabled = (byte & 0x80) != 0;
                 if (!enabled and self.nr52.audio_on) {
+                    // Power off: clear all sound registers (NR10-NR51) and disable.
                     for (0xFF10..0xFF26) |reset_addr| {
                         self.write_apu_register(@truncate(reset_addr), 0);
                     }
-                    // self.nr52.audio_on = false;
-                } else {
+                    self.nr52.audio_on = false;
+                } else if (enabled and !self.nr52.audio_on) {
+                    // Power on (off -> on transition): reset the frame sequencer.
                     self.nr52.audio_on = true;
                     self.frame_sequence = 0;
                     self.channel_1.duty_pos = 0;
