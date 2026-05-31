@@ -39,6 +39,37 @@ pub const SAMPLE_RATE = 48000;
 // pub const SAMPLE_RATE = 48000 * 4;
 pub const CPU_SPEED_HZ = 4194304;
 
+// Anti-aliasing FIR low-pass used when decimating the CPU-rate (4.19 MHz) audio down to
+// SAMPLE_RATE. A windowed-sinc kernel (Blackman window) gives a flat passband and a deep
+// stopband, so high-frequency content (e.g. high-rate noise) is band-limited instead of
+// aliasing into audible static. FIR_TAPS is a power of two so the ring buffer index masks.
+const FIR_TAPS: usize = 2048;
+const FIR_CUTOFF_HZ: f64 = 22000.0;
+var fir_kernel: [FIR_TAPS]f32 = [_]f32{0} ** FIR_TAPS;
+var fir_kernel_ready: bool = false;
+fn build_fir_kernel() void {
+    if (fir_kernel_ready) return;
+    const pi = std.math.pi;
+    const fc: f64 = FIR_CUTOFF_HZ / @as(f64, CPU_SPEED_HZ); // cutoff normalized to input rate
+    const m: f64 = @floatFromInt(FIR_TAPS - 1);
+    var sum: f64 = 0;
+    var i: usize = 0;
+    while (i < FIR_TAPS) : (i += 1) {
+        const n: f64 = @floatFromInt(i);
+        const x: f64 = n - m / 2.0;
+        var h: f64 = if (x == 0) 2.0 * fc else std.math.sin(2.0 * pi * fc * x) / (pi * x);
+        const w: f64 = 0.42 - 0.5 * std.math.cos(2.0 * pi * n / m) + 0.08 * std.math.cos(4.0 * pi * n / m);
+        h *= w;
+        fir_kernel[i] = @floatCast(h);
+        sum += h;
+    }
+    i = 0;
+    while (i < FIR_TAPS) : (i += 1) {
+        fir_kernel[i] = @floatCast(@as(f64, fir_kernel[i]) / sum); // unity DC gain
+    }
+    fir_kernel_ready = true;
+}
+
 pub var count: u64 = 0;
 var prev_sdl_ticks: u64 = 0;
 
@@ -190,12 +221,11 @@ pub const APU = struct {
     audio_buffer_downsample_count: usize,
     audio_buffer_count: usize,
     audio_buffer: [SDL_SAMPLE_SIZE * 2]f32,
-    // Box-filter decimation: average every CPU-cycle sample over the ~87 cycles between output
-    // samples instead of point-sampling one. This band-limits the signal so high-frequency
-    // content (e.g. high-rate noise) doesn't alias into audible static at the 48 kHz output rate.
-    accum_left: f32,
-    accum_right: f32,
-    accum_n: u32,
+    // FIR anti-aliasing decimator state: ring buffer of recent per-cycle samples, low-pass
+    // filtered with fir_kernel before decimating to the 48 kHz output (see build_fir_kernel).
+    fir_buf_l: [FIR_TAPS]f32,
+    fir_buf_r: [FIR_TAPS]f32,
+    fir_pos: usize,
 
     length_step: bool,
     envelope_step: bool,
@@ -245,9 +275,9 @@ pub const APU = struct {
             .audio_buffer_downsample_count = 0,
             .audio_buffer_count = 0,
             .audio_buffer = [_]f32{0} ** (SDL_SAMPLE_SIZE * 2),
-            .accum_left = 0,
-            .accum_right = 0,
-            .accum_n = 0,
+            .fir_buf_l = [_]f32{0} ** FIR_TAPS,
+            .fir_buf_r = [_]f32{0} ** FIR_TAPS,
+            .fir_pos = 0,
             .nr52 = NR52{
                 .channel_1 = false,
                 .channel_2 = false,
@@ -283,6 +313,7 @@ pub const APU = struct {
             .channel_4 = Channel4.new(),
         };
 
+        build_fir_kernel();
         apu.reset_registers();
         return apu;
     }
@@ -355,11 +386,10 @@ pub const APU = struct {
             // }
         }
 
-        // Accumulate every cycle for box-filter decimation (anti-aliasing). The emitted output
-        // sample is the average over all cycles since the last one, not a single point sample.
-        self.accum_left += apu_sample_left;
-        self.accum_right += apu_sample_right;
-        self.accum_n += 1;
+        // Push the current per-cycle sample into the FIR ring buffer (anti-aliasing decimator).
+        self.fir_buf_l[self.fir_pos] = apu_sample_left;
+        self.fir_buf_r[self.fir_pos] = apu_sample_right;
+        self.fir_pos = (self.fir_pos + 1) & (FIR_TAPS - 1);
 
         count += 1;
         self.audio_buffer_downsample_count += SAMPLE_RATE;
@@ -368,12 +398,17 @@ pub const APU = struct {
             count = 0;
             self.audio_buffer_downsample_count -= CPU_SPEED_HZ;
 
-            const inv: f32 = 1.0 / @as(f32, @floatFromInt(self.accum_n));
-            const out_left = self.accum_left * inv;
-            const out_right = self.accum_right * inv;
-            self.accum_left = 0;
-            self.accum_right = 0;
-            self.accum_n = 0;
+            // Low-pass the last FIR_TAPS samples (newest-to-oldest) with the windowed-sinc kernel.
+            var out_left: f32 = 0;
+            var out_right: f32 = 0;
+            var idx: usize = (self.fir_pos + FIR_TAPS - 1) & (FIR_TAPS - 1);
+            var j: usize = 0;
+            while (j < FIR_TAPS) : (j += 1) {
+                const kf = fir_kernel[j];
+                out_left += kf * self.fir_buf_l[idx];
+                out_right += kf * self.fir_buf_r[idx];
+                idx = (idx + FIR_TAPS - 1) & (FIR_TAPS - 1);
+            }
 
             if (!have_sdl) {
                 // Web build: the JS side drains this buffer on its own clock (gb_audio_consume).
@@ -493,9 +528,9 @@ pub const APU = struct {
 
         self.audio_buffer_count = 0;
         self.audio_buffer_downsample_count = 0;
-        self.accum_left = 0;
-        self.accum_right = 0;
-        self.accum_n = 0;
+        self.fir_buf_l = std.mem.zeroes([FIR_TAPS]f32);
+        self.fir_buf_r = std.mem.zeroes([FIR_TAPS]f32);
+        self.fir_pos = 0;
 
         self.audio_buffer = std.mem.zeroes([SDL_SAMPLE_SIZE * 2]f32);
 
