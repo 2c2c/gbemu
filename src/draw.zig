@@ -62,10 +62,10 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
             switch (ev.type) {
                 SDL.SDL_QUIT => break :mainLoop,
                 SDL.SDL_MOUSEBUTTONUP => {},
-                SDL.SDL_KEYDOWN => {
+                // KEYDOWN and KEYUP share the same handling; is_pressed distinguishes them.
+                SDL.SDL_KEYDOWN, SDL.SDL_KEYUP => {
                     const key = ev.key.keysym.sym;
                     const is_pressed = ev.type == SDL.SDL_KEYDOWN;
-                    // std.debug.print("Key down event: {d} pressed\n", .{key});
                     switch (key) {
                         SDL.SDLK_w => gb.joypad.dpad.pressed.UP = is_pressed,
                         SDL.SDLK_a => gb.joypad.dpad.pressed.LEFT = is_pressed,
@@ -75,23 +75,12 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
                         SDL.SDLK_k => gb.joypad.button.pressed.B = is_pressed,
                         SDL.SDLK_RETURN => gb.joypad.button.pressed.START = is_pressed,
                         SDL.SDLK_QUOTE => gb.joypad.button.pressed.SELECT = is_pressed,
-                        SDL.SDLK_ESCAPE => break :mainLoop,
-                        else => {},
-                    }
-                },
-                SDL.SDL_KEYUP => {
-                    const key = ev.key.keysym.sym;
-                    const is_pressed = ev.type == SDL.SDL_KEYDOWN;
-                    // std.debug.print("Key up event: {d} released\n", .{key});
-                    switch (key) {
-                        SDL.SDLK_w => gb.joypad.dpad.pressed.UP = is_pressed,
-                        SDL.SDLK_a => gb.joypad.dpad.pressed.LEFT = is_pressed,
-                        SDL.SDLK_s => gb.joypad.dpad.pressed.DOWN = is_pressed,
-                        SDL.SDLK_d => gb.joypad.dpad.pressed.RIGHT = is_pressed,
-                        SDL.SDLK_j => gb.joypad.button.pressed.A = is_pressed,
-                        SDL.SDLK_k => gb.joypad.button.pressed.B = is_pressed,
-                        SDL.SDLK_RETURN => gb.joypad.button.pressed.START = is_pressed,
-                        SDL.SDLK_QUOTE => gb.joypad.button.pressed.SELECT = is_pressed,
+                        // M: toggle mute (on key-down only; ignore key auto-repeat).
+                        SDL.SDLK_m => {
+                            if (is_pressed and ev.key.repeat == 0) gb.apu.mute = !gb.apu.mute;
+                        },
+                        // Tab: hold for 2x fast-forward (release returns to normal speed).
+                        SDL.SDLK_TAB => gb.apu.speed = if (is_pressed) 2 else 1,
                         SDL.SDLK_ESCAPE => break :mainLoop,
                         else => {},
                     }
@@ -108,7 +97,12 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         // Use precise frame timing (frame * FRAME_CYCLES / CPU_HZ)
         const consts = @import("constants.zig");
         const secs: f64 = (@as(f64, @floatFromInt(frame)) * @as(f64, consts.FRAME_CYCLES)) / @as(f64, consts.CPU_HZ);
-        _ = std.fmt.bufPrintZ(title, "Frame {} | Seconds {d:.2}", .{ frame, secs }) catch unreachable;
+        _ = std.fmt.bufPrintZ(title, "GBEMU | Frame {} | {d:.2}s{s}{s}", .{
+            frame,
+            secs,
+            if (gb.apu.speed > 1) " | 2x" else "",
+            if (gb.apu.mute) " | MUTE" else "",
+        }) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
         _ = SDL.SDL_UpdateTexture(texture, null, &gb.gpu.canvas, gpu.DRAW_WIDTH * 3);
 

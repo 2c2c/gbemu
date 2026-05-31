@@ -226,6 +226,12 @@ pub const APU = struct {
     fir_buf_l: [FIR_TAPS]f32,
     fir_buf_r: [FIR_TAPS]f32,
     fir_pos: usize,
+    // Native UI toggles. mute zeros the output (pacing still works because silence is still
+    // queued). speed is the emulation multiplier (2 = fast-forward): we emit 1/speed as many
+    // output samples per emulated second, so the audio-queue backpressure — which drains at a
+    // fixed 48 kHz — paces the emulator `speed`x faster (the audio plays sped up).
+    mute: bool,
+    speed: usize,
 
     length_step: bool,
     envelope_step: bool,
@@ -278,6 +284,8 @@ pub const APU = struct {
             .fir_buf_l = [_]f32{0} ** FIR_TAPS,
             .fir_buf_r = [_]f32{0} ** FIR_TAPS,
             .fir_pos = 0,
+            .mute = false,
+            .speed = 1,
             .nr52 = NR52{
                 .channel_1 = false,
                 .channel_2 = false,
@@ -386,14 +394,19 @@ pub const APU = struct {
             // }
         }
 
+        if (self.mute) {
+            apu_sample_left = 0;
+            apu_sample_right = 0;
+        }
+
         // Push the current per-cycle sample into the FIR ring buffer (anti-aliasing decimator).
         self.fir_buf_l[self.fir_pos] = apu_sample_left;
         self.fir_buf_r[self.fir_pos] = apu_sample_right;
         self.fir_pos = (self.fir_pos + 1) & (FIR_TAPS - 1);
 
         count += 1;
-        self.audio_buffer_downsample_count += SAMPLE_RATE;
-        // after ~87 cycles, we add to audio buffer
+        self.audio_buffer_downsample_count += SAMPLE_RATE / @max(self.speed, 1);
+        // after ~87 cycles (or ~87*speed for fast-forward) we add to audio buffer
         if (self.audio_buffer_downsample_count >= CPU_SPEED_HZ) {
             count = 0;
             self.audio_buffer_downsample_count -= CPU_SPEED_HZ;
