@@ -276,7 +276,7 @@ const RTC = struct {
 };
 
 pub const MBC = struct {
-    filename: []u8,
+    filename: []const u8,
     header: GameBoyRomHeader,
     rom: []u8,
     ram: []u8,
@@ -605,12 +605,11 @@ pub const MBC = struct {
         }
     }
 
-    pub fn new(filename: []u8, alloc: std.mem.Allocator) !MBC {
-        const file = try std.fs.cwd().openFile(filename, .{});
-        defer file.close();
-
-        const rom = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
-        // _ = try file.readAll(rom);
+    pub fn new(filename: []const u8, io: std.Io, alloc: std.mem.Allocator) !MBC {
+        // Zig 0.16 routes filesystem access through an Io (std.Io.Dir replaced
+        // std.fs.Dir); readFileAlloc reads the whole ROM. Native path only — the
+        // wasm build loads via newFromRomBytes and never compiles this.
+        const rom = try std.Io.Dir.cwd().readFileAlloc(io, filename, alloc, .unlimited);
         log.info("raw mbc {} rom size {}, ram size {}\n", .{
             rom[0x147],
             rom[0x148],

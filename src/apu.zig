@@ -45,7 +45,7 @@ pub const CPU_SPEED_HZ = 4194304;
 // aliasing into audible static. FIR_TAPS is a power of two so the ring buffer index masks.
 const FIR_TAPS: usize = 2048;
 const FIR_CUTOFF_HZ: f64 = 22000.0;
-var fir_kernel: [FIR_TAPS]f32 = [_]f32{0} ** FIR_TAPS;
+var fir_kernel: [FIR_TAPS]f32 = @splat(0);
 var fir_kernel_ready: bool = false;
 fn build_fir_kernel() void {
     if (fir_kernel_ready) return;
@@ -280,9 +280,9 @@ pub const APU = struct {
             .sdl_audio_device = audio_device,
             .audio_buffer_downsample_count = 0,
             .audio_buffer_count = 0,
-            .audio_buffer = [_]f32{0} ** (SDL_SAMPLE_SIZE * 2),
-            .fir_buf_l = [_]f32{0} ** FIR_TAPS,
-            .fir_buf_r = [_]f32{0} ** FIR_TAPS,
+            .audio_buffer = @splat(0),
+            .fir_buf_l = @splat(0),
+            .fir_buf_r = @splat(0),
             .fir_pos = 0,
             .mute = false,
             .speed = 1,
@@ -1051,7 +1051,7 @@ const Channel3 = struct {
             .length_timer = 0,
             .dac_enabled = false,
             .wave_ram = WaveRam{
-                .byte = [_]u8{0} ** 16,
+                .byte = @splat(0),
             },
             .nr30 = NR30{
                 ._padding = 0,

@@ -19,4 +19,7 @@ games
 DUMP*
 emutrace*
 
+# Transient golden-harness output (compared against tools/golden/*.txt)
+tools/golden/*.cur.txt
+
 # Keep source files (e.g., web.zig) committed; patterns above only affect compiled outputs.

@@ -29,46 +29,42 @@ pub const std_options: std.Options = .{
     // },
 };
 
-pub fn main() !void {
-    // try headless_main();
-    try draw_main();
+// Zig 0.16+ hands the program a `std.process.Init` providing io, allocators,
+// and command-line args (std.process.argsAlloc was removed).
+pub fn main(init: std.process.Init) !void {
+    // try headless_main(init);
+    try draw_main(init);
 }
 
-pub fn headless_main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+pub fn headless_main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
     for (args) |arg| {
         std.debug.print("{s}\n", .{arg});
     }
 
     const filename = args[1];
-    var gb = try Gameboy.new(filename, allocator);
+    var gb = try Gameboy.new(filename, init.io, allocator);
     while (true) {
-        _ = gb.frame();
+        gb.frame();
     }
 }
 
-pub fn draw_main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+pub fn draw_main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
     for (args) |arg| {
         std.debug.print("{s}\n", .{arg});
     }
 
     const filename = args[1];
 
-    try draw.main(filename, allocator);
+    try draw.main(filename, init.io, allocator);
 }
 
 test {
-    std.testing.refAllDeclsRecursive(@This());
-    // or refAllDeclsRecursive
+    // Zig 0.16 removed refAllDeclsRecursive.
+    std.testing.refAllDecls(@This());
 }

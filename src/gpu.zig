@@ -45,7 +45,8 @@ pub const TilePixelValue = enum(u2) {
 const Tile = [8][8]TilePixelValue;
 
 fn empty_tile() Tile {
-    return .{.{.Zero} ** 8} ** 8;
+    const row: [8]TilePixelValue = @splat(.Zero);
+    return @splat(row);
 }
 
 /// FE00-FE9F
@@ -214,20 +215,20 @@ pub const GPU = struct {
             },
         };
 
-        const objects = [_]Object{.{
+        const objects: [40]Object = @splat(.{
             .y = 0,
             .x = 0,
             .tile_index = 0,
             .attributes = @bitCast(@as(u8, 0)),
-        }} ** 40;
+        });
 
         return GPU{
-            .tile_canvas = [_]u8{0} ** DRAW_WIDTH ** DRAW_HEIGHT,
-            .canvas = [_]u8{0} ** (DRAW_WIDTH * DRAW_HEIGHT * 3),
-            .full_bg_canvas = [_]u8{0} ** (BACKGROUND_WIDTH * BACKGROUND_HEIGHT * 3),
-            .palette_canvas = [_]u8{0} ** (8 * 8 * 4 * 3 * 3),
-            .vram = [_]u8{0} ** 0x10000,
-            .tile_set = .{empty_tile()} ** 384,
+            .tile_canvas = @splat(0),
+            .canvas = @splat(0),
+            .full_bg_canvas = @splat(0),
+            .palette_canvas = @splat(0),
+            .vram = @splat(0),
+            .tile_set = @splat(empty_tile()),
             // ai says htis is default value
             .lcdc = @bitCast(@as(u8, 0x91)),
             .stat = @bitCast(@as(u8, 0x85)),
@@ -600,7 +601,7 @@ pub const GPU = struct {
         var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena_allocator.deinit();
         const allocator = arena_allocator.allocator();
-        var renderable_objects = std.ArrayList(Object).init(allocator);
+        var renderable_objects = std.array_list.Managed(Object).init(allocator);
         defer renderable_objects.deinit();
         for (self.objects) |object| {
             const start_y = object.y;
@@ -625,7 +626,7 @@ pub const GPU = struct {
             index: usize,
         };
 
-        var objectpair_hash = std.AutoHashMap(i16, std.ArrayList(ObjectIndexPair)).init(allocator);
+        var objectpair_hash = std.AutoHashMap(i16, std.array_list.Managed(ObjectIndexPair)).init(allocator);
         defer {
             var itr = objectpair_hash.valueIterator();
             while (itr.next()) |objects| {
@@ -637,7 +638,7 @@ pub const GPU = struct {
         for (renderable_objects.items, 0..) |object, oam_index| {
             const gop = objectpair_hash.getOrPut(object.x) catch unreachable;
             if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayList(ObjectIndexPair).init(allocator);
+                gop.value_ptr.* = std.array_list.Managed(ObjectIndexPair).init(allocator);
             }
             const pair = ObjectIndexPair{ .object = object, .index = oam_index };
             gop.value_ptr.*.append(pair) catch unreachable;
@@ -668,7 +669,7 @@ pub const GPU = struct {
             if (objectpairs.*.items.len <= 1) {
                 continue;
             }
-            var identical_x_objects = std.ArrayList(Object).init(allocator);
+            var identical_x_objects = std.array_list.Managed(Object).init(allocator);
             defer identical_x_objects.deinit();
             for (objectpairs.*.items) |objectpair| {
                 identical_x_objects.append(objectpair.object) catch unreachable;
@@ -678,7 +679,7 @@ pub const GPU = struct {
         }
     }
 
-    pub fn render_objects_list(self: *GPU, renderable_objects: std.ArrayList(Object)) void {
+    pub fn render_objects_list(self: *GPU, renderable_objects: std.array_list.Managed(Object)) void {
         for (renderable_objects.items) |object| {
             if (self.ly < SCREEN_HEIGHT) {
                 var tile_y: i16 = undefined;

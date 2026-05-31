@@ -1838,60 +1838,60 @@ pub const CPU = struct {
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 8;
             },
-            Instruction.SPADD => |_| {
+            Instruction.SPADD => {
                 const value = self.read_next_byte();
                 const new_value = self.spadd(value);
                 self.sp = new_value;
                 self.pc = self.pc +% 2;
                 self.clock.t_cycles += 16;
             },
-            Instruction.DAA => |_| {
+            Instruction.DAA => {
                 // log.debug("DAA\n", .{});
                 const new_value = self.daa(self.registers.A);
                 self.registers.A = new_value;
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.CPL => |_| {
+            Instruction.CPL => {
                 // log.debug("CPL\n", .{});
                 _ = self.cpl();
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.CCF => |_| {
+            Instruction.CCF => {
                 // log.debug("CCF\n", .{});
                 _ = self.ccf();
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.SCF => |_| {
+            Instruction.SCF => {
                 // log.debug("SCF\n", .{});
                 _ = self.scf();
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.RLA => |_| {
+            Instruction.RLA => {
                 // log.debug("RLA\n", .{});
                 const new_value = self.rla(self.registers.A);
                 self.registers.A = new_value;
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.RLCA => |_| {
+            Instruction.RLCA => {
                 // log.debug("RLCA\n", .{});
                 const new_value = self.rlca(self.registers.A);
                 self.registers.A = new_value;
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.RRA => |_| {
+            Instruction.RRA => {
                 // log.debug("RRA\n", .{});
                 const new_value = self.rra(self.registers.A);
                 self.registers.A = new_value;
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 4;
             },
-            Instruction.RRCA => |_| {
+            Instruction.RRCA => {
                 // log.debug("RRCA\n", .{});
                 const new_value = self.rrca(self.registers.A);
                 self.registers.A = new_value;
@@ -2649,8 +2649,8 @@ pub const CPU = struct {
             .ime = IME.Disabled,
             .pending_t_cycles = 0,
             .clock = .{ .t_cycles = 0 },
-            .fetch_log_pcs = [_]u16{0} ** 256,
-            .fetch_log_opcodes = [_]u8{0} ** 256,
+            .fetch_log_pcs = @splat(0),
+            .fetch_log_opcodes = @splat(0),
             .fetch_log_index = 0,
             .last_opcode = 0,
         };

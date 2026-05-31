@@ -23,9 +23,9 @@ pub const Gameboy = struct {
 
     alloc: std.mem.Allocator,
 
-    pub fn new(filename: []u8, alloc: std.mem.Allocator) !Gameboy {
+    pub fn new(filename: []const u8, io: std.Io, alloc: std.mem.Allocator) !Gameboy {
         const mbc_ = try alloc.create(cartridge.MBC);
-        mbc_.* = try cartridge.MBC.new(filename, alloc);
+        mbc_.* = try cartridge.MBC.new(filename, io, alloc);
 
         const gpu_ = try alloc.create(gpu.GPU);
         gpu_.* = gpu.GPU.new();

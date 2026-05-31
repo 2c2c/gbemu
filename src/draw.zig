@@ -16,8 +16,8 @@ const CPU_SPEED_HZ = 4194304;
 
 const SCALE = 3;
 
-pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
-    var gb = try Gameboy.new(filename, alloc);
+pub fn main(filename: []const u8, io: std.Io, alloc: std.mem.Allocator) !void {
+    var gb = try Gameboy.new(filename, io, alloc);
     defer gb.deinit();
 
     if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
@@ -97,12 +97,12 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
         // Use precise frame timing (frame * FRAME_CYCLES / CPU_HZ)
         const consts = @import("constants.zig");
         const secs: f64 = (@as(f64, @floatFromInt(frame)) * @as(f64, consts.FRAME_CYCLES)) / @as(f64, consts.CPU_HZ);
-        _ = std.fmt.bufPrintZ(title, "GBEMU | Frame {} | {d:.2}s{s}{s}", .{
+        _ = std.fmt.bufPrintSentinel(title, "GBEMU | Frame {} | {d:.2}s{s}{s}", .{
             frame,
             secs,
             if (gb.apu.speed > 1) " | 2x" else "",
             if (gb.apu.mute) " | MUTE" else "",
-        }) catch unreachable;
+        }, 0) catch unreachable;
         SDL.SDL_SetWindowTitle(window, title.ptr);
         _ = SDL.SDL_UpdateTexture(texture, null, &gb.gpu.canvas, gpu.DRAW_WIDTH * 3);
 
@@ -117,17 +117,4 @@ pub fn main(filename: []u8, alloc: std.mem.Allocator) !void {
 fn sdlPanic() noreturn {
     const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
     @panic(std.mem.sliceTo(str, 0));
-}
-
-test "test" {
-    const hz_60_micros: u64 = 60 * 16667;
-    const start_us = std.time.microTimestamp();
-    std.debug.print("start\n", .{});
-    while (true) {
-        const time_diff = std.time.microTimestamp() - start_us;
-        if (time_diff >= hz_60_micros) {
-            break;
-        }
-    }
-    std.debug.print("end\n", .{});
 }

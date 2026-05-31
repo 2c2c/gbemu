@@ -43,9 +43,9 @@
         //    // actually used.
         //    .lazy = false,
         //},
-        .sdl = .{
-            .path = "lib/SDL.zig",
-        },
+        // SDL2 is no longer a package dependency: the native build uses the
+        // compiler's build-system translate-c over the system SDL2 headers
+        // (see build.zig / src/sdl_c.h). The old lib/SDL.zig binding is unused.
     },
 
     // Specifies the set of files and directories that are included in this package.
