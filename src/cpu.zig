@@ -598,6 +598,41 @@ pub const CPU = struct {
     fetch_log_index: u16,
     last_opcode: u8,
 
+    // Cycle-accurate support. Peripherals (timer/PPU/APU) can be stepped *inline*
+    // during an instruction via tick(); `inline_ticked` counts how many T-cycles
+    // were stepped that way this step() so gameboy.frame() steps only the rest.
+    // Instructions not yet converted leave inline_ticked at 0 (legacy behavior:
+    // the whole instruction's cycles are stepped after it). hit_vblank surfaces a
+    // PPU vblank that occurs inside an inline tick.
+    inline_ticked: u64 = 0,
+    hit_vblank: bool = false,
+
+    /// Step the timer/APU/PPU by one T-cycle and fold their interrupt requests
+    /// into IF. Shared by the inline tick() path and gameboy.frame()'s remainder.
+    pub fn tick_peripherals_one(self: *CPU) void {
+        const enable_timer_flag = self.bus.timer.step();
+        _ = self.bus.apu.step(self.clock);
+        const gpu_irq = self.bus.gpu.step(1);
+        if (gpu_irq.vblank) self.hit_vblank = true;
+        self.bus.update_if_flags(IERegister{
+            .enable_timer = enable_timer_flag,
+            .enable_vblank = gpu_irq.vblank,
+            .enable_lcd_stat = gpu_irq.lcd_stat,
+            .enable_serial = false,
+            .enable_joypad = false,
+        });
+    }
+
+    /// Advance one M-cycle (4 T-cycles) with peripherals stepped inline. A
+    /// converted instruction calls this once per memory access / internal cycle
+    /// instead of adding a lump `clock.t_cycles += N`.
+    pub fn tick(self: *CPU) void {
+        var k: u8 = 0;
+        while (k < 4) : (k += 1) self.tick_peripherals_one();
+        self.clock.t_cycles += 4;
+        self.inline_ticked += 4;
+    }
+
     fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.debug("Instruction {}\n", .{instruction}) ;
         // halt bug isnt needed to pass blargg fully i think
@@ -2013,6 +2048,7 @@ pub const CPU = struct {
     }
     pub fn step(self: *CPU) u64 {
         self.pending_t_cycles = 0;
+        self.inline_ticked = 0;
         const current_cycles = self.clock.t_cycles;
 
         const ran_interrupt = self.handle_interrupt();

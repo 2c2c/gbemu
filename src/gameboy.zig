@@ -126,29 +126,22 @@ pub const Gameboy = struct {
                 .enable_joypad = enable_joypad_interrupt,
             };
             self.memory_bus.update_if_flags(joypad_interrupt_flag);
-            var cpu_cycles_spent = self.cpu.step();
+
+            self.cpu.hit_vblank = false;
+            const cpu_cycles_spent = self.cpu.step();
             frame_cycles += cpu_cycles_spent;
 
-            var hit_vblank = false;
-            while (cpu_cycles_spent > 0) : (cpu_cycles_spent -= 1) {
-                const enable_timer_flag = self.timer.step();
-                _ = self.apu.step(self.cpu.clock);
-                const gpu_interrupt_requests = self.gpu.step(1);
-                if (gpu_interrupt_requests.vblank) hit_vblank = true;
-
-                const interrupt_flags = ie_register.IERegister{
-                    .enable_timer = enable_timer_flag,
-                    .enable_vblank = gpu_interrupt_requests.vblank,
-                    .enable_lcd_stat = gpu_interrupt_requests.lcd_stat,
-                    // whocares
-                    .enable_serial = false,
-                    .enable_joypad = false,
-                };
-
-                self.memory_bus.update_if_flags(interrupt_flags);
+            // Step the timer/APU/PPU for the cycles the CPU did NOT already step
+            // inline. Cycle-accurate (converted) instructions step their own
+            // peripherals interleaved with memory accesses (inline_ticked > 0);
+            // legacy instructions leave inline_ticked == 0, so the whole
+            // instruction's worth is stepped here — identical to the old loop.
+            var remaining = cpu_cycles_spent - self.cpu.inline_ticked;
+            while (remaining > 0) : (remaining -= 1) {
+                self.cpu.tick_peripherals_one();
             }
 
-            if (hit_vblank or frame_cycles >= max_cycles) {
+            if (self.cpu.hit_vblank or frame_cycles >= max_cycles) {
                 break;
             }
         }
