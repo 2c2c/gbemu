@@ -173,9 +173,17 @@ export fn gb_cart_type() u32 { if (gb_opt) |*gb| return @intFromEnum(gb.mbc.head
 export fn gb_cart_rom_size_bytes() u32 { if (gb_opt) |*gb| return @intCast(gb.mbc.rom.len); return 0; }
 export fn gb_cart_ram_size_bytes() u32 { if (gb_opt) |*gb| return @intCast(gb.mbc.ram.len); return 0; }
 export fn gb_cpu_pc() u16 { if (gb_opt) |*gb| return gb.cpu.pc; return 0; }
+// Register pairs (for headless test grading, e.g. Mooneye's fibonacci magic:
+// B,C,D,E,H,L == 3,5,8,13,21,34 on pass).
+export fn gb_reg_bc() u16 { if (gb_opt) |*gb| return (@as(u16, gb.cpu.registers.B) << 8) | gb.cpu.registers.C; return 0; }
+export fn gb_reg_de() u16 { if (gb_opt) |*gb| return (@as(u16, gb.cpu.registers.D) << 8) | gb.cpu.registers.E; return 0; }
+export fn gb_reg_hl() u16 { if (gb_opt) |*gb| return (@as(u16, gb.cpu.registers.H) << 8) | gb.cpu.registers.L; return 0; }
 
 // Debug: read a single memory byte (returns 0xFF if no gb)
 export fn gb_read_mem(addr: u16) u8 { if (gb_opt) |*gb| return gb.memory_bus.read_byte(addr); return 0xFF; }
+// Serial output capture (blargg test results). Read gb_serial_len() bytes at gb_serial_ptr().
+export fn gb_serial_len() usize { if (gb_opt) |*gb| return gb.memory_bus.serial_len; return 0; }
+export fn gb_serial_ptr() ?[*]const u8 { if (gb_opt) |*gb| return &gb.memory_bus.serial_out; return null; }
 // Debug: expose IF and IE registers raw
 export fn gb_if() u8 { if (gb_opt) |*gb| return @bitCast(gb.memory_bus.interrupt_flag); return 0; }
 export fn gb_ie() u8 { if (gb_opt) |*gb| return @bitCast(gb.memory_bus.interrupt_enable); return 0; }

@@ -76,6 +76,20 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
 
+    // ---- native headless accuracy-test runner (stub SDL; ReleaseFast for speed) ----
+    const testrunner = b.addExecutable(.{
+        .name = "testrunner",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/testrunner.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{stub_import},
+        }),
+    });
+    const install_testrunner = b.addInstallArtifact(testrunner, .{});
+    const testrunner_step = b.step("testrunner", "Build the accuracy-test runner");
+    testrunner_step.dependOn(&install_testrunner.step);
+
     // ---- WebAssembly (wasm32) build: headless core + JS glue, no SDL ----
     // The wasm entrypoint (src/web.zig) loads ROMs from a byte buffer (no fs) and
     // exposes a C-ABI surface the JS loader (web/emu.js) and the Node golden
