@@ -162,8 +162,10 @@ pub const WaveRam = struct {
 
 /// FF20 - NR41 - Channel 4 sound length
 pub const NR41 = packed struct {
-    initial_length_timer: u5,
-    _padding: u3,
+    // 6-bit length (NR41 bits 0-5). Was u5, which capped length_timer at >=33 ticks so short
+    // noise bursts (e.g. a sword slash) couldn't end and droned on.
+    initial_length_timer: u6,
+    _padding: u2,
 };
 
 /// FF21 - NR42 - Channel 4 volume envelope
@@ -188,6 +190,12 @@ pub const APU = struct {
     audio_buffer_downsample_count: usize,
     audio_buffer_count: usize,
     audio_buffer: [SDL_SAMPLE_SIZE * 2]f32,
+    // Box-filter decimation: average every CPU-cycle sample over the ~87 cycles between output
+    // samples instead of point-sampling one. This band-limits the signal so high-frequency
+    // content (e.g. high-rate noise) doesn't alias into audible static at the 48 kHz output rate.
+    accum_left: f32,
+    accum_right: f32,
+    accum_n: u32,
 
     length_step: bool,
     envelope_step: bool,
@@ -237,6 +245,9 @@ pub const APU = struct {
             .audio_buffer_downsample_count = 0,
             .audio_buffer_count = 0,
             .audio_buffer = [_]f32{0} ** (SDL_SAMPLE_SIZE * 2),
+            .accum_left = 0,
+            .accum_right = 0,
+            .accum_n = 0,
             .nr52 = NR52{
                 .channel_1 = false,
                 .channel_2 = false,
@@ -344,6 +355,12 @@ pub const APU = struct {
             // }
         }
 
+        // Accumulate every cycle for box-filter decimation (anti-aliasing). The emitted output
+        // sample is the average over all cycles since the last one, not a single point sample.
+        self.accum_left += apu_sample_left;
+        self.accum_right += apu_sample_right;
+        self.accum_n += 1;
+
         count += 1;
         self.audio_buffer_downsample_count += SAMPLE_RATE;
         // after ~87 cycles, we add to audio buffer
@@ -351,20 +368,27 @@ pub const APU = struct {
             count = 0;
             self.audio_buffer_downsample_count -= CPU_SPEED_HZ;
 
+            const inv: f32 = 1.0 / @as(f32, @floatFromInt(self.accum_n));
+            const out_left = self.accum_left * inv;
+            const out_right = self.accum_right * inv;
+            self.accum_left = 0;
+            self.accum_right = 0;
+            self.accum_n = 0;
+
             if (!have_sdl) {
                 // Web build: the JS side drains this buffer on its own clock (gb_audio_consume).
                 // Append a stereo sample only if there is room; if JS briefly falls behind, drop
                 // new samples rather than wrap and overwrite unconsumed ones (which corrupts
                 // playback / causes static). No mid-stream reset here — only the consumer resets.
                 if (self.audio_buffer_count + 2 <= SDL_SAMPLE_SIZE * 2) {
-                    self.audio_buffer[self.audio_buffer_count] = apu_sample_left;
-                    self.audio_buffer[self.audio_buffer_count + 1] = apu_sample_right;
+                    self.audio_buffer[self.audio_buffer_count] = out_left;
+                    self.audio_buffer[self.audio_buffer_count + 1] = out_right;
                     self.audio_buffer_count += 2;
                 }
             } else {
-                self.audio_buffer[self.audio_buffer_count] = apu_sample_left;
+                self.audio_buffer[self.audio_buffer_count] = out_left;
                 self.audio_buffer_count += 1;
-                self.audio_buffer[self.audio_buffer_count] = apu_sample_right;
+                self.audio_buffer[self.audio_buffer_count] = out_right;
                 self.audio_buffer_count += 1;
 
                 // when the audio buffer is filled, we queue it to the audio device
@@ -469,6 +493,9 @@ pub const APU = struct {
 
         self.audio_buffer_count = 0;
         self.audio_buffer_downsample_count = 0;
+        self.accum_left = 0;
+        self.accum_right = 0;
+        self.accum_n = 0;
 
         self.audio_buffer = std.mem.zeroes([SDL_SAMPLE_SIZE * 2]f32);
 
