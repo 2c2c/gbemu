@@ -1,5 +1,5 @@
 # rom=games/dr_mario.gb frames=900 interval=30 canvas=160x144
-frame=00000 pc=0x0215 cycles=135888 fb=0x56333405
+frame=00000 pc=0x0215 cycles=135888 fb=0x998313c5
 frame=00030 pc=0x035a cycles=2582252 fb=0x431e52d4
 frame=00060 pc=0x035a cycles=4688972 fb=0x431e52d4
 frame=00090 pc=0x035a cycles=6795692 fb=0x431e52d4

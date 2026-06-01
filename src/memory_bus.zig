@@ -21,14 +21,13 @@ const ECHO_RAM_END: u16 = 0xFDFF;
 
 /// Cycle-accurate OAM DMA. Writing FF46 schedules a 160-byte transfer from
 /// XX00-XX9F into OAM (FE00-FE9F), one byte per M-cycle, after a short startup
-/// delay. While the transfer runs the CPU bus is held: reads of everything except
-/// HRAM (FF80-FFFE) return the byte the DMA is moving this cycle, and writes to
-/// OAM are dropped. The transfer is stepped once per CPU M-cycle (step_mcycle).
+/// delay. While the transfer runs the source bus is held: a CPU access on that
+/// bus reads open bus (0xFF) and OAM writes are dropped. The transfer is stepped
+/// once per CPU M-cycle (dma_step).
 pub const OamDma = struct {
     active: bool = false,
     source_high: u8 = 0, // source base = source_high << 8 for the running transfer
     index: u16 = 0, // next OAM byte to copy (0..159)
-    last_byte: u8 = 0xFF, // byte moved this M-cycle (what a conflicting CPU read sees)
     // A write to FF46 doesn't take effect immediately: the new transfer begins
     // after this many M-cycles (mooneye oam_dma_start/restart probe this). While
     // a startup is pending, any already-running transfer keeps going (restart).
@@ -46,17 +45,20 @@ pub const OamDma = struct {
         self.starting = 3;
     }
 
-    /// Whether a CPU access to `addr` conflicts with the running DMA. The DMG has
-    /// two memory buses — external (ROM/SRAM/WRAM: 0000-7FFF, A000-FDFF) and video
+    /// Whether a `source`-bus DMA holds the bus `addr` lives on. The DMG has two
+    /// memory buses — external (ROM/SRAM/WRAM: 0000-7FFF, A000-FDFF) and video
     /// (VRAM/OAM: 8000-9FFF, FE00-FE9F) — and the DMA only holds the one its source
-    /// sits on. A conflicting CPU read returns the in-flight DMA byte; accesses on
-    /// the other bus (and HRAM/IO at FF00+) proceed normally.
-    pub fn conflicts(self: *const OamDma, addr: u16) bool {
-        if (!self.active) return false;
-        if (addr >= 0xFF00) return false; // HRAM + IO + IE are on neither external/video bus
-        const src_video = self.source_high >= 0x80 and self.source_high <= 0x9F;
+    /// sits on. HRAM/IO at FF00+ are on neither and stay accessible.
+    fn busHeld(source: u8, addr: u16) bool {
+        if (addr >= 0xFF00) return false;
+        const src_video = source >= 0x80 and source <= 0x9F;
         const addr_video = (addr >= 0x8000 and addr <= 0x9FFF) or (addr >= 0xFE00 and addr <= 0xFE9F);
         return src_video == addr_video;
+    }
+
+    /// Whether a CPU access to `addr` conflicts with the running DMA.
+    pub fn conflicts(self: *const OamDma, addr: u16) bool {
+        return self.active and busHeld(self.source_high, addr);
     }
 };
 
@@ -141,19 +143,20 @@ pub const MemoryBus = struct {
             // $E0 (mooneye oam_dma/sources). $E000-$FDFF already echo via
             // read_byte_raw; this also redirects $FE00-$FFFF.
             const src = if (self.dma.source_high >= 0xE0) (0xC000 | (raw_src & 0x1FFF)) else raw_src;
-            self.dma.last_byte = self.read_byte_raw(src);
-            self.gpu.write_oam(gpu.OAM_BEGIN + self.dma.index, self.dma.last_byte);
+            self.gpu.write_oam(gpu.OAM_BEGIN + self.dma.index, self.read_byte_raw(src));
             self.dma.index += 1;
             if (self.dma.index >= 0xA0) self.dma.active = false;
         }
     }
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
-        // OAM DMA bus conflict: a CPU read on the same bus as the running DMA
-        // sees the byte being moved this cycle. This is what the *_timing tests
-        // exploit by fetching from echo RAM mid-DMA.
+        // OAM DMA bus conflict: while the transfer holds a bus, a CPU access on
+        // that same bus reads open bus (0xFF) — the held bus is inaccessible.
+        // (mooneye oam_dma_start times this by executing OAM as code: a corrupted
+        // fetch becomes RST $38, not the source byte.) HRAM/IO and the other bus
+        // stay accessible.
         if (self.dma.conflicts(address)) {
-            return self.dma.last_byte;
+            return 0xFF;
         }
         return self.read_byte_raw(address);
     }
