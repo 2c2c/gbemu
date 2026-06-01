@@ -135,7 +135,12 @@ pub const MemoryBus = struct {
             }
         }
         if (self.dma.active) {
-            const src = (@as(u16, self.dma.source_high) << 8) | self.dma.index;
+            const raw_src = (@as(u16, self.dma.source_high) << 8) | self.dma.index;
+            // Source high bytes E0-FF read from the internal RAM bus (the WRAM
+            // echo continues), not OAM/IO — so $FE/$FF DMA copies WRAM, matching
+            // $E0 (mooneye oam_dma/sources). $E000-$FDFF already echo via
+            // read_byte_raw; this also redirects $FE00-$FFFF.
+            const src = if (self.dma.source_high >= 0xE0) (0xC000 | (raw_src & 0x1FFF)) else raw_src;
             self.dma.last_byte = self.read_byte_raw(src);
             self.gpu.write_oam(gpu.OAM_BEGIN + self.dma.index, self.dma.last_byte);
             self.dma.index += 1;
