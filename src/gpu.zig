@@ -227,7 +227,11 @@ pub const GPU = struct {
             .canvas = @splat(0),
             .full_bg_canvas = @splat(0),
             .palette_canvas = @splat(0),
-            .vram = @splat(0),
+            // VRAM/OAM power-on reads back as 0xFF (the value mooneye's OAM-DMA
+            // timing tests assume for the bytes they copy out of uninitialised
+            // VRAM). Games initialise VRAM before use, so this only changes
+            // pre-init frames; both buses share this array (OAM lives at FE00+).
+            .vram = @splat(0xFF),
             .tile_set = @splat(empty_tile()),
             // ai says htis is default value
             .lcdc = @bitCast(@as(u8, 0x91)),

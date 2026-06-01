@@ -1,5 +1,5 @@
 # rom=games/tetris.gb frames=900 interval=30 canvas=160x144
-frame=00000 pc=0x0235 cycles=135888 fb=0x998313c5
+frame=00000 pc=0x0235 cycles=135888 fb=0x56333405
 frame=00030 pc=0x02ed cycles=2478816 fb=0xbb1558dd
 frame=00060 pc=0x02ef cycles=4585532 fb=0xbb1558dd
 frame=00090 pc=0x02ed cycles=6692252 fb=0xbb1558dd

@@ -39,12 +39,24 @@ pub const OamDma = struct {
     pub fn request(self: *OamDma, source_high: u8) void {
         self.pending_source = source_high;
         self.reg = source_high;
-        self.starting = 1; // setup M-cycles before byte 0 is copied
+        // Setup M-cycles counted down before byte 0 is copied. 3 places the
+        // 160-cycle transfer window where mooneye oam_dma_timing/restart and the
+        // *_timing family expect it (conflict starts/ends on the exact cycle);
+        // the request is registered at the end of the FF46-write M-cycle.
+        self.starting = 3;
     }
 
-    /// True while the CPU bus is held by the DMA (transfer in progress).
-    pub fn holdsBus(self: *const OamDma) bool {
-        return self.active;
+    /// Whether a CPU access to `addr` conflicts with the running DMA. The DMG has
+    /// two memory buses — external (ROM/SRAM/WRAM: 0000-7FFF, A000-FDFF) and video
+    /// (VRAM/OAM: 8000-9FFF, FE00-FE9F) — and the DMA only holds the one its source
+    /// sits on. A conflicting CPU read returns the in-flight DMA byte; accesses on
+    /// the other bus (and HRAM/IO at FF00+) proceed normally.
+    pub fn conflicts(self: *const OamDma, addr: u16) bool {
+        if (!self.active) return false;
+        if (addr >= 0xFF00) return false; // HRAM + IO + IE are on neither external/video bus
+        const src_video = self.source_high >= 0x80 and self.source_high <= 0x9F;
+        const addr_video = (addr >= 0x8000 and addr <= 0x9FFF) or (addr >= 0xFE00 and addr <= 0xFE9F);
+        return src_video == addr_video;
     }
 };
 
@@ -132,11 +144,10 @@ pub const MemoryBus = struct {
     }
 
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
-        // OAM DMA bus conflict: while the transfer holds the bus the CPU reads
-        // the byte being moved this cycle for every address but HRAM (FF80-FFFE)
-        // and IE (FFFF). This is what the *_timing tests exploit by fetching from
-        // echo RAM mid-DMA.
-        if (self.dma.active and address < 0xFF80) {
+        // OAM DMA bus conflict: a CPU read on the same bus as the running DMA
+        // sees the byte being moved this cycle. This is what the *_timing tests
+        // exploit by fetching from echo RAM mid-DMA.
+        if (self.dma.conflicts(address)) {
             return self.dma.last_byte;
         }
         return self.read_byte_raw(address);
