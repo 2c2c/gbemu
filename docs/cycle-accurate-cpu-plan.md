@@ -32,8 +32,10 @@ Model implemented (transition form, lumps kept as clock source):
 Results (native `zig build testrunner`):
 - blargg CPU **12/12** (incl. `instr_timing`, which the old atomic core failed).
 - mooneye timer **13/13** (including `rapid_toggle`).
-- mooneye flipped to PASS: `ei_sequence`, `if_ie_registers`, `pop_timing`,
-  `oam_dma/basic` (plus `ei_timing`/`intr_timing`/`div_timing` stay green).
+- mooneye flipped to PASS: `ei_sequence`, `if_ie_registers`, `pop_timing`, and —
+  after the OAM-DMA work below — the whole `jp/call/ret/push/rst/add_sp_e/
+  ld_hl_sp_e_timing` family + `oam_dma_timing/restart` + `oam_dma/basic`+`reg_read`
+  (17/19 DMA-dependent tests). Broad acceptance 14/41 → 29/41.
 - Games verified rendering correctly via `tools/verify_wasm.sh` (re-baselined) and
   an 8-ROM smoke test (tetris, kirby, dr_mario, pokemon_blue, links_awakening,
   sml, sml2, donkey_kong). Native unit tests + `zig build check` green.
@@ -52,15 +54,34 @@ so `tim00..11` keep passing — flipping the *whole* write order to before-tick
 fixed rapid_toggle but broke 5 other timer tests, so the fix is scoped to the
 overflow-recognition path only.
 
-## Remaining gaps (need work beyond the CPU core)
+### OAM DMA precision (17/19 of the DMA-dependent family now pass)
 
-- The OAM-DMA-dependent timing tests — `jp/jp_cc/call/call2/call_cc/call_cc2/ret/
-  ret_cc/reti/push/rst/add_sp_e/ld_hl_sp_e_timing` and `oam_dma_timing/start/
-  restart`, `oam_dma/reg_read` — now *run to completion* (the bus conflict stopped
-  the crashes) but still fail their precise assertions: they pin the DMA start/end
-  to an exact T-cycle. A single startup-delay constant can't satisfy both
-  `oam_dma/basic` and `oam_dma_timing`, so the DMA needs an exact hardware-T-cycle
-  model (start latch + bus-hold boundary), not just M-cycle alignment.
+The whole `jp/jp_cc/call/call2/call_cc/call_cc2/ret/ret_cc/reti/push/rst/
+add_sp_e/ld_hl_sp_e_timing` family plus `oam_dma_timing`, `oam_dma_restart`,
+`oam_dma/basic`, `oam_dma/reg_read` pass after three pieces landed together:
+- **Two-bus conflict** (`OamDma.conflicts`): the DMG has an external bus
+  (ROM/SRAM/WRAM) and a video bus (VRAM/OAM); a DMA only holds the bus its source
+  sits on, so a CPU read conflicts (sees the in-flight byte) only on that bus. The
+  old "all non-HRAM conflicts" model corrupted the stack during a VRAM-sourced
+  DMA. This alone fixed `oam_dma/reg_read`.
+- **Startup delay = 3** M-cycles: positions the 160-cycle transfer window on the
+  exact cycle the tests probe (`oam_dma_timing` passes only at 3).
+- **VRAM/OAM power-on = 0xFF**: the tests copy uninitialised VRAM out via DMA and
+  expect 0xFF; with 0-init the jp/call/ret family crashed. Games initialise VRAM
+  before use (Tetris/Dr.Mario title screens verified pixel-correct), so only
+  pre-init frames change — the wasm golden was re-baselined.
+
+Broad mooneye acceptance went 14/41 → 29/41 with no regressions.
+
+## Remaining gaps
+
+- `oam_dma_start` and `oam_dma/sources-GS` (2 of 19). `oam_dma_start` executes
+  OAM as code (`INC B` sled) and measures when the bus conflict corrupts the
+  instruction stream; it appears to need an instruction-fetch-vs-data-read
+  distinction in the conflict (a fetch from OAM reading the real not-yet-DMA'd
+  byte while a data read of the same address returns the in-flight byte), which
+  the current single read path can't express. `sources-GS` exercises DMA from the
+  E0-FF source range (echo/OAM) and needs that region's exact source mapping.
 
 Validation net: `tools/accuracy_check.sh` runs blargg CPU, mooneye timer, and the
 target timing tests in one shot.
