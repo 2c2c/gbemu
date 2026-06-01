@@ -19,6 +19,35 @@ const WRAM_END: u16 = 0xDFFF;
 const ECHO_RAM_BEGIN: u16 = 0xE000;
 const ECHO_RAM_END: u16 = 0xFDFF;
 
+/// Cycle-accurate OAM DMA. Writing FF46 schedules a 160-byte transfer from
+/// XX00-XX9F into OAM (FE00-FE9F), one byte per M-cycle, after a short startup
+/// delay. While the transfer runs the CPU bus is held: reads of everything except
+/// HRAM (FF80-FFFE) return the byte the DMA is moving this cycle, and writes to
+/// OAM are dropped. The transfer is stepped once per CPU M-cycle (step_mcycle).
+pub const OamDma = struct {
+    active: bool = false,
+    source_high: u8 = 0, // source base = source_high << 8 for the running transfer
+    index: u16 = 0, // next OAM byte to copy (0..159)
+    last_byte: u8 = 0xFF, // byte moved this M-cycle (what a conflicting CPU read sees)
+    // A write to FF46 doesn't take effect immediately: the new transfer begins
+    // after this many M-cycles (mooneye oam_dma_start/restart probe this). While
+    // a startup is pending, any already-running transfer keeps going (restart).
+    starting: u8 = 0,
+    pending_source: u8 = 0,
+    reg: u8 = 0xFF, // last value written to FF46 (reads back unchanged)
+
+    pub fn request(self: *OamDma, source_high: u8) void {
+        self.pending_source = source_high;
+        self.reg = source_high;
+        self.starting = 1; // setup M-cycles before byte 0 is copied
+    }
+
+    /// True while the CPU bus is held by the DMA (transfer in progress).
+    pub fn holdsBus(self: *const OamDma) bool {
+        return self.active;
+    }
+};
+
 pub const MemoryBus = struct {
     memory: [0x10000]u8,
 
@@ -30,6 +59,8 @@ pub const MemoryBus = struct {
 
     interrupt_enable: IERegister,
     interrupt_flag: IERegister,
+
+    dma: OamDma,
 
     // Serial output capture — side channel for headless test harnesses (blargg
     // writes its pass/fail text to serial). Does not affect emulation state.
@@ -53,6 +84,8 @@ pub const MemoryBus = struct {
             .interrupt_enable = @bitCast(@as(u8, 0)),
             .interrupt_flag = @bitCast(@as(u8, 0)),
 
+            .dma = .{},
+
             .serial_sb = 0,
             .serial_out = @splat(0),
             .serial_len = 0,
@@ -75,7 +108,41 @@ pub const MemoryBus = struct {
             self.interrupt_flag.enable_joypad and self.interrupt_enable.enable_joypad;
     }
 
+    /// Advance the OAM DMA by one CPU M-cycle: run down the startup delay, then
+    /// copy one byte from the source into OAM. Called once per CPU M-cycle (from
+    /// CPU.mcycle) so the transfer is exactly 160 M-cycles and stays aligned with
+    /// instruction memory accesses. The source byte is read raw (the DMA is the
+    /// bus master, so it is not subject to its own conflict).
+    pub fn dma_step(self: *MemoryBus) void {
+        if (self.dma.starting > 0) {
+            self.dma.starting -= 1;
+            if (self.dma.starting == 0) {
+                self.dma.active = true;
+                self.dma.source_high = self.dma.pending_source;
+                self.dma.index = 0;
+            }
+        }
+        if (self.dma.active) {
+            const src = (@as(u16, self.dma.source_high) << 8) | self.dma.index;
+            self.dma.last_byte = self.read_byte_raw(src);
+            self.gpu.write_oam(gpu.OAM_BEGIN + self.dma.index, self.dma.last_byte);
+            self.dma.index += 1;
+            if (self.dma.index >= 0xA0) self.dma.active = false;
+        }
+    }
+
     pub fn read_byte(self: *const MemoryBus, address: u16) u8 {
+        // OAM DMA bus conflict: while the transfer holds the bus the CPU reads
+        // the byte being moved this cycle for every address but HRAM (FF80-FFFE)
+        // and IE (FFFF). This is what the *_timing tests exploit by fetching from
+        // echo RAM mid-DMA.
+        if (self.dma.active and address < 0xFF80) {
+            return self.dma.last_byte;
+        }
+        return self.read_byte_raw(address);
+    }
+
+    pub fn read_byte_raw(self: *const MemoryBus, address: u16) u8 {
         switch (address) {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
@@ -105,7 +172,9 @@ pub const MemoryBus = struct {
                 return self.memory[new_addr];
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
-                return self.memory[address];
+                // OAM is stored in the GPU's memory (where write_oam puts it), not
+                // the flat `memory` array — read it back from the same place.
+                return self.gpu.read_vram(address);
             },
             0xFEA0...0xFEFF => {
                 // log.debug("Attempted read from unusable memory\n", .{});
@@ -148,6 +217,8 @@ pub const MemoryBus = struct {
                 return;
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
+                // CPU writes to OAM are dropped while the DMA holds the bus.
+                if (self.dma.active) return;
                 self.gpu.write_oam(address, byte);
                 return;
             },
@@ -200,7 +271,8 @@ pub const MemoryBus = struct {
                 0xFF05 => break :blk self.timer.tima,
                 0xFF06 => break :blk self.timer.tma,
                 0xFF07 => break :blk @bitCast(self.timer.tac),
-                0xFF0F => break :blk @bitCast(self.interrupt_flag),
+                // IF bits 5-7 are unimplemented and always read back as 1.
+                0xFF0F => break :blk 0xE0 | @as(u8, @bitCast(self.interrupt_flag)),
                 0xFF10...0xFF3F => break :blk self.apu.read_apu_register(io_addr),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
                 0xFF41 => break :blk @bitCast(self.gpu.stat),
@@ -211,6 +283,7 @@ pub const MemoryBus = struct {
                 0xFF43 => break :blk self.gpu.background_viewport.scx,
                 0xFF44 => break :blk self.gpu.ly,
                 0xFF45 => break :blk self.gpu.lyc,
+                0xFF46 => break :blk self.dma.reg,
                 0xFF47 => break :blk @bitCast(self.gpu.bgp),
                 0xFF48 => break :blk @bitCast(self.gpu.obp[0]),
                 0xFF49 => break :blk @bitCast(self.gpu.obp[1]),
@@ -305,13 +378,9 @@ pub const MemoryBus = struct {
                     self.gpu.lyc = byte;
                 },
                 0xFF46 => {
-                    std.debug.assert(byte >= 0x00 and byte <= 0xDF);
-                    const dma_high: u16 = @as(u16, byte) << 8;
-                    for (0x00..0x100) |dma_low| {
-                        const dma_low_u16 = @as(u16, @intCast(dma_low));
-                        const value = self.read_byte(dma_high | dma_low_u16);
-                        self.write_byte(gpu.OAM_BEGIN +% dma_low_u16, value);
-                    }
+                    // Schedule a cycle-accurate OAM DMA instead of an instant copy.
+                    // The transfer is driven one byte per CPU M-cycle by dma_step().
+                    self.dma.request(byte);
                 },
                 0xFF47 => {
                     self.gpu.bgp = @bitCast(byte);

@@ -136,6 +136,13 @@ pub const Gameboy = struct {
             // peripherals interleaved with memory accesses (inline_ticked > 0);
             // legacy instructions leave inline_ticked == 0, so the whole
             // instruction's worth is stepped here — identical to the old loop.
+            // Conversion safety net (pitfall #2): a converted instruction must
+            // never tick MORE peripheral cycles than its lump reports, or the
+            // unsigned subtraction below underflows and frame() spins forever.
+            // This instantly pinpoints a stray ticking read (e.g. a debug peek).
+            if (self.cpu.inline_ticked > cpu_cycles_spent) {
+                std.debug.panic("inline overstep: opcode 0x{x} inline={d} spent={d}\n", .{ self.cpu.last_opcode, self.cpu.inline_ticked, cpu_cycles_spent });
+            }
             var remaining = cpu_cycles_spent - self.cpu.inline_ticked;
             while (remaining > 0) : (remaining -= 1) {
                 self.cpu.tick_peripherals_one();

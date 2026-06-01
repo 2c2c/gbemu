@@ -633,6 +633,39 @@ pub const CPU = struct {
         self.inline_ticked += 4;
     }
 
+    /// One M-cycle (4 T-cycles) of peripheral progress that does NOT advance the
+    /// CPU clock. During the cycle-accurate transition the per-instruction lump
+    /// `clock.t_cycles += N` stays the clock source; mcycle only steps
+    /// peripherals interleaved with the instruction and records the T-cycles in
+    /// `inline_ticked`. When an instruction is fully converted its lump equals
+    /// its inline ticks, so gameboy.frame() steps nothing extra (remaining == 0).
+    pub fn mcycle(self: *CPU) void {
+        var k: u8 = 0;
+        while (k < 4) : (k += 1) self.tick_peripherals_one();
+        // OAM DMA moves one byte per CPU M-cycle. Stepping it here (after the
+        // peripheral T-cycles, before the access that follows in tick_read/write)
+        // keeps it aligned with instruction memory accesses and makes the bus
+        // conflict observable on the very next read.
+        self.bus.dma_step();
+        self.inline_ticked += 4;
+    }
+
+    /// Tick one M-cycle, then read. A memory access is the last thing in its
+    /// M-cycle, so peripherals advance first and the read observes post-step
+    /// state (e.g. a just-incremented DIV/TIMA). Use for every instruction read.
+    pub fn tick_read(self: *CPU, addr: u16) u8 {
+        self.mcycle();
+        return self.bus.read_byte(addr);
+    }
+
+    /// Tick one M-cycle, then write (peripherals stepped to the write's cycle
+    /// before the store applies — this is what makes the timer write path
+    /// observe the correct internal_clock at FF04-FF07).
+    pub fn tick_write(self: *CPU, addr: u16, value: u8) void {
+        self.mcycle();
+        self.bus.write_byte(addr, value);
+    }
+
     fn execute(self: *CPU, mutable_instruction: Instruction) void {
         // log.debug("Instruction {}\n", .{instruction}) ;
         // halt bug isnt needed to pass blargg fully i think
@@ -678,6 +711,7 @@ pub const CPU = struct {
             Instruction.HALT => {
                 self.halt_state = HaltState.Enabled;
                 self.pc +%= 1;
+                self.clock.t_cycles += 4; // fetch M-cycle (was unaccounted)
             },
             Instruction.CALL => |jt| {
                 const jump_condition = jmpBlk: {
@@ -709,40 +743,29 @@ pub const CPU = struct {
                 self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 24 else self.clock.t_cycles + 12;
             },
             Instruction.RET => |jt| {
-                const jump_condition = jmpBlk: {
-                    switch (jt) {
-                        JumpTest.NotZero => {
-                            // log.debug("RET NZ\n", .{});
-                            const jump_condition = !self.registers.F.zero;
-                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
-                            break :jmpBlk jump_condition;
-                        },
-                        JumpTest.NotCarry => {
-                            // log.debug("RET NC\n", .{});
-                            const jump_condition = !self.registers.F.carry;
-                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
-                            break :jmpBlk jump_condition;
-                        },
-                        JumpTest.Zero => {
-                            // log.debug("RET Z\n", .{});
-                            const jump_condition = self.registers.F.zero;
-                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
-                            break :jmpBlk jump_condition;
-                        },
-                        JumpTest.Carry => {
-                            // log.debug("RET C\n", .{});
-                            const jump_condition = self.registers.F.carry;
-                            self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
-                            break :jmpBlk jump_condition;
-                        },
-                        JumpTest.Always => {
-                            // log.debug("RET\n", .{});
-                            self.clock.t_cycles += 16;
-                            break :jmpBlk true;
-                        },
-                    }
-                };
-                self.pc = self.ret(jump_condition);
+                switch (jt) {
+                    JumpTest.Always => {
+                        // log.debug("RET\n", .{});
+                        // unconditional: fetch + read lo + read hi + [int set PC] (4 M)
+                        self.pc = self.ret(true);
+                        self.clock.t_cycles += 16;
+                    },
+                    else => {
+                        // RET cc: a leading internal cycle evaluates the condition
+                        // (M2). Taken: fetch + [int] + read lo + read hi + [int] (5 M);
+                        // not taken: fetch + [int] (2 M).
+                        self.mcycle(); // [int]: condition-evaluation delay
+                        const jump_condition = switch (jt) {
+                            JumpTest.NotZero => !self.registers.F.zero,
+                            JumpTest.NotCarry => !self.registers.F.carry,
+                            JumpTest.Zero => self.registers.F.zero,
+                            JumpTest.Carry => self.registers.F.carry,
+                            JumpTest.Always => unreachable,
+                        };
+                        self.pc = self.ret(jump_condition);
+                        self.clock.t_cycles = if (jump_condition) self.clock.t_cycles + 20 else self.clock.t_cycles + 8;
+                    },
+                }
             },
             Instruction.RETI => {
                 // log.debug("RETI\n", .{});
@@ -808,6 +831,7 @@ pub const CPU = struct {
                         },
                     }
                 };
+                self.mcycle(); // [int] before the push (PUSH = 4 M-cycles)
                 self.push(value);
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 16;
@@ -853,7 +877,7 @@ pub const CPU = struct {
                                 },
                                 LoadByteSource.HLI => {
                                     // log.debug("LD HLI\n", .{});
-                                    const hl_byte = self.bus.read_byte(self.registers.get_HL());
+                                    const hl_byte = self.tick_read(self.registers.get_HL());
                                     break :sourceBlk hl_byte;
                                 },
                             }
@@ -889,7 +913,7 @@ pub const CPU = struct {
                             },
                             LoadByteTarget.HLI => {
                                 // log.debug("LD HLI\n", .{});
-                                self.bus.write_byte(self.registers.get_HL(), source_value);
+                                self.tick_write(self.registers.get_HL(), source_value);
                             },
                         }
 
@@ -954,35 +978,35 @@ pub const CPU = struct {
                             switch (indirect) {
                                 Indirect.BCIndirect => {
                                     // log.debug("LD A (BC)\n", .{});
-                                    break :sourceBlk self.bus.read_byte(self.registers.get_BC());
+                                    break :sourceBlk self.tick_read(self.registers.get_BC());
                                 },
                                 Indirect.DEIndirect => {
                                     // log.debug("LD A (DE)\n", .{});
-                                    break :sourceBlk self.bus.read_byte(self.registers.get_DE());
+                                    break :sourceBlk self.tick_read(self.registers.get_DE());
                                 },
                                 Indirect.HLIndirectPlus => {
                                     // log.debug("LD A (HL+)\n", .{});
                                     const hl = self.registers.get_HL();
-                                    const value = self.bus.read_byte(hl);
+                                    const value = self.tick_read(hl);
                                     self.registers.set_HL(hl +% 1);
                                     break :sourceBlk value;
                                 },
                                 Indirect.HLIndirectMinus => {
                                     // log.debug("LD A (HL-)\n", .{});
                                     const hl = self.registers.get_HL();
-                                    const value = self.bus.read_byte(hl);
+                                    const value = self.tick_read(hl);
                                     self.registers.set_HL(hl -% 1);
                                     break :sourceBlk value;
                                 },
                                 Indirect.WordIndirect => {
                                     // log.debug("LD A (nn)\n", .{});
                                     const address = self.read_next_word();
-                                    break :sourceBlk self.bus.read_byte(address);
+                                    break :sourceBlk self.tick_read(address);
                                 },
                                 Indirect.LastByteIndirect => {
                                     // log.debug("LD A (FF00 + C)\n", .{});
                                     const address = 0xFF00 +% @as(u16, self.registers.C);
-                                    break :sourceBlk self.bus.read_byte(address);
+                                    break :sourceBlk self.tick_read(address);
                                 },
                             }
                         };
@@ -1003,33 +1027,33 @@ pub const CPU = struct {
                         switch (indirect) {
                             Indirect.BCIndirect => {
                                 // log.debug("LD (BC) A\n", .{});
-                                self.bus.write_byte(self.registers.get_BC(), value);
+                                self.tick_write(self.registers.get_BC(), value);
                             },
                             Indirect.DEIndirect => {
                                 // log.debug("LD (DE) A\n", .{});
-                                self.bus.write_byte(self.registers.get_DE(), value);
+                                self.tick_write(self.registers.get_DE(), value);
                             },
                             Indirect.HLIndirectPlus => {
                                 // log.debug("LD (HL+) A\n", .{});
                                 const hl = self.registers.get_HL();
-                                self.bus.write_byte(hl, value);
+                                self.tick_write(hl, value);
                                 self.registers.set_HL(hl +% 1);
                             },
                             Indirect.HLIndirectMinus => {
                                 // log.debug("LD (HL-) A\n", .{});
                                 const hl = self.registers.get_HL();
-                                self.bus.write_byte(hl, value);
+                                self.tick_write(hl, value);
                                 self.registers.set_HL(hl -% 1);
                             },
                             Indirect.WordIndirect => {
                                 // log.debug("LD (nn) A\n", .{});
                                 const address = self.read_next_word();
-                                self.bus.write_byte(address, value);
+                                self.tick_write(address, value);
                             },
                             Indirect.LastByteIndirect => {
                                 // log.debug("LD (FF00 + C) A\n", .{});
                                 const address = 0xFF00 +% @as(u16, self.registers.C);
-                                self.bus.write_byte(address, value);
+                                self.tick_write(address, value);
                             },
                         }
                         switch (indirect) {
@@ -1045,24 +1069,26 @@ pub const CPU = struct {
                     },
                     LoadType.AFromByteAddress => {
                         const offset = @as(u16, self.read_next_byte());
-                        self.registers.A = self.bus.read_byte(0xFF00 +% offset);
+                        self.registers.A = self.tick_read(0xFF00 +% offset);
                         // at this point A is 0x04, which is correct. why is it going to 0x00?
                         self.pc = self.pc +% 2;
                         self.clock.t_cycles += 12;
                     },
                     LoadType.ByteAddressFromA => {
                         const offset = @as(u16, self.read_next_byte());
-                        self.bus.write_byte(0xFF00 + offset, self.registers.A);
+                        self.tick_write(0xFF00 + offset, self.registers.A);
                         self.pc = self.pc +% 2;
                         self.clock.t_cycles += 12;
                     },
                     LoadType.SPFromHL => {
+                        self.mcycle(); // [int]: SP load (LD SP,HL = 2 M-cycles)
                         self.sp = self.registers.get_HL();
                         self.pc = self.pc +% 1;
                         self.clock.t_cycles += 8;
                     },
                     LoadType.HLFromSPN => {
                         const n = self.read_next_byte();
+                        self.mcycle(); // [int]: ALU/SP add (LD HL,SP+e = 3 M-cycles)
                         const signed: i8 = @bitCast(n);
                         if (signed >= 0) {
                             self.registers.set_HL(self.sp +% @abs(signed));
@@ -1079,7 +1105,9 @@ pub const CPU = struct {
                     },
                     LoadType.IndirectFromSP => {
                         const address = self.read_next_word();
-                        self.bus.write_word(address, self.sp);
+                        // fetch + read lo + read hi + write lo + write hi (5 M-cycles)
+                        self.tick_write(address, @truncate(self.sp));
+                        self.tick_write(address +% 1, @truncate(self.sp >> 8));
                         self.pc = self.pc +% 3;
                         self.clock.t_cycles += 20;
                     },
@@ -1193,7 +1221,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("ADD HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.add(value);
                             self.clock.t_cycles += 4;
                             break :addBlk new_value;
@@ -1259,7 +1287,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("ADC HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.adc(value);
                             self.clock.t_cycles += 4;
                             break :adcBlk new_value;
@@ -1325,7 +1353,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("SUB HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.sub(value);
                             self.clock.t_cycles += 4;
                             break :subBlk new_value;
@@ -1391,7 +1419,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("sbc HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.sbc(value);
                             self.clock.t_cycles += 4;
                             break :sbcBlk new_value;
@@ -1457,7 +1485,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("and HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.and_(value);
                             self.clock.t_cycles += 4;
                             break :andBlk new_value;
@@ -1523,7 +1551,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("xor HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.xor(value);
                             self.clock.t_cycles += 4;
                             break :xorBlk new_value;
@@ -1589,7 +1617,7 @@ pub const CPU = struct {
                         },
                         ArithmeticTarget.HL => {
                             // log.debug("or HL\n", .{});
-                            const value = self.bus.read_byte(self.registers.get_HL());
+                            const value = self.tick_read(self.registers.get_HL());
                             const new_value = self.or_(value);
                             self.clock.t_cycles += 4;
                             break :orBlk new_value;
@@ -1647,7 +1675,7 @@ pub const CPU = struct {
                     },
                     ArithmeticTarget.HL => {
                         // log.debug("cp HL\n", .{});
-                        const value = self.bus.read_byte(self.registers.get_HL());
+                        const value = self.tick_read(self.registers.get_HL());
                         self.clock.t_cycles += 4;
                         self.cp(value);
                     },
@@ -1709,10 +1737,10 @@ pub const CPU = struct {
                     ArithmeticTarget.HL => {
                         // log.debug("inc HL\n", .{});
                         const HL = self.registers.get_HL();
-                        const value = self.bus.read_byte(HL);
+                        const value = self.tick_read(HL);
                         const res = self.inc(value);
                         self.clock.t_cycles += 8;
-                        self.bus.write_byte(HL, res);
+                        self.tick_write(HL, res);
                     },
                     else => {
                         // log.debug("Unknown INC target\n", .{});
@@ -1768,10 +1796,10 @@ pub const CPU = struct {
                     ArithmeticTarget.HL => {
                         // log.debug("dec HL\n", .{});
                         const HL = self.registers.get_HL();
-                        const value = self.bus.read_byte(HL);
+                        const value = self.tick_read(HL);
                         const res = self.dec(value);
                         self.clock.t_cycles += 8;
-                        self.bus.write_byte(HL, res);
+                        self.tick_write(HL, res);
                     },
                     else => {
                         // log.debug("Unknown DEC target\n", .{});
@@ -1809,6 +1837,7 @@ pub const CPU = struct {
                         },
                     }
                 };
+                self.mcycle(); // [int]: 16-bit add (ADD HL,rr = 2 M-cycles)
                 self.registers.set_HL(value);
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 8;
@@ -1840,6 +1869,7 @@ pub const CPU = struct {
                         self.sp = new_value;
                     },
                 }
+                self.mcycle(); // [int]: 16-bit increment (INC rr = 2 M-cycles)
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 8;
             },
@@ -1870,11 +1900,14 @@ pub const CPU = struct {
                         self.sp = new_value;
                     },
                 }
+                self.mcycle(); // [int]: 16-bit decrement (DEC rr = 2 M-cycles)
                 self.pc = self.pc +% 1;
                 self.clock.t_cycles += 8;
             },
             Instruction.SPADD => {
                 const value = self.read_next_byte();
+                self.mcycle(); // [int]: SP add low byte
+                self.mcycle(); // [int]: SP add carry propagate (ADD SP,e = 4 M-cycles)
                 const new_value = self.spadd(value);
                 self.sp = new_value;
                 self.pc = self.pc +% 2;
@@ -1937,13 +1970,11 @@ pub const CPU = struct {
                 // log.debug("RLC {}\n", .{target});
                 handle_prefix_instruction(self, target, rlc, .{ .r8_cycles = 8, .hl_cycles = 16 });
                 self.pc = self.pc +% 2;
-                self.clock.t_cycles += 8;
             },
             Instruction.RRC => |target| {
                 // log.debug("RRC {}\n", .{target});
                 handle_prefix_instruction(self, target, rrc, .{ .r8_cycles = 8, .hl_cycles = 16 });
                 self.pc = self.pc +% 2;
-                self.clock.t_cycles += 8;
             },
             Instruction.RL => |target| {
                 // log.debug("RL {}\n", .{target});
@@ -2007,36 +2038,43 @@ pub const CPU = struct {
                 log.debug("IME.Enabled PC=0x{x}\n", .{self.pc});
                 log.debug("HANDLING AN INTERRUPT PC=0x{x}\n", .{self.pc});
                 self.ime = IME.Disabled;
-                self.push(self.pc);
 
-                // 20 cycles for interrupts
-                // not sure if some of these cycles are spent if IME is on, but ie/if are off for all interrupts
+                // Interrupt dispatch is 5 M-cycles (20 T): two internal cycles,
+                // push PC hi+lo, then one internal cycle that loads the vector.
+                // The peripherals are stepped inline across all five so the timer
+                // keeps running while the handler is entered (the timing tests
+                // measure exactly this).
+                self.mcycle(); // [int]
+                self.mcycle(); // [int]
+                self.push(self.pc); // write hi, write lo
+
+                // Vector is latched here (after the push, IE/IF re-read).
                 if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
                     log.debug("HANDLING VBLANK\n", .{});
                     self.bus.interrupt_flag.enable_vblank = false;
                     self.pc = @intFromEnum(ISR.VBlank);
-                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
                     log.debug("HANDLING LCDSTAT\n", .{});
                     self.bus.interrupt_flag.enable_lcd_stat = false;
                     self.pc = @intFromEnum(ISR.LCDStat);
-                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
                     log.debug("HANDLING TIMER\n", .{});
                     self.bus.interrupt_flag.enable_timer = false;
                     self.pc = @intFromEnum(ISR.Timer);
-                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
                     log.debug("HANDLING SERIAL\n", .{});
                     self.bus.interrupt_flag.enable_serial = false;
                     self.pc = @intFromEnum(ISR.Serial);
-                    self.clock.t_cycles += 20;
                 } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
                     log.debug("HANDLING JOYPAD\n", .{});
                     self.bus.interrupt_flag.enable_joypad = false;
                     self.pc = @intFromEnum(ISR.Joypad);
-                    self.clock.t_cycles += 20;
+                } else {
+                    // IF cancelled by the push (overwrote IE/IF): jump to 0x0000.
+                    self.pc = 0x0000;
                 }
+                self.mcycle(); // [int]: load vector into PC
+                self.clock.t_cycles += 20;
                 return true;
             }
         }
@@ -2059,8 +2097,10 @@ pub const CPU = struct {
 
         beeg_print(self);
         if (self.halt_state == HaltState.Enabled) {
+            self.mcycle(); // halted: one M-cycle of peripheral progress per step
             self.clock.t_cycles += 4;
         } else {
+            self.mcycle(); // M1: opcode fetch (peripherals advance, then read)
             var instruction_byte = self.bus.read_byte(self.pc);
             // debug log fetch
             self.fetch_log_pcs[self.fetch_log_index & 0xFF] = self.pc;
@@ -2069,8 +2109,9 @@ pub const CPU = struct {
             self.last_opcode = instruction_byte;
             const prefixed = instruction_byte == 0xCB;
             if (prefixed) {
+                self.mcycle(); // M2: CB op-byte fetch
                 instruction_byte = self.bus.read_byte(self.pc +% 1);
-                self.clock.t_cycles += 4;
+                self.clock.t_cycles += 8; // M1 (0xCB) + M2 (op) fetch M-cycles
             }
             if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {
                 break :blk self.execute(instruction);
@@ -2091,9 +2132,12 @@ pub const CPU = struct {
     pub fn debug_fetch_log_opcodes_ptr(self: *CPU) [*]const u8 { return &self.fetch_log_opcodes; }
 
     fn jump(self: *CPU, should_jump: bool) u16 {
+        // Operands are fetched on hardware whether or not the branch is taken
+        // (JP cc not-taken is still 3 M-cycles: fetch + read lo + read hi).
+        const low = self.tick_read(self.pc +% 1);
+        const high = self.tick_read(self.pc +% 2);
         if (should_jump) {
-            const low = self.bus.read_byte(self.pc +% 1);
-            const high = self.bus.read_byte(self.pc +% 2);
+            self.mcycle(); // [int]: internal cycle that loads PC (taken = 4 M-cycles)
             const address = @as(u16, high) << 8 | @as(u16, low);
             return address;
         } else {
@@ -2101,9 +2145,11 @@ pub const CPU = struct {
         }
     }
     fn jump_relative(self: *CPU, should_jump: bool) u16 {
-        var new_pc = self.pc +% 2;
+        // The signed offset is always read (JR cc not-taken = 2 M-cycles).
+        const offset = self.read_next_byte();
         if (should_jump) {
-            const offset = self.read_next_byte();
+            self.mcycle(); // [int]: internal cycle that adjusts PC (taken = 3 M-cycles)
+            var new_pc = self.pc +% 2;
             const signed: i8 = @bitCast(offset);
             if (signed < 0) {
                 new_pc = new_pc -% @abs(signed);
@@ -2114,8 +2160,6 @@ pub const CPU = struct {
         } else {
             return self.pc +% 2;
         }
-
-        return new_pc;
     }
     fn add(self: *CPU, value: u8) u8 {
         const result = @addWithOverflow(self.registers.A, value);
@@ -2525,51 +2569,35 @@ pub const CPU = struct {
     }
 
     fn handle_prefix_instruction(self: *CPU, target: PrefixTarget, op: *const fn (*CPU, u8, PrefixExtendedArgs) u8, args: PrefixExtendedArgs) void {
+        // A CB op on a register is 2 M-cycles total (the 0xCB fetch + the op-byte
+        // fetch) — both already ticked and lumped in step(); the register form
+        // adds no further cycles. The (HL) form adds a read M-cycle, plus a write
+        // M-cycle for everything except BIT. args.r8_cycles/hl_cycles are no
+        // longer the clock source (kept only to plumb the BIT bit index).
         switch (target) {
             PrefixTarget.A => {
-                const value = self.registers.A;
-                const new_value = op(self, value, args);
-                self.registers.A = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.A = op(self, self.registers.A, args);
             },
             PrefixTarget.B => {
-                const value = self.registers.B;
-                const new_value = op(self, value, args);
-                self.registers.B = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.B = op(self, self.registers.B, args);
             },
             PrefixTarget.C => {
-                const value = self.registers.C;
-                const new_value = op(self, value, args);
-                self.registers.C = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.C = op(self, self.registers.C, args);
             },
             PrefixTarget.D => {
-                const value = self.registers.D;
-                const new_value = op(self, value, args);
-                self.registers.D = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.D = op(self, self.registers.D, args);
             },
             PrefixTarget.E => {
-                const value = self.registers.E;
-                const new_value = op(self, value, args);
-                self.registers.E = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.E = op(self, self.registers.E, args);
             },
             PrefixTarget.H => {
-                const value = self.registers.H;
-                const new_value = op(self, value, args);
-                self.registers.H = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.H = op(self, self.registers.H, args);
             },
             PrefixTarget.L => {
-                const value = self.registers.L;
-                const new_value = op(self, value, args);
-                self.registers.L = new_value;
-                self.clock.t_cycles += args.r8_cycles;
+                self.registers.L = op(self, self.registers.L, args);
             },
             PrefixTarget.HLI => {
-                const value = self.bus.read_byte(self.registers.get_HL());
+                const value = self.tick_read(self.registers.get_HL());
                 const new_value = op(self, value, args);
                 // I wrote the generalizing code for bit/res/set long before I was aware of MBC banking
                 // this lead to a nasty bug:
@@ -2593,35 +2621,45 @@ pub const CPU = struct {
                 //
                 // this check is a quick jank fix for this
                 if (op != bit) {
-                    self.bus.write_byte(self.registers.get_HL(), new_value);
+                    self.tick_write(self.registers.get_HL(), new_value);
+                    self.clock.t_cycles += 8; // read + write M-cycles
+                } else {
+                    self.clock.t_cycles += 4; // BIT (HL): read only (3 M-cycles)
                 }
-                self.clock.t_cycles += args.hl_cycles;
             },
         }
     }
 
+    /// Stack push: 2 M-cycles (write hi, then write lo). The caller is
+    /// responsible for any preceding internal M-cycle (PUSH/CALL/RST/interrupt
+    /// all have a [int] before the writes).
     fn push(self: *CPU, value: u16) void {
         const high: u8 = @truncate(value >> 8);
         self.sp = self.sp -% 1;
-        self.bus.write_byte(self.sp, high);
+        self.tick_write(self.sp, high);
 
         const low: u8 = @truncate(value & 0xFF);
         self.sp = self.sp -% 1;
-        self.bus.write_byte(self.sp, low);
+        self.tick_write(self.sp, low);
     }
 
+    /// Stack pop: 2 M-cycles (read lo, then read hi).
     fn pop(self: *CPU) u16 {
-        const low = self.bus.read_byte(self.sp);
+        const low = self.tick_read(self.sp);
         self.sp = self.sp +% 1;
-        const high = self.bus.read_byte(self.sp);
+        const high = self.tick_read(self.sp);
         self.sp = self.sp +% 1;
         return @as(u16, high) << 8 | @as(u16, low);
     }
 
     fn call(self: *CPU, next_pc: u16, should_call: bool) u16 {
+        // Hardware order: read target lo (M2), read hi (M3) — always, even when
+        // the condition is false (CALL cc not-taken = 3 M-cycles). When taken:
+        // internal cycle (M4) then push return address (M5 hi, M6 lo).
+        const address = self.read_next_word();
         if (should_call) {
+            self.mcycle(); // [int] before the push
             self.push(next_pc);
-            const address = self.read_next_word();
             return address;
         } else {
             return next_pc;
@@ -2635,7 +2673,8 @@ pub const CPU = struct {
 
     fn ret(self: *CPU, should_return: bool) u16 {
         if (should_return) {
-            const address = self.pop();
+            const address = self.pop(); // read lo, hi
+            self.mcycle(); // [int]: set PC
             return address;
         } else {
             return self.pc +% 1;
@@ -2648,17 +2687,23 @@ pub const CPU = struct {
     }
 
     fn ei(self: *CPU) u16 {
-        self.ime = IME.EILagCycle;
+        // EI enables IME after the *following* instruction. Only arm the one-cycle
+        // delay when IME is currently off — a run of consecutive EIs must not keep
+        // re-arming the delay (which would prevent the interrupt from ever being
+        // serviced). Once IME is on (or already pending), EI is a no-op.
+        if (self.ime == IME.Disabled) self.ime = IME.EILagCycle;
         return self.pc +% 1;
     }
 
     fn reti(self: *CPU) u16 {
         self.ime = IME.Enabled;
-        const address = self.pop();
+        const address = self.pop(); // read lo, hi
+        self.mcycle(); // [int]: set PC
         return address;
     }
     fn rst(self: *CPU, location: RstLocation) u16 {
         const address: u16 = @intFromEnum(location);
+        self.mcycle(); // [int] before the push
         self.push(self.pc +% 1);
         return address;
     }
@@ -2694,17 +2739,17 @@ pub const CPU = struct {
     }
 
     fn read_next_byte(self: *CPU) u8 {
-        const byte = self.bus.read_byte(self.pc +% 1);
+        const byte = self.tick_read(self.pc +% 1);
         return byte;
     }
 
     fn write_next_byte(self: *CPU, byte: u8) void {
-        self.bus.write_byte(self.pc +% 1, byte);
+        self.tick_write(self.pc +% 1, byte);
     }
 
     fn read_next_word(self: *CPU) u16 {
-        const low = self.bus.read_byte(self.pc +% 1);
-        const high = self.bus.read_byte(self.pc +% 2);
+        const low = self.tick_read(self.pc +% 1);
+        const high = self.tick_read(self.pc +% 2);
         return @as(u16, high) << 8 | @as(u16, low);
     }
 };

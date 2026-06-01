@@ -100,7 +100,7 @@ fn gradeMooneye(gb: *Gameboy, detail_buf: []u8) Result {
             return .{ .verdict = .fail, .detail = "failure magic (0x42)" };
     }
     const r = &gb.cpu.registers;
-    const d = std.fmt.bufPrint(detail_buf, "no magic; B={X:0>2} C={X:0>2} D={X:0>2} E={X:0>2} H={X:0>2} L={X:0>2}", .{ r.B, r.C, r.D, r.E, r.H, r.L }) catch "no magic";
+    const d = std.fmt.bufPrint(detail_buf, "no magic; PC={X:0>4} SP={X:0>4} LY={d} B={X:0>2} C={X:0>2} D={X:0>2} E={X:0>2} H={X:0>2} L={X:0>2}", .{ gb.cpu.pc, gb.cpu.sp, gb.gpu.ly, r.B, r.C, r.D, r.E, r.H, r.L }) catch "no magic";
     return .{ .verdict = .fail, .detail = d };
 }
 
