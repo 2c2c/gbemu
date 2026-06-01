@@ -658,9 +658,7 @@ pub const CPU = struct {
         return self.bus.read_byte(addr);
     }
 
-    /// Tick one M-cycle, then write (peripherals stepped to the write's cycle
-    /// before the store applies — this is what makes the timer write path
-    /// observe the correct internal_clock at FF04-FF07).
+    /// Write M-cycle (peripherals stepped to the write's cycle before the store).
     pub fn tick_write(self: *CPU, addr: u16, value: u8) void {
         self.mcycle();
         self.bus.write_byte(addr, value);

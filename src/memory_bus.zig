@@ -312,7 +312,16 @@ pub const MemoryBus = struct {
                     }
                 },
                 0xFF04 => {
+                    const before_delay = self.timer.tima_cycles_till_interrupt;
                     self.timer.clock_update(@bitCast(@as(u64, 0)));
+                    // A DIV reset can drop the selected mux bit and glitch-overflow
+                    // TIMA; like the TAC case, recognize the interrupt at this
+                    // instruction's boundary rather than 4 T-cycles late.
+                    if (before_delay == 0 and self.timer.tima_cycles_till_interrupt > 0) {
+                        self.timer.tima = self.timer.tma;
+                        self.timer.tima_cycles_till_interrupt = 0;
+                        self.interrupt_flag.enable_timer = true;
+                    }
                     log.debug("div reset 0b{b:0>8}\n", .{@as(u64, @bitCast(self.timer.internal_clock))});
                 },
                 0xFF05 => {
@@ -339,8 +348,20 @@ pub const MemoryBus = struct {
                     // the hardware's spurious TIMA increment (and prev_bit is left
                     // holding the real bit). The old code used only the enable bit,
                     // which broke rapid_toggle and corrupted prev_bit for div_write.
+                    const before_delay = self.timer.tima_cycles_till_interrupt;
                     self.timer.tac = @bitCast(byte);
                     self.timer.clock_update(self.timer.internal_clock);
+                    // If the glitch overflowed TIMA, the write lands at the end of
+                    // its own M-cycle, so the reload + interrupt are recognized at
+                    // this instruction's boundary rather than 4 T-cycles later. With
+                    // cycle-accurate inline timer stepping those 4 cycles would
+                    // otherwise spill into the next instruction and shift the
+                    // interrupt one instruction late (mooneye rapid_toggle).
+                    if (before_delay == 0 and self.timer.tima_cycles_till_interrupt > 0) {
+                        self.timer.tima = self.timer.tma;
+                        self.timer.tima_cycles_till_interrupt = 0;
+                        self.interrupt_flag.enable_timer = true;
+                    }
                 },
                 0xFF0F => {
                     self.interrupt_flag = @bitCast(byte);

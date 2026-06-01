@@ -31,20 +31,29 @@ Model implemented (transition form, lumps kept as clock source):
 
 Results (native `zig build testrunner`):
 - blargg CPU **12/12** (incl. `instr_timing`, which the old atomic core failed).
-- mooneye timer **12/13** — `rapid_toggle` regressed (see gaps).
+- mooneye timer **13/13** (including `rapid_toggle`).
 - mooneye flipped to PASS: `ei_sequence`, `if_ie_registers`, `pop_timing`,
   `oam_dma/basic` (plus `ei_timing`/`intr_timing`/`div_timing` stay green).
 - Games verified rendering correctly via `tools/verify_wasm.sh` (re-baselined) and
   an 8-ROM smoke test (tetris, kirby, dr_mario, pokemon_blue, links_awakening,
   sml, sml2, donkey_kong). Native unit tests + `zig build check` green.
 
+### rapid_toggle fix (timer 12/13 → 13/13)
+
+Inline timer stepping is hardware-correct and the per-T glitch sequence matched
+the old core exactly (verified by logging both). The single-iteration divergence
+was *interrupt recognition*: a TAC/DIV write that glitch-overflows TIMA does so at
+the end of the write's M-cycle, so the 4-T reload window spilled into the next
+instruction and the timer IRQ was recognized one instruction late. Because the
+write lands at the M-cycle boundary, `memory_bus` now reloads TIMA and raises the
+timer IF immediately when a FF04/FF07 write overflows TIMA (instead of deferring 4
+T). The counter/enable phase still commits at the M-cycle end (tick-before-write),
+so `tim00..11` keep passing — flipping the *whole* write order to before-tick
+fixed rapid_toggle but broke 5 other timer tests, so the fix is scoped to the
+overflow-recognition path only.
+
 ## Remaining gaps (need work beyond the CPU core)
 
-- `rapid_toggle` (timer 12/13): timer-register accesses now step the timer to the
-  exact access M-cycle (hardware-correct), but the `memory_bus` FF04/FF07
-  falling-edge workaround was tuned for the *old* deferred-stepping model. The
-  other 12 timer tests pass; reconciling this one needs a sub-M-cycle rework of the
-  timer mux/edge model (a +1 T-cycle write-placement experiment did not fix it).
 - The OAM-DMA-dependent timing tests — `jp/jp_cc/call/call2/call_cc/call_cc2/ret/
   ret_cc/reti/push/rst/add_sp_e/ld_hl_sp_e_timing` and `oam_dma_timing/start/
   restart`, `oam_dma/reg_read` — now *run to completion* (the bus conflict stopped

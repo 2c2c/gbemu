@@ -113,6 +113,33 @@ pub fn main(init: std.process.Init) !void {
         return error.Usage;
     }
     const mode = args[1];
+
+    // Debug mode: step a ROM until PC hits a watch address, print registers.
+    //   testrunner watch <rom> <hexaddr>
+    if (std.mem.eql(u8, mode, "watch")) {
+        const rom_path = args[2];
+        const watch = try std.fmt.parseInt(u16, args[3], 16);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var steps: u64 = 0;
+        while (steps < 200_000_000) : (steps += 1) {
+            if (gb.cpu.pc == watch) {
+                const r = &gb.cpu.registers;
+                std.debug.print("HIT {X:0>4} after {d} steps: BC={X:0>2}{X:0>2} DE={X:0>2}{X:0>2} HL={X:0>2}{X:0>2} A={X:0>2}\n", .{ watch, steps, r.B, r.C, r.D, r.E, r.H, r.L, r.A });
+                return;
+            }
+            _ = gb.cpu.step();
+            gb.cpu.hit_vblank = false;
+            var rem = gb.cpu.pending_t_cycles - gb.cpu.inline_ticked;
+            while (rem > 0) : (rem -= 1) gb.cpu.tick_peripherals_one();
+        }
+        std.debug.print("never hit {X:0>4}\n", .{watch});
+        return;
+    }
+
     const is_blargg = std.mem.eql(u8, mode, "blargg");
 
     var pass: u32 = 0;

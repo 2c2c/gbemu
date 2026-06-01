@@ -12,7 +12,7 @@ echo "############ BLARGG CPU (11 sub-tests + instr_timing = 12/12) ############
 ./zig-out/bin/testrunner blargg games/blargg/0*.gb games/blargg/1*.gb 2>&1 | tail -2
 
 echo ""
-echo "############ MOONEYE TIMER (12/13 — rapid_toggle is a known regression) ############"
+echo "############ MOONEYE TIMER (must stay 13/13) ############"
 ./zig-out/bin/testrunner mooneye games/mooneye/acceptance/timer/*.gb 2>&1 | tail -2
 
 echo ""
