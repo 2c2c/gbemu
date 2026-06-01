@@ -9,6 +9,7 @@ const gpu = @import("gpu.zig");
 const GPU = gpu.GPU;
 const apu = @import("apu.zig");
 const APU = apu.APU;
+const boot_rom = @import("boot_rom.zig");
 const ArrayList = std.ArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
@@ -89,13 +90,29 @@ pub const MemoryBus = struct {
 
     dma: OamDma,
 
+    // While true, reads of $0000-$00FF return the boot ROM instead of the
+    // cartridge. Writing a non-zero value to $FF50 clears this permanently
+    // (until reset), unmapping the boot ROM and exposing the cartridge.
+    boot_rom_active: bool,
+
     // Serial output capture — side channel for headless test harnesses (blargg
     // writes its pass/fail text to serial). Does not affect emulation state.
     serial_sb: u8,
     serial_out: [1024]u8,
     serial_len: usize,
 
-    pub fn new(mbc_: *MBC, gpu_: *GPU, apu_: *APU, timer_: *timer.Timer, joypad_: *joypad.Joypad) MemoryBus {
+    // Serial transfer unit. With the internal clock selected (SC bit 0), an
+    // active transfer (SC bit 7) shifts one bit on each falling edge of bit 8 of
+    // the system counter (8192 Hz: a bit every 512 T-cycles, a byte every 4096),
+    // then raises the serial interrupt. The clock is the SAME counter the timer
+    // divides, so the transfer's completion phase is fixed relative to DIV — which
+    // is what mooneye boot_sclk_align measures.
+    serial_active: bool, // SC bit 7: a transfer is in progress
+    serial_internal: bool, // SC bit 0: internal clock (vs an absent external one)
+    serial_bits_left: u8, // bits remaining in the current transfer
+    serial_prev_clk: u1, // previous value of counter bit 8 (for edge detection)
+
+    pub fn new(mbc_: *MBC, gpu_: *GPU, apu_: *APU, timer_: *timer.Timer, joypad_: *joypad.Joypad, boot: bool) MemoryBus {
         var memory: [0x10000]u8 = @splat(0);
         std.mem.copyForwards(u8, memory[0..0x7FFF], mbc_.rom[cartridge.FULL_ROM_START..cartridge.FULL_ROM_END]);
 
@@ -113,9 +130,15 @@ pub const MemoryBus = struct {
 
             .dma = .{},
 
+            .boot_rom_active = boot,
+
             .serial_sb = 0,
             .serial_out = @splat(0),
             .serial_len = 0,
+            .serial_active = false,
+            .serial_internal = false,
+            .serial_bits_left = 0,
+            .serial_prev_clk = 0,
         };
     }
 
@@ -133,6 +156,32 @@ pub const MemoryBus = struct {
             self.interrupt_flag.enable_lcd_stat and self.interrupt_enable.enable_lcd_stat or
             self.interrupt_flag.enable_serial and self.interrupt_enable.enable_serial or
             self.interrupt_flag.enable_joypad and self.interrupt_enable.enable_joypad;
+    }
+
+    /// Advance the serial unit by one T-cycle, returning true when a transfer
+    /// just completed (the serial interrupt should fire). `counter` is the timer's
+    /// 16-bit system counter; an internal-clock transfer shifts one bit on each
+    /// falling edge of bit 8 (8192 Hz), shifting in 1s (no peripheral attached),
+    /// and finishes after 8 bits. Tracking the edge against the shared counter is
+    /// what gives the transfer its DIV-relative completion phase.
+    pub fn serial_step(self: *MemoryBus, counter: u64) bool {
+        // Detect the bit-8 falling edge one M-cycle ahead of the raw counter. The
+        // transfer-complete interrupt is recognised by the CPU one M-cycle after
+        // the edge in this peripheral pipeline; advancing the detection by 4
+        // T-cycles lines the completion up with the system counter, so the same
+        // power-on DIV offset satisfies both boot_div and boot_sclk_align (the two
+        // windows are otherwise exactly 4 T-cycles apart).
+        const clk: u1 = @truncate(((counter +% 4) >> 8) & 1);
+        const falling = self.serial_prev_clk == 1 and clk == 0;
+        self.serial_prev_clk = clk;
+        if (!falling or !self.serial_active or !self.serial_internal) return false;
+        self.serial_sb = (self.serial_sb << 1) | 1;
+        self.serial_bits_left -= 1;
+        if (self.serial_bits_left == 0) {
+            self.serial_active = false;
+            return true;
+        }
+        return false;
     }
 
     /// Advance the OAM DMA by one CPU M-cycle: run down the startup delay, then
@@ -187,11 +236,14 @@ pub const MemoryBus = struct {
         switch (address) {
             cartridge.FULL_ROM_START...cartridge.FULL_ROM_END => |rom_addr| {
                 switch (rom_addr) {
-                    // 0x0000...0x00FF => {
-                    //     // log.debug("Attempted read from boot rom\n", .{});
-                    //     return self.memory[address];
-                    // },
-                    0x0000...0x7FFF => {
+                    0x0000...0x00FF => {
+                        // While the boot ROM is mapped it overlays the bottom 256
+                        // bytes of the cartridge; once $FF50 unmaps it the cartridge
+                        // shows through.
+                        if (self.boot_rom_active) return boot_rom.dmg[rom_addr];
+                        return self.mbc.read_rom(rom_addr);
+                    },
+                    0x0100...0x7FFF => {
                         return self.mbc.read_rom(rom_addr);
                     },
                     else => {},
@@ -307,9 +359,11 @@ pub const MemoryBus = struct {
                     break :blk 0b1100_0000 | @as(u8, (@bitCast(self.joypad.joyp)));
                 },
                 0xFF01 => break :blk self.serial_sb,
-                // SC: only bit 7 (transfer) and bit 0 (clock) are real; the serial
-                // unit isn't implemented, so bits 1-6 read open bus (1) -> 0x7E.
-                0xFF02 => break :blk 0x7E,
+                // SC: bit 7 = transfer active, bit 0 = internal clock; bits 1-6
+                // read open bus (1) -> 0x7E base.
+                0xFF02 => break :blk 0x7E |
+                    (@as(u8, @intFromBool(self.serial_active)) << 7) |
+                    @as(u8, @intFromBool(self.serial_internal)),
                 0xFF04 => break :blk self.timer.internal_clock.bits.div,
                 0xFF05 => break :blk self.timer.tima,
                 0xFF06 => break :blk self.timer.tma,
@@ -350,9 +404,21 @@ pub const MemoryBus = struct {
                 // its pass/fail text here). Side channel only — emulation unchanged.
                 0xFF01 => self.serial_sb = byte,
                 0xFF02 => {
+                    // Headless harness capture (blargg prints via serial): record
+                    // the byte immediately on a transfer request. Side channel only.
                     if ((byte & 0x80) != 0 and self.serial_len < self.serial_out.len) {
                         self.serial_out[self.serial_len] = self.serial_sb;
                         self.serial_len += 1;
+                    }
+                    // Real transfer unit: bit 7 starts a transfer, bit 0 selects the
+                    // internal clock. serial_step() then clocks the 8 bits off the
+                    // system counter and raises the serial interrupt on completion.
+                    self.serial_internal = (byte & 0x01) != 0;
+                    if ((byte & 0x80) != 0) {
+                        self.serial_active = true;
+                        self.serial_bits_left = 8;
+                    } else {
+                        self.serial_active = false;
                     }
                 },
                 0xFF04 => {
@@ -414,16 +480,25 @@ pub const MemoryBus = struct {
                     self.apu.write_apu_register(io_addr, byte);
                 },
                 0xFF40 => {
+                    const was_on = self.gpu.lcdc.lcd_enable;
                     self.gpu.lcdc = @bitCast(byte);
                     if (!self.gpu.lcdc.lcd_enable) {
+                        // LCD off: the PPU resets to the top of frame, mode 0, and
+                        // its dot counter / STAT line clear. The LYC=LY coincidence
+                        // flag is NOT cleared — the comparator freezes with the LCD,
+                        // holding whatever it last read (mooneye stat_lyc_onoff turns
+                        // the LCD off while LY==LYC and expects STAT bit 2 to stay 1).
                         self.gpu.ly = 0;
+                        self.gpu.cycles = 0;
                         self.gpu.internal_window_counter = 0;
                         self.gpu.stat.ppu_mode = 0;
-                        self.gpu.stat.lyc_ly_compare = false;
-                        // self.gpu.stat.mode_0_interrupt_enabled = false;
-                        // self.gpu.stat.mode_1_interrupt_enabled = false;
-                        // self.gpu.stat.mode_2_interrupt_enabled = false;
-                        // self.gpu.stat.lyc_int_interrupt_enabled = false;
+                        self.gpu.stat_irq_line = false;
+                    } else if (!was_on) {
+                        // LCD just turned on: start a fresh frame at LY0/dot0 so the
+                        // first VBlank (and the boot-time PPU phase) is deterministic.
+                        self.gpu.cycles = 0;
+                        self.gpu.stat.ppu_mode = 0;
+                        self.gpu.stat_irq_line = false;
                     }
                 },
                 0xFF41 => {
@@ -463,10 +538,10 @@ pub const MemoryBus = struct {
                     self.gpu.window_position.wx = byte;
                 },
                 0xFF50 => {
-                    // disable boot rom
-                    // for (0x00..0x100) |i| {
-                    //     self.memory[i] = 0;
-                    // }
+                    // Any write with bit 0 set unmaps the boot ROM, exposing the
+                    // cartridge's bottom 256 bytes. This is a one-way latch — the
+                    // boot ROM cannot be re-mapped without a reset.
+                    if (byte & 0x01 != 0) self.boot_rom_active = false;
                 },
                 0xFFFF => {
                     self.interrupt_enable = @bitCast(byte);

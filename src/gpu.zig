@@ -183,7 +183,20 @@ pub const GPU = struct {
     /// LY == LYC trigger STAT interrupt
     /// 0-153
     lyc: u8,
+    /// Dot position within the current scanline (0..455). The PPU is stepped one
+    /// dot per T-cycle, so this is the cycle-accurate horizontal position that
+    /// drives mode 2/3/0 transitions.
     cycles: usize,
+
+    /// Mode 3 (pixel transfer) length in dots for the current scanline, latched
+    /// when mode 3 begins. Base 172 + the SCX fine-scroll penalty (SCX & 7),
+    /// + sprite penalties. Mode 0 (HBlank) fills the rest of the 456-dot line.
+    line3_len: u16 = 172,
+
+    /// Previous state of the combined STAT interrupt line (OR of the enabled
+    /// mode/LYC sources). The STAT interrupt fires only on its rising edge, which
+    /// is the "STAT blocking" behaviour mooneye stat_irq_blocking checks.
+    stat_irq_line: bool = false,
 
     pub fn new() GPU {
         // const obp: [2]Palette = .{
@@ -249,97 +262,86 @@ pub const GPU = struct {
         lcd_stat: bool,
         vblank: bool,
     };
+    // PPU timing (DMG, in dots == T-cycles).
+    const DOTS_PER_LINE: usize = 456;
+    const MODE2_DOTS: usize = 80; // OAM scan
+    const MODE3_BASE: u16 = 172; // pixel transfer, before SCX/sprite penalties
+    const VBLANK_LY: u8 = 144;
+    const TOTAL_LINES: u8 = 154;
+
     pub fn step(self: *GPU, cycles: u64) IFEnableRequests {
-        var updated_flags = IFEnableRequests{ .lcd_stat = false, .vblank = false };
-        if (!self.lcdc.lcd_enable) {
-            return updated_flags;
-        }
-
-    self.cycles +%= @as(usize, @intCast(cycles));
-
-        switch (self.stat.ppu_mode) {
-            // Horizontal blank
-            0b00 => {
-                if (self.cycles >= 204) {
-                    self.cycles = self.cycles % 204;
-                    self.ly += 1;
-
-                    if (self.ly >= 144) {
-                        // if (self.ly >= 90) {
-                        self.stat.ppu_mode = 0b01;
-                        updated_flags.vblank = true;
-                        if (self.stat.mode_1_interrupt_enabled) {
-                            updated_flags.lcd_stat = true;
-                        }
-                    } else {
-                        self.stat.ppu_mode = 0b10;
-                        if (self.stat.mode_2_interrupt_enabled) {
-                            updated_flags.lcd_stat = true;
-                        }
-                    }
-                    self.lyc_ly_check(&updated_flags);
-                }
-            },
-            // Vertical blank
-            0b01 => {
-                if (self.cycles >= 456) {
-                    self.cycles = self.cycles % 456;
-                    self.ly += 1;
-                    if (self.ly >= 154) {
-                        self.ly = 0;
-                        self.internal_window_counter = 0;
-                        self.stat.ppu_mode = 0b10;
-                        if (self.stat.mode_2_interrupt_enabled) {
-                            updated_flags.lcd_stat = true;
-                        }
-                        // self.render_full_bg();
-                    }
-                    self.lyc_ly_check(&updated_flags);
-                }
-            },
-            // OAM read
-            0b10 => {
-                if (self.cycles >= 80) {
-                    self.cycles = self.cycles % 80;
-                    self.stat.ppu_mode = 0b11;
-                }
-            },
-            // VRAM read
-            0b11 => {
-                if (self.cycles >= 172) {
-                    self.cycles = self.cycles % 172;
-                    if (self.stat.mode_0_interrupt_enabled) {
-                        updated_flags.lcd_stat = true;
-                    }
-                    self.stat.ppu_mode = 0b00;
-                    self.render_scanline();
-
-                    // log.debug("scx {} scy {} ly {}  wx {} wy {}\n", .{
-                    //     self.background_viewport.scx,
-                    //     self.background_viewport.scy,
-                    //     self.ly,
-                    //     self.window_position.wx,
-                    //     self.window_position.wy,
-                    // });
-
-                    // log.debug("BGP 0b{b:0>8} OBP0 0b{b:0>8} OBP1 0b{b:0>8}\n", .{
-                    //     @as(u8, @bitCast(self.bgp)),
-                    //     @as(u8, @bitCast(self.obp[0])),
-                    //     @as(u8, @bitCast(self.obp[1])),
-                    // });
-                }
-            },
-        }
-        // log.debug("cycles {} ly {} ppu_mode {}\n", .{ self.cycles, self.ly, self.stat.ppu_mode });
-        return updated_flags;
+        var flags = IFEnableRequests{ .lcd_stat = false, .vblank = false };
+        if (!self.lcdc.lcd_enable) return flags;
+        // The PPU is stepped one dot per T-cycle (gpu.step(1)); loop for safety in
+        // case it is ever called with a lump.
+        var n: u64 = cycles;
+        while (n > 0) : (n -= 1) self.tick_dot(&flags);
+        return flags;
     }
 
-    fn lyc_ly_check(self: *GPU, request: *IFEnableRequests) void {
-        const check = self.ly == self.lyc;
-        if (check and self.stat.lyc_int_interrupt_enabled) {
-            request.lcd_stat = true;
+    /// Advance the PPU one dot. Drives mode 2 -> 3 -> 0 across each visible line
+    /// and mode 1 over VBlank, fires the VBlank IRQ on entering line 144, renders
+    /// a scanline when pixel transfer (mode 3) ends, and raises the STAT IRQ on
+    /// the rising edge of the combined (mode + LYC) STAT line.
+    fn tick_dot(self: *GPU, flags: *IFEnableRequests) void {
+        // Advance the horizontal dot; wrap to the next scanline every 456 dots.
+        self.cycles += 1;
+        if (self.cycles >= DOTS_PER_LINE) {
+            self.cycles = 0;
+            self.ly += 1;
+            if (self.ly >= TOTAL_LINES) {
+                self.ly = 0;
+                self.internal_window_counter = 0;
+            }
         }
-        self.stat.lyc_ly_compare = check;
+        const dot = self.cycles;
+
+        // Latch this line's mode-3 length when pixel transfer begins (samples SCX).
+        if (self.ly < VBLANK_LY and dot == MODE2_DOTS) {
+            self.line3_len = self.mode3_length();
+        }
+
+        // Mode implied by the current (ly, dot).
+        const mode: u2 = if (self.ly >= VBLANK_LY)
+            1
+        else if (dot < MODE2_DOTS)
+            2
+        else if (dot < MODE2_DOTS + self.line3_len)
+            3
+        else
+            0;
+
+        if (mode != self.stat.ppu_mode) {
+            // Pixel transfer just finished: emit the scanline for this line.
+            if (mode == 0 and self.stat.ppu_mode == 3) self.render_scanline();
+            // Entering VBlank (LY=144) requests the VBlank interrupt.
+            if (mode == 1) flags.vblank = true;
+            self.stat.ppu_mode = mode;
+        }
+
+        // LYC==LY comparison is evaluated continuously.
+        self.stat.lyc_ly_compare = (self.ly == self.lyc);
+
+        // STAT interrupt: the combined source line is the OR of the enabled mode
+        // and LYC sources; the interrupt fires only on its rising edge (this is
+        // the STAT-blocking behaviour). The OAM (mode 2) source also pulses at the
+        // start of line 144 — the VBlank line triggers the OAM-scan STAT signal in
+        // addition to the VBlank one (mooneye vblank_stat_intr).
+        const oam_source = mode == 2 or (self.ly == VBLANK_LY and dot < MODE2_DOTS);
+        const stat_line =
+            (self.stat.mode_0_interrupt_enabled and mode == 0) or
+            (self.stat.mode_1_interrupt_enabled and mode == 1) or
+            (self.stat.mode_2_interrupt_enabled and oam_source) or
+            (self.stat.lyc_int_interrupt_enabled and self.stat.lyc_ly_compare);
+        if (stat_line and !self.stat_irq_line) flags.lcd_stat = true;
+        self.stat_irq_line = stat_line;
+    }
+
+    /// Mode 3 (pixel transfer) length for the current line: base 172 dots plus the
+    /// SCX fine-scroll penalty (the first SCX&7 pixels are discarded, extending
+    /// mode 3 by that many dots). Sprite/window penalties are added later.
+    fn mode3_length(self: *GPU) u16 {
+        return MODE3_BASE + (self.background_viewport.scx & 7);
     }
 
     fn render_scanline(self: *GPU) void {

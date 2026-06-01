@@ -48,7 +48,10 @@ pub const Joypad = struct {
 
     pub fn new() Joypad {
         return Joypad{
-            .joyp = @bitCast(@as(u8, 0xFF)),
+            // Power-on: the two select lines (P14/P15, bits 4-5) read low and
+            // nothing is pressed, so P1 reads $CF (the boot ROM never writes it).
+            // 0x0F == unpressed nibble $F, select=Both(0b00).
+            .joyp = @bitCast(@as(u8, 0x0F)),
             .button = .{
                 .pressed = .{
                     .A = false,

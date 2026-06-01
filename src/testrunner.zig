@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const Gameboy = @import("gameboy.zig").Gameboy;
+const timer_mod = @import("timer.zig");
 
 const Verdict = enum { pass, fail, timeout, load_error };
 
@@ -129,6 +130,7 @@ pub fn main(init: std.process.Init) !void {
             if (gb.cpu.pc == watch) {
                 const r = &gb.cpu.registers;
                 std.debug.print("HIT {X:0>4} after {d} steps: BC={X:0>2}{X:0>2} DE={X:0>2}{X:0>2} HL={X:0>2}{X:0>2} A={X:0>2}\n", .{ watch, steps, r.B, r.C, r.D, r.E, r.H, r.L, r.A });
+                std.debug.print("  GPU: LY={d} LYC={d} mode={d} cycles={d} clock=0x{X} (DIV={X:0>2})\n", .{ gb.gpu.ly, gb.gpu.lyc, gb.gpu.stat.ppu_mode, gb.gpu.cycles, @as(u64, @bitCast(gb.timer.internal_clock)), gb.timer.internal_clock.bits.div });
                 return;
             }
             _ = gb.cpu.step();
@@ -137,6 +139,119 @@ pub fn main(init: std.process.Init) !void {
             while (rem > 0) : (rem -= 1) gb.cpu.tick_peripherals_one();
         }
         std.debug.print("never hit {X:0>4}\n", .{watch});
+        return;
+    }
+
+    // Debug mode: run the boot ROM until handoff (PC reaches $0100) and dump the
+    // CPU + IO state the mooneye boot_regs/boot_hwio/boot_div tests sample there.
+    //   testrunner bootdump <rom>
+    if (std.mem.eql(u8, mode, "bootdump")) {
+        const rom_path = args[2];
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var steps: u64 = 0;
+        // Capture the clock the first time PC reaches each checkpoint in the
+        // SameBoy DMG boot ROM, so we can attribute pre-LCD-enable cycles to
+        // segments: VRAM clear, logo decode, tilemap setup, then LCD enable.
+        const checkpoints = [_]u16{ 0x0006, 0x000C, 0x0026, 0x0034, 0x0040, 0x0055, 0x005B };
+        var cp_clock: [checkpoints.len]u64 = @splat(0);
+        var cp_hit: [checkpoints.len]bool = @splat(false);
+        while (steps < 50_000_000 and gb.cpu.pc != 0x0100) : (steps += 1) {
+            for (checkpoints, 0..) |cp, idx| {
+                if (!cp_hit[idx] and gb.cpu.pc == cp) {
+                    cp_hit[idx] = true;
+                    cp_clock[idx] = @bitCast(gb.timer.internal_clock);
+                }
+            }
+            _ = gb.cpu.step();
+            gb.cpu.hit_vblank = false;
+            var rem = gb.cpu.pending_t_cycles - gb.cpu.inline_ticked;
+            while (rem > 0) : (rem -= 1) gb.cpu.tick_peripherals_one();
+        }
+        for (checkpoints, 0..) |cp, idx| {
+            const prev: u64 = if (idx == 0) 0 else cp_clock[idx - 1];
+            std.debug.print("  PC {X:0>4}: clock={d}  (segment delta={d})\n", .{ cp, cp_clock[idx], cp_clock[idx] - prev });
+        }
+        const r = &gb.cpu.registers;
+        std.debug.print("handoff at PC={X:0>4} after {d} steps (boot_active={})\n", .{ gb.cpu.pc, steps, gb.memory_bus.boot_rom_active });
+        std.debug.print("AF={X:0>2}{X:0>2} BC={X:0>2}{X:0>2} DE={X:0>2}{X:0>2} HL={X:0>2}{X:0>2} SP={X:0>4}\n", .{ r.A, @as(u8, @bitCast(r.F)), r.B, r.C, r.D, r.E, r.H, r.L, gb.cpu.sp });
+        std.debug.print("DIV(FF04)={X:0>2}  internal_clock=0x{X}\n", .{ gb.timer.internal_clock.bits.div, @as(u64, @bitCast(gb.timer.internal_clock)) });
+        var addr: u16 = 0xFF00;
+        while (addr <= 0xFF4B) : (addr += 1) {
+            std.debug.print("{X:0>4}={X:0>2} ", .{ addr, gb.memory_bus.read_io(addr) });
+            if ((addr & 0x7) == 0x7) std.debug.print("\n", .{});
+        }
+        std.debug.print("\nFF50={X:0>2} FFFF(IE)={X:0>2}\n", .{ gb.memory_bus.read_byte(0xFF50), @as(u8, @bitCast(gb.memory_bus.interrupt_enable)) });
+        return;
+    }
+
+    // Debug mode: run a mooneye test to its result, then dump the mismatch
+    // record the mooneye test framework leaves in HRAM ($FF80 = addr LE,
+    // $FF82 = expected, $FF83 = actual). Lets us see exactly which IO register
+    // the boot_hwio sweep rejected.
+    //   testrunner mismatch <rom>
+    if (std.mem.eql(u8, mode, "mismatch")) {
+        const rom_path = args[2];
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var i: u32 = 0;
+        while (i < MOONEYE_FRAMES) : (i += 1) {
+            gb.frame();
+            const r = &gb.cpu.registers;
+            const passed = r.B == 3 and r.C == 5 and r.D == 8 and r.E == 13 and r.H == 21 and r.L == 34;
+            const failed = r.B == 0x42 and r.C == 0x42 and r.D == 0x42;
+            if (passed or failed) break;
+        }
+        const lo = gb.memory_bus.read_byte(0xFF80);
+        const hi = gb.memory_bus.read_byte(0xFF81);
+        const addr = (@as(u16, hi) << 8) | lo;
+        std.debug.print("mismatch addr={X:0>4} expected={X:0>2} actual={X:0>2}\n", .{ addr, gb.memory_bus.read_byte(0xFF82), gb.memory_bus.read_byte(0xFF83) });
+        return;
+    }
+
+    // Debug mode: sweep the power-on DIV counter and report which values make a
+    // mooneye test reach its pass magic. Used to pin the boot_div offset.
+    //   testrunner divsweep <rom> <start_hex> <end_hex> <step_hex>
+    if (std.mem.eql(u8, mode, "divsweep")) {
+        const rom_path = args[2];
+        const start = try std.fmt.parseInt(u64, args[3], 16);
+        const end = try std.fmt.parseInt(u64, args[4], 16);
+        const step = try std.fmt.parseInt(u64, args[5], 16);
+        var first_pass: ?u64 = null;
+        var last_pass: ?u64 = null;
+        var off = start;
+        while (off <= end) : (off += step) {
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
+            const a = arena.allocator();
+            const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+            timer_mod.Timer.div_power_on = off;
+            var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+            var i: u32 = 0;
+            var passed = false;
+            while (i < MOONEYE_FRAMES) : (i += 1) {
+                gb.frame();
+                const r = &gb.cpu.registers;
+                if (r.B == 3 and r.C == 5 and r.D == 8 and r.E == 13 and r.H == 21 and r.L == 34) {
+                    passed = true;
+                    break;
+                }
+                if (r.B == 0x42 and r.C == 0x42 and r.D == 0x42) break;
+            }
+            if (passed) {
+                if (first_pass == null) first_pass = off;
+                last_pass = off;
+            }
+            std.debug.print("offset=0x{X:0>4} -> {s}\n", .{ off, if (passed) "PASS" else "fail" });
+        }
+        timer_mod.Timer.div_power_on = 0;
+        if (first_pass) |fp| std.debug.print("PASS window: 0x{X:0>4} .. 0x{X:0>4}\n", .{ fp, last_pass.? }) else std.debug.print("no passing offset in range\n", .{});
         return;
     }
 

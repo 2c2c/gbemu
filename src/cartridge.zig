@@ -33,11 +33,13 @@ const MBC1_RAM_BANK_NUMBER_END = 0x5FFF;
 const MBC1_ROM_RAM_MODE_SELECT_START = 0x6000;
 const MBC1_ROM_RAM_MODE_SELECT_END = 0x7FFF;
 
-const MBC2_RAM_ENABLE_START = 0x0000;
-const MBC2_RAM_ENABLE_END = 0x00FF;
-
-const MBC2_ROM_BANK_NUMBER_START = 0x2100;
-const MBC2_ROM_BANK_NUMBER_END = 0x21FF;
+// MBC2 has a single control region (0x0000-0x3FFF). A write is a RAM-enable or
+// a ROM-bank select depending on address bit 8 (0x0100): bit 8 clear -> RAM
+// enable, bit 8 set -> ROM bank. So there are no fixed sub-ranges like the other
+// MBCs; the bit-8 test in handle_register selects the function.
+const MBC2_BIT8: u16 = 0x0100;
+// Built-in RAM: 512 cells of 4 bits, at 0xA000-0xA1FF (echoed up to 0xBFFF).
+const MBC2_RAM_LEN: usize = 512;
 
 const MBC3_RAM_RTC_ENABLE_START = 0x0000;
 const MBC3_RAM_RTC_ENABLE_END = 0x1FFF;
@@ -235,6 +237,15 @@ pub const MBC1RomAddress = packed struct {
     ram_bank: u2,
 };
 
+// MBC1 multicart (MBC1M) wiring: BANK1 is only 4 bits and BANK2 sits one bit
+// lower, so the physical bank is (BANK2 << 4) | (BANK1 & 0x0F) instead of the
+// standard (BANK2 << 5) | BANK1. Used by multi-game compilation carts.
+pub const MBC1MultiRomAddress = packed struct {
+    base: u14,
+    rom_bank: u4,
+    ram_bank: u2,
+};
+
 pub const MBC5RomAddress = packed struct {
     base: u14,
     rom_bank_low: u8,
@@ -287,6 +298,9 @@ pub const MBC = struct {
     ram_bank: u8,
     ram_enabled: bool,
     banking_mode: u8,
+    /// True for an MBC1 multicart (MBC1M) — there is no header bit for this, so it
+    /// is detected heuristically at load time (see detect_mbc1_multicart).
+    multicart: bool,
     mbc_type: MBCCartridgeType,
     rom_size: RomSize,
     ram_size: RamSize,
@@ -307,11 +321,13 @@ pub const MBC = struct {
                         self.ram_enabled = if ((byte & 0x0F) == 0x0A) true else false;
                     },
                     MBC1_ROM_BANK_NUMBER_START...MBC1_ROM_BANK_NUMBER_END => {
-                        // mask to 5 bits
+                        // BANK1: 5-bit register, and a written value of 0 reads back
+                        // as 1 (bank 0 can't be selected here). The 0->1 applies to
+                        // the full 5-bit value even on a multicart (which only wires
+                        // bits 0-3 to the address) — so writing $10 selects sub-bank
+                        // 0, not 1. The multicart read path takes the low 4 bits.
                         var masked_bank = byte & 0x1F;
-                        // 0 is set to 1, looking at all 5 bits
                         masked_bank = if (masked_bank == 0) 1 else masked_bank;
-                        masked_bank = masked_bank & 0b11111;
                         log.debug("rom_bank {} set\n", .{masked_bank});
                         self.rom_bank = masked_bank;
                     },
@@ -373,6 +389,26 @@ pub const MBC = struct {
                 }
             },
 
+            MBCCartridgeType.MBC2,
+            MBCCartridgeType.MBC2_BATTERY,
+            => {
+                // One control region (0x0000-0x3FFF). Address bit 8 selects the
+                // function: clear -> RAM enable ((value & 0x0F) == 0x0A), set ->
+                // ROM bank (low 4 bits, 0 mapped to 1). Writes at 0x4000-0x7FFF do
+                // nothing.
+                switch (address) {
+                    ROM_BANK_X0_START...ROM_BANK_X0_END => {
+                        if (address & MBC2_BIT8 == 0) {
+                            self.ram_enabled = (byte & 0x0F) == 0x0A;
+                        } else {
+                            const bank = byte & 0x0F;
+                            self.rom_bank = if (bank == 0) 1 else bank;
+                        }
+                    },
+                    else => {},
+                }
+            },
+
             else => {},
         }
     }
@@ -394,23 +430,20 @@ pub const MBC = struct {
             => {
                 switch (address) {
                     ROM_BANK_X0_START...ROM_BANK_X0_END => {
-                        const mbc1_address = MBC1RomAddress{
-                            .base = @truncate(address),
-                            .rom_bank = 0,
-                            .ram_bank = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0,
-                        };
-                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(mbc1_address)))));
-                        // log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        // In mode 1, BANK2 also banks the low region; bank 1's BANK1
+                        // bits are 0 here.
+                        const bank2: u2 = if (self.banking_mode == 1) @truncate(self.ram_bank) else 0;
+                        const full_address = if (self.multicart)
+                            self.rom_address_mask(@as(usize, @intCast(@as(u20, @bitCast(MBC1MultiRomAddress{ .base = @truncate(address), .rom_bank = 0, .ram_bank = bank2 })))))
+                        else
+                            self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(MBC1RomAddress{ .base = @truncate(address), .rom_bank = 0, .ram_bank = bank2 })))));
                         return self.rom[full_address];
                     },
                     ROM_BANK_N_START...ROM_BANK_N_END => {
-                        const mbc1_address = MBC1RomAddress{
-                            .base = @truncate(address),
-                            .rom_bank = @truncate(self.rom_bank),
-                            .ram_bank = @truncate(self.ram_bank),
-                        };
-                        const full_address = self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(mbc1_address)))));
-                        // log.info("rom bank: {} full_addr 0x{x}\n", .{ self.rom_bank, full_address });
+                        const full_address = if (self.multicart)
+                            self.rom_address_mask(@as(usize, @intCast(@as(u20, @bitCast(MBC1MultiRomAddress{ .base = @truncate(address), .rom_bank = @truncate(self.rom_bank), .ram_bank = @truncate(self.ram_bank) })))))
+                        else
+                            self.rom_address_mask(@as(usize, @intCast(@as(u21, @bitCast(MBC1RomAddress{ .base = @truncate(address), .rom_bank = @truncate(self.rom_bank), .ram_bank = @truncate(self.ram_bank) })))));
                         return self.rom[full_address];
                     },
                     else => {
@@ -465,6 +498,21 @@ pub const MBC = struct {
                     else => {
                         return 0xFF;
                     },
+                }
+            },
+            MBCCartridgeType.MBC2,
+            MBCCartridgeType.MBC2_BATTERY,
+            => {
+                switch (address) {
+                    // Bank 0 is fixed at the bottom of the address space.
+                    ROM_BANK_X0_START...ROM_BANK_X0_END => return self.rom[address],
+                    // 0x4000-0x7FFF maps to the selected 16 KiB bank (1-15).
+                    ROM_BANK_N_START...ROM_BANK_N_END => {
+                        const bank: usize = self.rom_bank;
+                        const full_address = self.rom_address_mask(bank * 0x4000 + (address - 0x4000));
+                        return self.rom[full_address];
+                    },
+                    else => return 0xFF,
                 }
             },
             else => {
@@ -557,6 +605,15 @@ pub const MBC = struct {
                     },
                 }
             },
+            MBCCartridgeType.MBC2,
+            MBCCartridgeType.MBC2_BATTERY,
+            => {
+                if (!self.ram_enabled) return 0xFF;
+                // 512 4-bit cells, echoed every 0x200 bytes across 0xA000-0xBFFF.
+                // The upper nibble is unmapped and reads back as 1s (open bus).
+                const idx = @as(usize, address - RAM_BANK_START) & (MBC2_RAM_LEN - 1);
+                return 0xF0 | (self.ram[idx] & 0x0F);
+            },
             else => {
                 set_error(1);
                 return 0xFF;
@@ -601,6 +658,11 @@ pub const MBC = struct {
                     // Implement RTC register writing if needed
                 }
             },
+            .MBC2, .MBC2_BATTERY => {
+                // Only the low nibble is stored; the 512 cells echo every 0x200.
+                const idx = @as(usize, address - RAM_BANK_START) & (MBC2_RAM_LEN - 1);
+                self.ram[idx] = value & 0x0F;
+            },
             else => {},
         }
     }
@@ -617,7 +679,7 @@ pub const MBC = struct {
         });
         const header = get_game_rom_metadata(rom);
 
-    const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+    const ram = try alloc.alloc(u8, ram_bytes_for(header));
     @memset(ram, 0);
 
         log.info("cartridge type: {}, size {}, rom size: {}, rom bytes: {}, rom banks: {}, ram size: {}\n", .{
@@ -639,6 +701,7 @@ pub const MBC = struct {
             .ram_bank = 0,
             .ram_enabled = false,
             .banking_mode = 0,
+            .multicart = detect_mbc1_multicart(rom, header.cartridge_type),
             .mbc_type = header.cartridge_type,
             .rom_size = header.rom_size,
             .ram_size = header.ram_size,
@@ -658,7 +721,7 @@ pub const MBC = struct {
         // Copy ROM bytes into owned allocation, mirroring new() semantics
         const rom = try alloc.dupe(u8, rom_source);
         const header = get_game_rom_metadata(rom);
-        const ram = try alloc.alloc(u8, header.ram_size.num_bytes());
+        const ram = try alloc.alloc(u8, ram_bytes_for(header));
         @memset(ram, 0);
         return MBC{
             .filename = &[_]u8{}, // empty filename when loaded from memory
@@ -670,6 +733,7 @@ pub const MBC = struct {
             .ram_bank = 0,
             .ram_enabled = false,
             .banking_mode = 0,
+            .multicart = detect_mbc1_multicart(rom, header.cartridge_type),
             .mbc_type = header.cartridge_type,
             .rom_size = header.rom_size,
             .ram_size = header.ram_size,
@@ -683,6 +747,35 @@ pub const MBC = struct {
         self.alloc.free(self.rom);
     }
 };
+/// Heuristically detect an MBC1 multicart. The cartridge header has no flag for
+/// it, so the standard trick is used: a multicart is a 1 MiB MBC1 ROM that stacks
+/// several games, each beginning with the Nintendo logo at offset +0x104 of its
+/// 256 KiB block. We compare each block's logo region against block 0's (no need
+/// to hardcode the logo itself) — if any later block matches, it's a multicart.
+fn detect_mbc1_multicart(rom: []const u8, mbc_type: MBCCartridgeType) bool {
+    switch (mbc_type) {
+        .MBC1, .MBC1_RAM, .MBC1_RAM_BATTERY => {},
+        else => return false,
+    }
+    if (rom.len < 0x100000) return false; // MBC1M carts are 1 MiB
+    const logo0 = rom[0x104..0x134];
+    var block: usize = 0x40000;
+    while (block + 0x134 <= rom.len) : (block += 0x40000) {
+        if (std.mem.eql(u8, logo0, rom[block + 0x104 .. block + 0x134])) return true;
+    }
+    return false;
+}
+
+/// External RAM size to allocate. MBC2 ignores the header's RAM-size byte (it is
+/// 0/None) and always has 512 built-in 4-bit cells; everything else uses the
+/// header value.
+fn ram_bytes_for(header: GameBoyRomHeader) usize {
+    return switch (header.cartridge_type) {
+        .MBC2, .MBC2_BATTERY => MBC2_RAM_LEN,
+        else => header.ram_size.num_bytes(),
+    };
+}
+
 pub fn get_game_rom_metadata(memory: []u8) GameBoyRomHeader {
     const slice = memory[0x100..0x150];
     const header: *GameBoyRomHeader = @ptrCast(slice);

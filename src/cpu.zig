@@ -612,13 +612,16 @@ pub const CPU = struct {
     pub fn tick_peripherals_one(self: *CPU) void {
         const enable_timer_flag = self.bus.timer.step();
         _ = self.bus.apu.step(self.clock);
+        // Serial is clocked off the same system counter the timer just advanced,
+        // so the falling-edge detection sees the post-step counter value.
+        const serial_irq = self.bus.serial_step(@bitCast(self.bus.timer.internal_clock));
         const gpu_irq = self.bus.gpu.step(1);
         if (gpu_irq.vblank) self.hit_vblank = true;
         self.bus.update_if_flags(IERegister{
             .enable_timer = enable_timer_flag,
             .enable_vblank = gpu_irq.vblank,
             .enable_lcd_stat = gpu_irq.lcd_stat,
-            .enable_serial = false,
+            .enable_serial = serial_irq,
             .enable_joypad = false,
         });
     }
@@ -2710,23 +2713,41 @@ pub const CPU = struct {
         return address;
     }
 
-    pub fn new(bus: *MemoryBus, mbc: *MBC) CPU {
+    pub fn new(bus: *MemoryBus, mbc: *MBC, boot: bool) CPU {
+        // Two starting states:
+        //  - boot=true:  power-on reset. Execution begins at $0000 with the boot
+        //    ROM mapped; the boot ROM sets up the registers itself, so the
+        //    pre-boot values are irrelevant (zeroed here). PC=$0000, SP=$0000.
+        //  - boot=false: the post-boot DMG state, used when skipping the boot ROM
+        //    (matches the values the boot ROM leaves for an ABC-revision DMG with
+        //    a header that produces a zero checksum carry: AF=$01B0 BC=$0013
+        //    DE=$00D8 HL=$014D SP=$FFFE PC=$0100).
+        const registers: Registers = if (boot) .{
+            .A = 0,
+            .B = 0,
+            .C = 0,
+            .D = 0,
+            .E = 0,
+            .F = @bitCast(@as(u8, 0)),
+            .H = 0,
+            .L = 0,
+        } else .{
+            .A = 0x01,
+            .B = 0x00,
+            .C = 0x13,
+            .D = 0x00,
+            .E = 0xD8,
+            .F = @bitCast(@as(u8, 0xB0)),
+            .H = 0x01,
+            .L = 0x4D,
+        };
         const cpu: CPU = CPU{
             .bus = bus,
             .mbc = mbc,
 
-            .registers = Registers{
-                .A = 0x01,
-                .B = 0x00,
-                .C = 0x13,
-                .D = 0x00,
-                .E = 0xD8,
-                .F = @bitCast(@as(u8, 0xB0)),
-                .H = 0x01,
-                .L = 0x4D,
-            },
-            .pc = 0x0100,
-            .sp = 0xFFFE,
+            .registers = registers,
+            .pc = if (boot) 0x0000 else 0x0100,
+            .sp = if (boot) 0x0000 else 0xFFFE,
             .halt_state = HaltState.Disabled,
             .is_stopped = false,
             .ime = IME.Disabled,

@@ -26,44 +26,23 @@ pub const Gameboy = struct {
     pub fn new(filename: []const u8, io: std.Io, alloc: std.mem.Allocator) !Gameboy {
         const mbc_ = try alloc.create(cartridge.MBC);
         mbc_.* = try cartridge.MBC.new(filename, io, alloc);
-
-        const gpu_ = try alloc.create(gpu.GPU);
-        gpu_.* = gpu.GPU.new();
-
-        const apu_ = try alloc.create(apu.APU);
-        apu_.* = apu.APU.new();
-
-        const joypad_ = try alloc.create(joypad.Joypad);
-        joypad_.* = joypad.Joypad.new();
-
-        const timer_ = try alloc.create(timer.Timer);
-        timer_.* = timer.Timer.new();
-        timer_.*.tac.frequency = timer.Frequency.Hz4096;
-
-        const mb = try alloc.create(memory_bus.MemoryBus);
-        mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, apu_, timer_, joypad_);
-
-        const cpu_ = try alloc.create(cpu.CPU);
-        cpu_.* = cpu.CPU.new(mb, mbc_);
-
-        return Gameboy{
-            .mbc = mbc_,
-            .cpu = cpu_,
-            .gpu = gpu_,
-            .apu = apu_,
-            .joypad = joypad_,
-            .timer = timer_,
-            .memory_bus = mb,
-
-            .alloc = alloc,
-        };
+        return finishInit(mbc_, alloc, true);
     }
 
     /// Alternate constructor used by WebAssembly build: initialize from an in-memory ROM slice.
     pub fn newFromRomBytes(rom_bytes: []const u8, alloc: std.mem.Allocator) !Gameboy {
         const mbc_ = try alloc.create(cartridge.MBC);
         mbc_.* = try cartridge.MBC.newFromRomBytes(rom_bytes, alloc);
+        return finishInit(mbc_, alloc, true);
+    }
 
+    /// Wire up the remaining subsystems around an already-constructed MBC. When
+    /// `boot` is true the machine starts at power-on reset state ($0000 with the
+    /// boot ROM mapped and the LCD off); the boot ROM itself initialises the IO
+    /// registers and hands off to the cartridge at $0100. When false the
+    /// subsystems start in the post-boot state (PC=$0100) so a cartridge can run
+    /// without the boot ROM.
+    fn finishInit(mbc_: *cartridge.MBC, alloc: std.mem.Allocator, boot: bool) !Gameboy {
         const gpu_ = try alloc.create(gpu.GPU);
         gpu_.* = gpu.GPU.new();
 
@@ -78,10 +57,12 @@ pub const Gameboy = struct {
         timer_.*.tac.frequency = timer.Frequency.Hz4096;
 
         const mb = try alloc.create(memory_bus.MemoryBus);
-        mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, apu_, timer_, joypad_);
+        mb.* = memory_bus.MemoryBus.new(mbc_, gpu_, apu_, timer_, joypad_, boot);
 
         const cpu_ = try alloc.create(cpu.CPU);
-        cpu_.* = cpu.CPU.new(mb, mbc_);
+        cpu_.* = cpu.CPU.new(mb, mbc_, boot);
+
+        if (boot) powerOnReset(gpu_);
 
         return Gameboy{
             .mbc = mbc_,
@@ -93,6 +74,20 @@ pub const Gameboy = struct {
             .memory_bus = mb,
             .alloc = alloc,
         };
+    }
+
+    /// Override the subsystem fields that `*.new()` leaves in their post-boot
+    /// state so the boot ROM runs against true power-on state. The biggest one is
+    /// the PPU: the LCD must be OFF so LY does not advance until the boot ROM
+    /// enables it (LCDC=$91), which is what aligns the boot-time PPU/timer state
+    /// the mooneye boot_div/boot_hwio tests sample at $0100. The boot ROM writes
+    /// the rest (BGP, sound regs, SCY/SCX, ...) itself.
+    fn powerOnReset(gpu_: *gpu.GPU) void {
+        gpu_.lcdc = @bitCast(@as(u8, 0x00)); // LCD off
+        gpu_.stat = @bitCast(@as(u8, 0x00)); // no STAT interrupt sources armed
+        gpu_.ly = 0;
+        gpu_.cycles = 0;
+        gpu_.internal_window_counter = 0;
     }
 
     pub fn deinit(self: *Gameboy) void {
