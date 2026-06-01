@@ -307,17 +307,20 @@ pub const MemoryBus = struct {
                     break :blk 0b1100_0000 | @as(u8, (@bitCast(self.joypad.joyp)));
                 },
                 0xFF01 => break :blk self.serial_sb,
-                0xFF02 => break :blk 0x00,
+                // SC: only bit 7 (transfer) and bit 0 (clock) are real; the serial
+                // unit isn't implemented, so bits 1-6 read open bus (1) -> 0x7E.
+                0xFF02 => break :blk 0x7E,
                 0xFF04 => break :blk self.timer.internal_clock.bits.div,
                 0xFF05 => break :blk self.timer.tima,
                 0xFF06 => break :blk self.timer.tma,
-                0xFF07 => break :blk @bitCast(self.timer.tac),
+                // TAC: only bits 0-2 used; bits 3-7 read open bus (1).
+                0xFF07 => break :blk 0xF8 | @as(u8, @bitCast(self.timer.tac)),
                 // IF bits 5-7 are unimplemented and always read back as 1.
                 0xFF0F => break :blk 0xE0 | @as(u8, @bitCast(self.interrupt_flag)),
                 0xFF10...0xFF3F => break :blk self.apu.read_apu_register(io_addr),
                 0xFF40 => break :blk @bitCast(self.gpu.lcdc),
-                0xFF41 => break :blk @bitCast(self.gpu.stat),
-                // 0xFF41 => break :blk @as(u8, @bitCast(self.gpu.stat)) | 0b1100_0000,
+                // STAT bit 7 is unimplemented and reads open bus (1).
+                0xFF41 => break :blk 0x80 | @as(u8, @bitCast(self.gpu.stat)),
                 0xFF42 => break :blk self.gpu.background_viewport.scy,
                 // debug
                 // 0xFF44 => break :blk 0x90,
