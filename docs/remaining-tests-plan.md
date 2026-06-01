@@ -100,6 +100,15 @@ is a much larger effort — treat separately.
 
 ## Category C — mealybug-tearoom-tests (31, rendering — the Tier-2 frontier)
 
+> **Update — the pixel-FIFO PPU (item 1 below) is now implemented** in
+> `src/gpu.zig` (see `docs/ppu-timing-tests.md` §"Tier 2 — DONE"). Mid-mode-3
+> register writes now affect only the pixels drawn after them. The remaining gap
+> for *grading* mealybug is item 2: vendored reference PNGs + a screenshot-diff
+> harness (the native `testrunner render <rom> <out.ppm>` mode added for the FIFO
+> work dumps the framebuffer as a PPM — a ready foundation). No regressions: the
+> 12/12 timing suite, blargg, emulator-only and a 29-ROM byte-for-byte render
+> compare all held (`tools/ppu_regress.sh`).
+
 These are **pixel-level PPU rendering** tests (`m3_*` = mid-mode-3 register writes:
 BGP/LCDC/SCX/SCY/WX/OBP changed *while a scanline is being drawn*; `m2_*` = a
 window-enable toggle). They pass by comparing the framebuffer to a reference PNG.

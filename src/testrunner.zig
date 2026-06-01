@@ -115,6 +115,34 @@ pub fn main(init: std.process.Init) !void {
     }
     const mode = args[1];
 
+    // Render mode: run N frames and write the framebuffer as a P6 PPM (the exact
+    // format tools/screenshot.mjs emits), so a shasum compares byte-for-byte
+    // against the WASM-captured baselines. Read-only w.r.t. the core — a fast
+    // native rendering-regression net for the PPU FIFO work.
+    //   testrunner render <rom> <out.ppm> [frames=600]
+    if (std.mem.eql(u8, mode, "render")) {
+        const rom_path = args[2];
+        const out_path = args[3];
+        const frames: u32 = if (args.len > 4) try std.fmt.parseInt(u32, args[4], 10) else 600;
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var i: u32 = 0;
+        while (i < frames) : (i += 1) gb.frame();
+        var buf: [64]u8 = undefined;
+        const header = try std.fmt.bufPrint(&buf, "P6\n{d} {d}\n255\n", .{ @as(usize, 160), @as(usize, 144) });
+        var file = try std.Io.Dir.cwd().createFile(io, out_path, .{});
+        defer file.close(io);
+        var w = file.writer(io, &.{});
+        try w.interface.writeAll(header);
+        try w.interface.writeAll(&gb.gpu.canvas);
+        try w.interface.flush();
+        std.debug.print("wrote {s} ({d} frames)\n", .{ out_path, frames });
+        return;
+    }
+
     // Debug mode: step a ROM until PC hits a watch address, print registers.
     //   testrunner watch <rom> <hexaddr>
     if (std.mem.eql(u8, mode, "watch")) {

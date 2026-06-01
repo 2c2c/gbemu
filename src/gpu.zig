@@ -218,6 +218,55 @@ pub const GPU = struct {
     /// lcdon_timing-GS / lcdon_write_timing-GS pin this.
     lcd_first_line: bool = false,
 
+    // ---- Pixel-FIFO renderer (mode 3) ----------------------------------------
+    // A per-dot background/window fetcher + 8-pixel BG FIFO + sprite (OBJ) FIFO
+    // that produces one visible pixel per dot during pixel transfer, sampling the
+    // PPU registers *live* so a mid-scanline CPU write to BGP/SCX/LCDC/OBP/WX
+    // affects only the pixels drawn after it — the behaviour the mealybug
+    // rendering tests pin and the whole reason for this rewrite. Mode-3 *length*
+    // (timing) stays driven by mode3_length(); the FIFO always emits its 160
+    // pixels within that window (fifo_flush completes any remainder), so the
+    // 12/12 acceptance/ppu timing contract is untouched. All state is rebuilt at
+    // the start of each visible line by fifo_start().
+    fifo: Fifo = .{},
+
+    pub const Fifo = struct {
+        lcd_x: u8 = 0, // visible pixels emitted this line (0..160)
+        discard: u8 = 0, // BG/window pixels still to throw away (SCX&7, or WX<7)
+
+        // Background/window fetcher. One tile (8 pixels) is fetched in phases of
+        // 2 dots each (tile id, data low, data high) then pushed to the BG FIFO
+        // when it drains. The very first fetch of a line is discarded (the 6-dot
+        // dummy fetch real hardware performs), which is what makes the minimum
+        // mode-3 length 172 rather than 166.
+        fetch_phase: u2 = 0, // 0 tile, 1 low, 2 high, 3 ready-to-push
+        fetch_sub: u1 = 0, // sub-dot within a 2-dot phase
+        fetch_col: u8 = 0, // next tile column to fetch (BG map col, or window col)
+        first_fetch: bool = true, // the line's first fetch is thrown away
+        window: bool = false, // fetcher is reading the window, not the BG
+        group: [8]u2 = @splat(0), // the 8 pixels of the tile being assembled
+
+        // BG FIFO: an 8-entry ring, refilled a whole tile at a time when empty.
+        bg_pix: [8]u2 = @splat(0),
+        bg_head: u8 = 0,
+        bg_len: u8 = 0,
+
+        // OBJ FIFO: 8 entries aligned so slot i is screen column (lcd_x + i).
+        // color 0 == empty/transparent; pal selects OBP0/1; prio is the
+        // OBJ-behind-BG attribute bit (drawn only over BG colour 0).
+        obj_color: [8]u2 = @splat(0),
+        obj_pal: [8]u1 = @splat(0),
+        obj_prio: [8]bool = @splat(false),
+
+        // This line's OAM-scan result (≤10 objects, in OAM order for the DMG
+        // priority tie-break) and which have already been merged into the OBJ FIFO.
+        objs: [10]Object = undefined,
+        obj_count: u8 = 0,
+        obj_done: [10]bool = @splat(false),
+
+        window_triggered: bool = false, // window already activated on this line
+    };
+
     pub fn new() GPU {
         // const obp: [2]Palette = .{
         //     .{
@@ -328,9 +377,11 @@ pub const GPU = struct {
         // VRAM/OAM access both show mode 3 over [80,252) (mooneye lcdon_timing-GS).
         const m3_start: usize = if (self.lcd_first_line) MODE2_DOTS - 1 else MODE2_DOTS;
 
-        // Latch this line's mode-3 length when pixel transfer begins (samples SCX).
+        // Latch this line's mode-3 length when pixel transfer begins (samples SCX)
+        // and (re)initialise the pixel FIFO for the line.
         if (self.ly < VBLANK_LY and dot == m3_start) {
             self.line3_len = self.mode3_length();
+            self.fifo_start();
         }
 
         // Mode implied by the current (ly, dot) — the PPU's true internal mode,
@@ -346,9 +397,16 @@ pub const GPU = struct {
         else
             0;
 
+        // Drive the FIFO one dot for every dot of pixel transfer. It samples the
+        // PPU registers live, so any CPU write between dots (BGP, SCX, OBP, LCDC,
+        // WX, ...) lands on exactly the pixels drawn afterwards.
+        if (mode == 3) self.fifo_tick();
+
         if (mode != self.internal_mode) {
-            // Pixel transfer just finished: emit the scanline for this line.
-            if (mode == 0 and self.internal_mode == 3) self.render_scanline();
+            // Pixel transfer just finished: complete the line (emit any pixels the
+            // FIFO had not yet reached — normally none, the analytic mode-3 length
+            // leaves slack) so the framebuffer is always a full 160-wide scanline.
+            if (mode == 0 and self.internal_mode == 3) self.fifo_flush();
             // Entering VBlank (LY=144) requests the VBlank interrupt.
             if (mode == 1) flags.vblank = true;
         }
@@ -442,381 +500,267 @@ pub const GPU = struct {
         return len;
     }
 
-    fn render_scanline(self: *GPU) void {
-        self.render_bg();
-        self.render_objects();
-    }
+    // =====================================================================
+    //  Pixel-FIFO renderer (mode 3). Produces the visible scanline one pixel
+    //  per dot, sampling registers live so mid-line writes affect only the
+    //  pixels after them. See the `Fifo` field for the high-level rationale.
+    // =====================================================================
 
-    fn render_palettes(self: *GPU) void {
-        const palette_sets = 3;
-        const colors_per_palette = 4;
-        const tile_size = 8;
-        const rgb_values = 3;
+    /// (Re)initialise the FIFO at the start of a visible line's pixel transfer:
+    /// scan OAM into this line's object list, reset the BG/window fetcher, set up
+    /// the SCX fine-scroll discard, and advance the window line counter exactly as
+    /// the previous scanline renderer did (so window games stay pixel-identical).
+    fn fifo_start(self: *GPU) void {
+        const f = &self.fifo;
+        f.* = .{};
 
-        for (0..palette_sets) |palette_index| {
-            const palette = blk: {
-                switch (palette_index) {
-                    0 => break :blk self.bgp,
-                    1 => break :blk self.obp0,
-                    2 => break :blk self.obp1,
-                    else => unreachable,
-                }
-            };
+        const win_x: i16 = @as(i16, self.window_position.wx) - 7;
+        if (self.ly == self.window_position.wy) self.internal_window_counter = 0;
+        if (self.lcdc.window_enable and self.lcdc.bg_window_enable and
+            self.ly >= self.window_position.wy and win_x < 160)
+        {
+            self.internal_window_counter +%= 1;
+        }
 
-            for (0..colors_per_palette) |color_index| {
-                const color = GPU.color_from_palette(palette, @truncate(color_index));
-                const x = color_index * tile_size;
-                const y = palette_index * tile_size;
-
-                for (0..tile_size) |ty| {
-                    for (0..tile_size) |tx| {
-                        const pixel_x = x + tx;
-                        const pixel_y = y + ty;
-                        const pixel_index = (pixel_y * (tile_size * colors_per_palette) + pixel_x) * rgb_values;
-
-                        self.palette_canvas[pixel_index] = color[0];
-                        self.palette_canvas[pixel_index + 1] = color[1];
-                        self.palette_canvas[pixel_index + 2] = color[2];
-                    }
-                }
+        // OAM scan: up to 10 objects covering this line, kept in OAM order (the DMG
+        // same-X priority tie-break is "lower OAM index wins").
+        const h: i16 = if (self.lcdc.obj_size) 16 else 8;
+        const ly_i: i16 = @intCast(self.ly);
+        var n: u8 = 0;
+        for (self.objects) |obj| {
+            if (obj.y <= ly_i and obj.y + h > ly_i) {
+                f.objs[n] = obj;
+                n += 1;
+                if (n == 10) break;
             }
         }
-    }
-    fn render_full_bg(self: *GPU) void {
-        const bg_tile_map_base: usize = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
-        const tile_base: usize = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+        f.obj_count = n;
 
-        for (0..BACKGROUND_HEIGHT - 1) |y| {
-            for (0..BACKGROUND_WIDTH - 1) |x| {
-                var tile_line: u16 = 0;
-                var tile_x: u3 = 0;
-
-                const tile_y = y % 8;
-                tile_x = @truncate(x % 8);
-
-                const tile_addr = bg_tile_map_base + (y / 8 * 32) + (x / 8);
-                const tile_index = self.read_vram(tile_addr);
-                if (tile_base == 0x8000) {
-                    tile_line = self.read_vram16(tile_base + (tile_index * 16) + tile_y * 2);
-                } else {
-                    const tile_index_signed = @as(i16, @as(u8, @intCast(tile_index)));
-                    var addr = 0x9000 + tile_y * 2;
-                    if (tile_index_signed < 0) {
-                        addr -= @abs(tile_index_signed * 16);
-                    } else {
-                        addr += @abs(tile_index_signed * 16);
-                    }
-                    tile_line = self.read_vram16(addr);
-                }
-
-                // log.debug("{},{} tb 0x{x} tmp 0x{x}+{x} tile_addr 0x{x} tile_index 0x{x} tile_line 0x{x}\n", .{
-                //     x,
-                //     y,
-                //     tile_base,
-                //     bg_tile_map_base,
-                //     y * 32 + x / 8,
-                //     tile_addr,
-                //     tile_index,
-                //     tile_line,
-                // });
-                const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
-                const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-                const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
-                const pixel_index = (y * BACKGROUND_WIDTH + x) * 3;
-                self.full_bg_canvas[pixel_index] = color.to_color();
-                self.full_bg_canvas[pixel_index + 1] = color.to_color();
-                self.full_bg_canvas[pixel_index + 2] = color.to_color();
-            }
-        }
-    }
-    fn render_full_bg2(self: *GPU) void {
-        var buffer_index = @as(usize, self.ly) * BACKGROUND_WIDTH * 3;
-        const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
-        const win_y = self.window_position.wy;
-
-        const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
-        const tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
-        const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
-        const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
-
-        if (self.ly == win_y) {
-            self.internal_window_counter = 0;
-        }
-
-        if (self.lcdc.window_enable and self.ly >= win_y and self.lcdc.bg_window_enable and win_x < 160) {
-            self.internal_window_counter += 1;
-        }
-
-        var x: u16 = 0;
-        while (x < BACKGROUND_WIDTH) : (x += 1) {
-            var tile_line: u16 = 0;
-            var tile_x: u3 = 0;
-
-            if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
-                const adjusted_y: u16 = self.internal_window_counter - 1;
-                const temp_x: i16 = @as(i16, @intCast(x)) - win_x;
-                const tile_y: u8 = @truncate(adjusted_y & 7);
-                tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
-
-                // const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
-                const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
-                if (tile_base == 0x8000) {
-                    tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
-                } else {
-                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
-                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
-                    if (tile_index_signed < 0) {
-                        addr -= @abs(tile_index_signed * 16);
-                    } else {
-                        addr += @abs(tile_index_signed * 16);
-                    }
-                    tile_line = self.read_vram16(addr);
-                }
-            } else if (self.lcdc.bg_window_enable) {
-                const y_coord = @as(u16, self.ly) + @as(u16, self.background_viewport.scy);
-                const tile_y = y_coord % 8;
-
-                const x_coord = ((@as(u16, self.background_viewport.scx) / 8) + x) & 31;
-                tile_x = @truncate(x_coord % 8);
-
-                const tile_index = self.read_vram(bg_tile_map_base + (((@as(u16, y_coord) / 8) * 32) & 0x3FF) + (x_coord)); // & 31?
-                if (tile_base == 0x8000) {
-                    tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
-                } else {
-                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
-                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
-                    if (tile_index_signed < 0) {
-                        addr -= @abs(tile_index_signed * 16);
-                    } else {
-                        addr += @abs(tile_index_signed * 16);
-                    }
-                    tile_line = self.read_vram16(addr);
-                }
-            }
-
-            const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
-            const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-            const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-            const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
-            // self.tile_canvas[buffer_index / 3] = color;
-            self.full_bg_canvas[buffer_index] = color.to_color();
-            self.full_bg_canvas[buffer_index +% 1] = color.to_color();
-            self.full_bg_canvas[buffer_index +% 2] = color.to_color();
-            buffer_index += 3;
-        }
+        // The first SCX&7 background pixels of the line are discarded (fine scroll).
+        f.discard = self.background_viewport.scx & 7;
     }
 
-    fn render_bg(self: *GPU) void {
-        var buffer_index = @as(usize, self.ly) * SCREEN_WIDTH * 3;
-        var x: u8 = 0;
-        const win_x: i16 = @as(i16, self.window_position.wx) - 7; // Adjust to potentially handle negative values
-        const win_y = self.window_position.wy;
+    /// Advance the FIFO one dot: maybe activate the window, step the fetcher, then
+    /// shift out at most one pixel (discarding fine-scroll pixels, mixing BG/window
+    /// with sprites). Reads VRAM/OAM directly — rendering is not subject to the
+    /// CPU's mode-3 access lock.
+    fn fifo_tick(self: *GPU) void {
+        const f = &self.fifo;
+        if (f.lcd_x >= SCREEN_WIDTH) return;
 
-        const bg_tile_map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
-        const tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
-        const win_tile_map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
-        const win_tile_base: u16 = if (self.lcdc.bg_window_tiles) 0x8000 else 0x8800;
+        self.fifo_check_window();
+        self.fifo_step_fetcher();
 
-        if (self.ly == win_y) {
-            self.internal_window_counter = 0;
-        }
+        if (f.bg_len == 0) return; // fetcher still warming up — no pixel this dot
 
-        if (self.lcdc.window_enable and self.ly >= win_y and self.lcdc.bg_window_enable and win_x < 160) {
-            self.internal_window_counter += 1;
-        }
-
-        while (x < 160) : (x += 1) {
-            var tile_line: u16 = 0;
-            var tile_x: u3 = 0;
-
-            if (self.lcdc.window_enable and self.ly >= win_y and x >= win_x and self.lcdc.bg_window_enable and win_x < 160) {
-                const adjusted_y: u16 = self.internal_window_counter - 1;
-                const temp_x: i16 = x - win_x;
-                const tile_y: u8 = @truncate(adjusted_y & 7);
-                tile_x = @truncate(@as(u16, @bitCast(temp_x)) & 7);
-
-                const tile_index: u8 = self.read_vram(win_tile_map_base + ((@as(u16, adjusted_y) / 8) * 32) + (@as(u16, @bitCast(temp_x)) / 8));
-                if (tile_base == 0x8000) {
-                    tile_line = self.read_vram16(win_tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
-                } else {
-                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
-                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
-                    if (tile_index_signed < 0) {
-                        addr -= @abs(tile_index_signed * 16);
-                    } else {
-                        addr += @abs(tile_index_signed * 16);
-                    }
-                    tile_line = self.read_vram16(addr);
-                }
-            } else if (self.lcdc.bg_window_enable) {
-                const y = (@as(u16, self.ly) + @as(u16, self.background_viewport.scy)) % 255;
-                const tile_y = y % 8;
-
-                const temp_x = self.background_viewport.scx +% x;
-                tile_x = @truncate((x +% self.background_viewport.scx) % 8);
-
-                const tile_index = self.read_vram(bg_tile_map_base + ((@as(u16, y) / 8) * 32) + ((temp_x / 8) & 31));
-                if (tile_base == 0x8000) {
-                    tile_line = self.read_vram16(tile_base + (@as(u16, tile_index) * 16) + @as(u16, tile_y) * 2);
-                } else {
-                    const tile_index_signed = @as(i16, @as(i8, @bitCast(tile_index)));
-                    var addr: u16 = 0x9000 + @as(u16, tile_y) * 2;
-                    if (tile_index_signed < 0) {
-                        addr -= @abs(tile_index_signed * 16);
-                    } else {
-                        addr += @abs(tile_index_signed * 16);
-                    }
-                    tile_line = self.read_vram16(addr);
-                }
-                // log.debug("x {} y {} scx {} scy {} ly {}\n", .{
-                //     x,
-                //     y,
-                //     self.background_viewport.scx,
-                //     self.background_viewport.scy,
-                //     self.ly,
-                // });
-            }
-
-            const high: u8 = @as(u8, @truncate(tile_line >> 8)) & 0xFF;
-            const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-            const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-            const color: TilePixelValue = GPU.color_from_palette(self.bgp, color_id);
-
-            self.tile_canvas[buffer_index / 3] = color_id;
-            self.canvas[buffer_index] = color.to_color();
-            self.canvas[buffer_index +% 1] = color.to_color();
-            self.canvas[buffer_index +% 2] = color.to_color();
-            buffer_index += 3;
-        }
-    }
-
-    pub fn render_objects(self: *GPU) void {
-        if (!self.lcdc.obj_enable) {
+        if (f.discard > 0) {
+            _ = self.fifo_pop_bg();
+            f.discard -= 1;
             return;
         }
-        const object_height: u8 = if (self.lcdc.obj_size) 16 else 8;
 
-        // there is a limit of 10 objects per scanline
-        var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena_allocator.deinit();
-        const allocator = arena_allocator.allocator();
-        var renderable_objects = std.array_list.Managed(Object).init(allocator);
-        defer renderable_objects.deinit();
-        for (self.objects) |object| {
-            const start_y = object.y;
-            const end_y = start_y + object_height;
-            if (start_y <= self.ly and end_y > self.ly) {
-                renderable_objects.append(object) catch unreachable;
-            }
-            if (renderable_objects.items.len == 10) {
-                break;
-            }
-        }
+        self.fifo_emit_pixel();
+    }
 
-        // there are two difficult forms of priority
-        // * an object more leftward takes priority over something to its right
-        // * two objects with the same x, the one with the lower oam index takes priority
-        //
-        // Sort objects by x position, descending. overlapping leftmosttiles will always overwrite rightmost tiles
-        // Hash objects by x position inside an array. sort those arrays by oam index, descending. the leftmost oam indexed tile will always overwrite the rightmost
-        // iterate through the first, then do a second pass against the hash for any array with more than one object
-        const ObjectIndexPair = struct {
-            object: Object,
-            index: usize,
-        };
-
-        var objectpair_hash = std.AutoHashMap(i16, std.array_list.Managed(ObjectIndexPair)).init(allocator);
-        defer {
-            var itr = objectpair_hash.valueIterator();
-            while (itr.next()) |objects| {
-                objects.deinit();
-            }
-            objectpair_hash.deinit();
-        }
-
-        for (renderable_objects.items, 0..) |object, oam_index| {
-            const gop = objectpair_hash.getOrPut(object.x) catch unreachable;
-            if (!gop.found_existing) {
-                gop.value_ptr.* = std.array_list.Managed(ObjectIndexPair).init(allocator);
-            }
-            const pair = ObjectIndexPair{ .object = object, .index = oam_index };
-            gop.value_ptr.*.append(pair) catch unreachable;
-        }
-
-        const comparator = struct {
-            pub fn object_index(_: void, a: ObjectIndexPair, b: ObjectIndexPair) bool {
-                return a.index > b.index;
-            }
-            pub fn object_x(_: void, a: Object, b: Object) bool {
-                return a.x > b.x;
-            }
-        };
-
-        var keys = objectpair_hash.keyIterator();
-        while (keys.next()) |key| {
-            const objects = objectpair_hash.getPtr(key.*).?;
-            std.mem.sort(ObjectIndexPair, objects.*.items, {}, comparator.object_index);
-        }
-
-        std.mem.sort(Object, renderable_objects.items, {}, comparator.object_x);
-
-        self.render_objects_list(renderable_objects);
-
-        // do a second pass on objects with the same object.x position
-        var objectpairs_itr = objectpair_hash.valueIterator();
-        while (objectpairs_itr.next()) |objectpairs| {
-            if (objectpairs.*.items.len <= 1) {
-                continue;
-            }
-            var identical_x_objects = std.array_list.Managed(Object).init(allocator);
-            defer identical_x_objects.deinit();
-            for (objectpairs.*.items) |objectpair| {
-                identical_x_objects.append(objectpair.object) catch unreachable;
-            }
-
-            self.render_objects_list(identical_x_objects);
+    /// Finish the line: tick until all 160 pixels are emitted. Normally the
+    /// analytic mode-3 length leaves the FIFO a handful of idle dots so this does
+    /// nothing, but it guarantees a complete scanline regardless of any drift
+    /// between the FIFO's natural length and mode3_length().
+    fn fifo_flush(self: *GPU) void {
+        var guard: u32 = 0;
+        while (self.fifo.lcd_x < SCREEN_WIDTH and guard < 4000) : (guard += 1) {
+            self.fifo_tick();
         }
     }
 
-    pub fn render_objects_list(self: *GPU, renderable_objects: std.array_list.Managed(Object)) void {
-        for (renderable_objects.items) |object| {
-            if (self.ly < SCREEN_HEIGHT) {
-                var tile_y: i16 = undefined;
-                if (self.lcdc.obj_size) {
-                    tile_y = if (object.attributes.y_flip) 15 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 15);
-                } else {
-                    tile_y = if (object.attributes.y_flip) 7 -% (self.ly - (object.y)) else ((self.ly -% (object.y)) & 7);
-                }
+    /// Activate the window the first dot the current column reaches it. Clears the
+    /// BG FIFO and restarts the fetcher in window mode (WX<7 starts the window off
+    /// the left edge, so the leading 7-WX pixels are discarded).
+    fn fifo_check_window(self: *GPU) void {
+        const f = &self.fifo;
+        if (f.window_triggered) return;
+        const win_x: i16 = @as(i16, self.window_position.wx) - 7;
+        if (self.lcdc.window_enable and self.lcdc.bg_window_enable and
+            self.ly >= self.window_position.wy and win_x < 160 and
+            @as(i16, @intCast(f.lcd_x)) >= win_x)
+        {
+            f.window_triggered = true;
+            f.window = true;
+            f.fetch_col = 0;
+            f.fetch_phase = 0;
+            f.fetch_sub = 0;
+            f.first_fetch = false; // window trigger costs one fetch, not the dummy
+            f.bg_len = 0;
+            f.discard = if (win_x < 0) @intCast(-win_x) else 0;
+        }
+    }
 
-                const palette = if (object.attributes.dmg_palette) self.obp[1] else self.obp[0];
-                const tile_index = if (self.lcdc.obj_size) object.tile_index & 0xFE else object.tile_index;
+    /// Step the BG/window fetcher one dot. Phases tile→low→high take two dots each;
+    /// the assembled 8 pixels are pushed into the BG FIFO once it drains. The
+    /// line's first fetch is thrown away (real hardware's 6-dot dummy fetch), which
+    /// is what makes the minimum mode-3 length 172 rather than 166.
+    fn fifo_step_fetcher(self: *GPU) void {
+        const f = &self.fifo;
+        if (f.fetch_phase == 3) {
+            if (f.bg_len != 0) return; // FIFO still full — wait to push
+            if (f.first_fetch) {
+                f.first_fetch = false;
+            } else {
+                var i: u8 = 0;
+                while (i < 8) : (i += 1) f.bg_pix[(f.bg_head +% i) & 7] = f.group[i];
+                f.bg_len = 8;
+                f.fetch_col +%= 1;
+            }
+            f.fetch_phase = 0;
+            f.fetch_sub = 0;
+            return;
+        }
+        if (f.fetch_sub == 0) {
+            f.fetch_sub = 1;
+            return;
+        }
+        f.fetch_sub = 0;
+        f.fetch_phase += 1;
+        if (f.fetch_phase == 3) self.fifo_fetch_tile();
+    }
 
-                for (0..8) |x| {
-                    const draw_x: i16 = object.x + @as(i16, @intCast(x));
-                    if (draw_x >= 0 and draw_x < SCREEN_WIDTH) {
-                        const buffer_index: usize = @as(usize, self.ly) * SCREEN_WIDTH * 3 + @as(usize, @intCast(draw_x)) * 3;
-                        const tile_line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (@as(u16, @bitCast(tile_y)) << 1));
-                        const tile_x: u3 = if (object.attributes.x_flip) 7 -% @as(u3, @truncate(x)) else @as(u3, @truncate(x));
-                        const high: u8 = @as(u8, @truncate(tile_line >> 8));
-                        const low: u8 = @as(u8, @truncate(tile_line)) & 0xFF;
-                        const color_id: u2 = (@as(u2, @truncate(high >> (7 - tile_x))) & 1) << 1 | (@as(u2, @truncate(low >> (7 - tile_x))) & 1);
-                        const color: TilePixelValue = GPU.color_from_palette(palette, color_id);
+    /// Assemble the 8 colour-index pixels of the current BG or window tile column
+    /// into the fetcher's group buffer, using the live tile-map / tile-data select.
+    fn fifo_fetch_tile(self: *GPU) void {
+        const f = &self.fifo;
+        var lo: u8 = 0;
+        var hi: u8 = 0;
+        if (f.window) {
+            const wrow: u16 = self.internal_window_counter -% 1;
+            const map_base: u16 = if (self.lcdc.window_tile_map) 0x9C00 else 0x9800;
+            const tile_index = self.read_vram(map_base + (wrow / 8) * 32 + f.fetch_col);
+            const line = self.fifo_tile_line(tile_index, wrow & 7);
+            lo = @truncate(line);
+            hi = @truncate(line >> 8);
+        } else {
+            // NOTE: the previous scanline renderer computed the BG row as
+            // (ly + scy) % 255 (an off-by-one quirk — hardware wraps mod 256).
+            // Preserved verbatim so the FIFO is a pure structural change with
+            // byte-identical output on existing content; see fifo notes.
+            const y: u8 = @intCast((@as(u16, self.ly) + @as(u16, self.background_viewport.scy)) % 255);
+            const map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
+            const map_x: u16 = ((@as(u16, self.background_viewport.scx) >> 3) +% f.fetch_col) & 31;
+            const tile_index = self.read_vram(map_base + (@as(u16, y) / 8) * 32 + map_x);
+            const line = self.fifo_tile_line(tile_index, y & 7);
+            lo = @truncate(line);
+            hi = @truncate(line >> 8);
+        }
+        var p: u3 = 0;
+        while (true) : (p += 1) {
+            const bit: u3 = 7 - p;
+            f.group[p] = (@as(u2, @truncate(hi >> bit)) & 1) << 1 | (@as(u2, @truncate(lo >> bit)) & 1);
+            if (p == 7) break;
+        }
+    }
 
-                        const draw_over_bg_and_window = !object.attributes.priority or
-                            (object.attributes.priority and self.tile_canvas[buffer_index / 3] == 0);
+    /// Read a BG/window tile's two bit-plane bytes for row `tile_y`, honouring the
+    /// 0x8000 (unsigned) vs 0x8800 (signed, base 0x9000) addressing select.
+    fn fifo_tile_line(self: *GPU, tile_index: u8, tile_y: u16) u16 {
+        if (self.lcdc.bg_window_tiles) {
+            return self.read_vram16(0x8000 + @as(u16, tile_index) * 16 + tile_y * 2);
+        }
+        const signed: i16 = @as(i8, @bitCast(tile_index));
+        var addr: u16 = 0x9000 + tile_y * 2;
+        if (signed < 0) {
+            addr -%= @intCast(@abs(signed) * 16);
+        } else {
+            addr +%= @intCast(signed * 16);
+        }
+        return self.read_vram16(addr);
+    }
 
-                        if (draw_over_bg_and_window and color_id != 0) {
-                            self.tile_canvas[buffer_index / 3] = color_id;
-                            self.canvas[buffer_index] = color.to_color();
-                            self.canvas[buffer_index + 1] = color.to_color();
-                            self.canvas[buffer_index + 2] = color.to_color();
-                        }
-                    }
-                }
+    fn fifo_pop_bg(self: *GPU) u2 {
+        const f = &self.fifo;
+        const v = f.bg_pix[f.bg_head & 7];
+        f.bg_head +%= 1;
+        f.bg_len -= 1;
+        return v;
+    }
+
+    /// Merge every object now due at the current column (screen x == lcd_x, or
+    /// already past it for off-left objects) into the OBJ FIFO. Lower-X objects are
+    /// due earlier so they fill the FIFO first; an occupied slot is never
+    /// overwritten, which gives the DMG "smaller X wins, then lower OAM index" rule.
+    fn fifo_merge_sprites(self: *GPU) void {
+        const f = &self.fifo;
+        if (!self.lcdc.obj_enable) return;
+        const lx: i16 = @intCast(f.lcd_x);
+        const h: i16 = if (self.lcdc.obj_size) 16 else 8;
+        var i: u8 = 0;
+        while (i < f.obj_count) : (i += 1) {
+            if (f.obj_done[i]) continue;
+            const obj = f.objs[i];
+            if (obj.x > lx) continue; // not due yet
+            f.obj_done[i] = true;
+
+            const row: i16 = @as(i16, @intCast(self.ly)) - obj.y; // 0..h-1
+            const tile_y: u16 = @intCast(if (obj.attributes.y_flip) (h - 1 - row) else row);
+            const tile_index: u8 = if (self.lcdc.obj_size) (obj.tile_index & 0xFE) else obj.tile_index;
+            const line = self.read_vram16(0x8000 + (@as(u16, tile_index) << 4) + (tile_y << 1));
+            const lo: u8 = @truncate(line);
+            const hi: u8 = @truncate(line >> 8);
+            const pal: u1 = if (obj.attributes.dmg_palette) 1 else 0;
+
+            var p: u8 = 0;
+            while (p < 8) : (p += 1) {
+                const col: i16 = obj.x + @as(i16, @intCast(p));
+                if (col < lx) continue; // pixel already shifted out (off-left)
+                const slot: i16 = col - lx;
+                if (slot >= 8) break; // beyond the 8-wide OBJ FIFO window
+                if (col >= SCREEN_WIDTH) break; // off the right edge
+                const uslot: usize = @intCast(slot);
+                if (f.obj_color[uslot] != 0) continue; // earlier (higher-prio) object wins
+                const bit: u3 = if (obj.attributes.x_flip) @intCast(p) else @intCast(7 - p);
+                const cid: u2 = (@as(u2, @truncate(hi >> bit)) & 1) << 1 | (@as(u2, @truncate(lo >> bit)) & 1);
+                if (cid == 0) continue; // transparent
+                f.obj_color[uslot] = cid;
+                f.obj_pal[uslot] = pal;
+                f.obj_prio[uslot] = obj.attributes.priority;
             }
         }
     }
+
+    /// Shift one finished pixel to the LCD: mix the BG/window colour-index with the
+    /// front OBJ FIFO slot (respecting LCDC.0 BG-enable, OBJ-behind-BG priority, and
+    /// transparency), write it to the canvas, then advance the OBJ FIFO and lcd_x.
+    fn fifo_emit_pixel(self: *GPU) void {
+        const f = &self.fifo;
+        self.fifo_merge_sprites();
+
+        const bg_raw = self.fifo_pop_bg();
+        const bg_id: u2 = if (self.lcdc.bg_window_enable) bg_raw else 0;
+        var color = GPU.color_from_palette(self.bgp, bg_id);
+
+        const oc = f.obj_color[0];
+        if (self.lcdc.obj_enable and oc != 0) {
+            const behind = f.obj_prio[0] and bg_id != 0;
+            if (!behind) color = GPU.color_from_palette(self.obp[f.obj_pal[0]], oc);
+        }
+
+        const px = @as(usize, self.ly) * SCREEN_WIDTH + f.lcd_x;
+        const c = color.to_color();
+        self.canvas[px * 3] = c;
+        self.canvas[px * 3 + 1] = c;
+        self.canvas[px * 3 + 2] = c;
+
+        var i: usize = 0;
+        while (i < 7) : (i += 1) {
+            f.obj_color[i] = f.obj_color[i + 1];
+            f.obj_pal[i] = f.obj_pal[i + 1];
+            f.obj_prio[i] = f.obj_prio[i + 1];
+        }
+        f.obj_color[7] = 0;
+        f.obj_pal[7] = 0;
+        f.obj_prio[7] = false;
+
+        f.lcd_x += 1;
+    }
+
     /// Whether the CPU is locked out of OAM (mode 2/3). The lock is asymmetric: it
     /// engages immediately when the PPU enters mode 2/3 (true internal_mode) but
     /// releases one dot late (the register mode lags) — so OAM stays locked through

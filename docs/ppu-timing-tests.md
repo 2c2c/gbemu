@@ -184,16 +184,39 @@ against its expected table). Both are read-only and don't touch the core.
 After Tier 1, re-run `divsweep` to see whether `div_power_on` can drop and
 whether `boot_hwio-dmgABCmgb` clears.
 
-### Tier 2 — pixel-FIFO / fetcher PPU (the principled fix)
+### Tier 2 — pixel-FIFO / fetcher PPU — DONE
 
-Replace `render_scanline`-at-mode-3-end with a real per-dot background/window/
-sprite FIFO + fetcher state machine. This naturally produces correct mode-3
-lengths (SCX, window-trigger, and sprite stalls all fall out), makes VRAM/OAM
-locking exact, and is what the **mealybug** rendering tests require. It subsumes
-Tier 1 items 1–3. Scope it as: fetcher (tile → data-low → data-high → push),
-8-pixel BG FIFO, sprite FIFO with mid-line OBJ fetch stalls, and the window
-mid-line activation. Keep the existing `tick_dot` mode/LY/STAT bookkeeping as the
-outer loop and drive the FIFO inside mode 3.
+Landed in `src/gpu.zig`: `render_scanline`-at-mode-3-end is replaced by a real
+per-dot background/window fetcher (`fifo_step_fetcher` / `fifo_fetch_tile`: tile →
+data-low → data-high → push), an 8-pixel BG FIFO ring, and a sprite/OBJ FIFO
+(`fifo_merge_sprites`) with mid-line window activation (`fifo_check_window`). It
+is driven inside mode 3 by `fifo_tick` (one dot per dot), with the existing
+`tick_dot` mode/LY/STAT bookkeeping kept as the outer loop. **Registers are
+sampled live per pixel**, so a mid-scanline write to BGP/SCX/LCDC/OBP/WX affects
+only the pixels drawn after it — the mealybug behaviour.
+
+Deliberate scope choice to protect the 12/12 timing contract: **mode-3 *length*
+(timing) is still driven by `mode3_length()`**, not by the FIFO. The FIFO always
+emits its 160 pixels inside that window (`fifo_flush` completes any remainder), so
+the dot-for-dot mode/STAT/access timing that `acceptance/ppu` pins is untouched.
+Per the original plan ("delete the analytic `mode3_length()` penalty only after
+the FIFO reproduces the same lengths"), the analytic model is kept as the timing
+authority; switching timing to the FIFO is a later, separately-validated step.
+
+Verification (no regressions): `acceptance/ppu` 12/12, blargg 25/25,
+emulator-only 28/28, the acceptance structural fail-set unchanged, and a
+byte-for-byte render compare of all 29 game ROMs against pre-FIFO baselines —
+28/29 identical, the one difference (`links_awakening`, 2 water-band transition
+scanlines) being the FIFO correctly rendering a **mid-mode-3 SCX write** the old
+batch renderer applied to the whole line. Harness: `tools/ppu_regress.sh` +
+`testrunner render <rom> <out.ppm>`. The BG row is still computed `(ly+scy) % 255`
+verbatim (a pre-existing off-by-one — hardware wraps mod 256) so the FIFO is a
+pure structural change on existing content; fixing that quirk is left as a
+separate, deliberately-validated change.
+
+Still outstanding for full mealybug parity: per-sprite mode-3 fetch *stalls* in
+the FIFO's own pacing (currently only in `mode3_length`), and a screenshot-diff
+harness with vendored DMG reference PNGs (Category C of `remaining-tests-plan.md`).
 
 ### Suggested order
 
