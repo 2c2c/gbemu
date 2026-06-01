@@ -2099,7 +2099,7 @@ pub const CPU = struct {
             self.clock.t_cycles += 4;
         } else {
             self.mcycle(); // M1: opcode fetch (peripherals advance, then read)
-            var instruction_byte = self.bus.read_byte(self.pc);
+            var instruction_byte = self.bus.read_fetch(self.pc);
             // debug log fetch
             self.fetch_log_pcs[self.fetch_log_index & 0xFF] = self.pc;
             self.fetch_log_opcodes[self.fetch_log_index & 0xFF] = instruction_byte;
@@ -2108,7 +2108,7 @@ pub const CPU = struct {
             const prefixed = instruction_byte == 0xCB;
             if (prefixed) {
                 self.mcycle(); // M2: CB op-byte fetch
-                instruction_byte = self.bus.read_byte(self.pc +% 1);
+                instruction_byte = self.bus.read_fetch(self.pc +% 1);
                 self.clock.t_cycles += 8; // M1 (0xCB) + M2 (op) fetch M-cycles
             }
             if (Instruction.from_byte(instruction_byte, prefixed)) |instruction| blk: {

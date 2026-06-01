@@ -38,11 +38,13 @@ pub const OamDma = struct {
     pub fn request(self: *OamDma, source_high: u8) void {
         self.pending_source = source_high;
         self.reg = source_high;
-        // Setup M-cycles counted down before byte 0 is copied. 3 places the
-        // 160-cycle transfer window where mooneye oam_dma_timing/restart and the
-        // *_timing family expect it (conflict starts/ends on the exact cycle);
-        // the request is registered at the end of the FF46-write M-cycle.
-        self.starting = 3;
+        // Setup M-cycles before byte 0 is copied. A fresh DMA (idle) or one that
+        // restarts mid-transfer (active) takes the full 3 — this places the
+        // 160-cycle window where oam_dma_timing/restart + the *_timing family
+        // expect it. But a second write while still in the *startup* delay does
+        // NOT restart the countdown (only the source latches), so the back-to-back
+        // FF46 writes in oam_dma_start's restart round leave it measuring B=0.
+        if (self.active or self.starting == 0) self.starting = 3;
     }
 
     /// Whether a `source`-bus DMA holds the bus `addr` lives on. The DMG has two
@@ -56,9 +58,20 @@ pub const OamDma = struct {
         return src_video == addr_video;
     }
 
-    /// Whether a CPU access to `addr` conflicts with the running DMA.
+    /// Conflict for a data read/write — held only while bytes actually transfer.
     pub fn conflicts(self: *const OamDma, addr: u16) bool {
         return self.active and busHeld(self.source_high, addr);
+    }
+
+    /// Conflict for an instruction fetch. A fetch reads the bus at the very start
+    /// of its M-cycle, so it already sees the bus taken on the DMA's final setup
+    /// cycle — one M-cycle before the first byte transfers. This is the offset
+    /// mooneye oam_dma_start measures (executing OAM as code) vs oam_dma_timing,
+    /// which reads a cycle later as data.
+    pub fn conflictsFetch(self: *const OamDma, addr: u16) bool {
+        if (self.active) return busHeld(self.source_high, addr);
+        if (self.starting == 1) return busHeld(self.pending_source, addr);
+        return false;
     }
 };
 
@@ -156,6 +169,15 @@ pub const MemoryBus = struct {
         // fetch becomes RST $38, not the source byte.) HRAM/IO and the other bus
         // stay accessible.
         if (self.dma.conflicts(address)) {
+            return 0xFF;
+        }
+        return self.read_byte_raw(address);
+    }
+
+    /// Opcode fetch read — conflicts one M-cycle earlier than a data read
+    /// (see OamDma.conflictsFetch).
+    pub fn read_fetch(self: *const MemoryBus, address: u16) u8 {
+        if (self.dma.conflictsFetch(address)) {
             return 0xFF;
         }
         return self.read_byte_raw(address);

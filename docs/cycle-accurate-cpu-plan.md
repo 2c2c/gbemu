@@ -54,12 +54,12 @@ so `tim00..11` keep passing — flipping the *whole* write order to before-tick
 fixed rapid_toggle but broke 5 other timer tests, so the fix is scoped to the
 overflow-recognition path only.
 
-### OAM DMA precision (17/19 of the DMA-dependent family now pass)
+### OAM DMA precision — the full DMA-dependent family (19/19) passes
 
 The whole `jp/jp_cc/call/call2/call_cc/call_cc2/ret/ret_cc/reti/push/rst/
-add_sp_e/ld_hl_sp_e_timing` family plus `oam_dma_timing`, `oam_dma_restart`,
-`oam_dma/basic`, `oam_dma/reg_read`, `oam_dma/sources-GS` pass after four pieces:
-- **Two-bus conflict** (`OamDma.conflicts`): the DMG has an external bus
+add_sp_e/ld_hl_sp_e_timing` family plus `oam_dma_timing/start/restart` and
+`oam_dma/basic/reg_read/sources-GS` pass, from five pieces:
+- **Two-bus conflict** (`OamDma.busHeld`): the DMG has an external bus
   (ROM/SRAM/WRAM) and a video bus (VRAM/OAM); a DMA only holds the bus its source
   sits on, so a CPU access conflicts only on that bus. The old "all non-HRAM
   conflicts" model corrupted the stack during a VRAM-sourced DMA. Fixed
@@ -67,27 +67,23 @@ add_sp_e/ld_hl_sp_e_timing` family plus `oam_dma_timing`, `oam_dma_restart`,
 - **Conflict reads open bus (0xFF)**, not the in-flight DMA byte — the held bus is
   inaccessible. Decoded from `oam_dma_start`'s fixture: a corrupted OAM fetch must
   become RST $38 (0xFF), not the source byte (which would be RST $10 = its fail
-  path). This also means VRAM init is irrelevant to the tests, so VRAM stays 0 and
-  games render exactly as before (no golden change).
-- **Startup delay = 3** M-cycles: positions the 160-cycle transfer window on the
-  exact cycle the tests probe (`oam_dma_timing` passes only at 3).
+  path). VRAM init is therefore irrelevant to the tests → VRAM stays 0 and games
+  render exactly as before (no golden change).
+- **Fetch conflicts one M-cycle before a data read** (`OamDma.conflictsFetch`, used
+  by `read_fetch` for the opcode/CB fetches): an instruction fetch reads the bus at
+  the very start of its M-cycle, so it sees the bus held on the DMA's final setup
+  cycle. This is the offset between `oam_dma_start` (measures via fetch) and
+  `oam_dma_timing` (measures via data read), which otherwise wanted delays a cycle
+  apart.
+- **Startup delay = 3** M-cycles for a fresh DMA or a restart *during transfer*;
+  but a second FF46 write *during the startup delay* does **not** reset the
+  countdown (only the source latches). That makes `oam_dma_start`'s back-to-back
+  FF46 restart round measure `B=0` while `oam_dma_restart` (restart mid-transfer)
+  still wants the full 3.
 - **Source E0-FF reads the WRAM echo** (`$C000 | (addr & 0x1FFF)`), not OAM/IO, so
   `$FE`/`$FF` DMA copies WRAM like `$E0` (`oam_dma/sources-GS` test_fe00/ff00).
 
-Broad mooneye acceptance went 14/41 → 29/41 with no regressions.
-
-## Remaining gap
-
-- `oam_dma_start` (1 of 19). It executes OAM as code and measures, to the cycle,
-  *when* the bus conflict first corrupts the instruction stream — and the
-  decoded fixture wants `B=1`/`B=0` for its two rounds. The conflict-start needs
-  to land one M-cycle earlier for an instruction **fetch** than for a data
-  **read** (the fetch reads the bus at the very start of its M-cycle, so it sees
-  the bus taken on the DMA's final setup cycle). A `conflictsFetch` variant that
-  fires on the warming cycle gets round 1 (`B=1`) but not round 2's restart
-  timing (`B=0`), so it needs the exact restart + sub-M-cycle model. `oam_dma_timing`
-  (data read) and `oam_dma_start` (fetch) otherwise want startup delays one cycle
-  apart, which a single read path can't satisfy. Left at 18/19.
+Broad mooneye acceptance went 14/41 → 30/41 with no regressions.
 
 Validation net: `tools/accuracy_check.sh` runs blargg CPU, mooneye timer, and the
 target timing tests in one shot.
