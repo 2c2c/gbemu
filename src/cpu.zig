@@ -2038,40 +2038,44 @@ pub const CPU = struct {
                 self.ime = IME.Disabled;
 
                 // Interrupt dispatch is 5 M-cycles (20 T): two internal cycles,
-                // push PC hi+lo, then one internal cycle that loads the vector.
-                // The peripherals are stepped inline across all five so the timer
-                // keeps running while the handler is entered (the timing tests
-                // measure exactly this).
-                self.mcycle(); // [int]
-                self.mcycle(); // [int]
-                self.push(self.pc); // write hi, write lo
+                // push PC high (M3), push PC low (M4), load the vector (M5). The
+                // peripherals step inline across all five so the timer keeps
+                // running while the handler is entered (the timing tests measure
+                // this). The vector is latched *between* the two pushes — IE is
+                // sampled after the high byte is written but before the low byte
+                // — which is what mooneye ie_push checks: a push landing on $FFFF
+                // (SP at 0x0000 → high byte, or 0x0001 → low byte) overwrites IE,
+                // and only an overwrite by the high byte can change/cancel the
+                // vector.
+                self.mcycle(); // M1 [int]
+                self.mcycle(); // M2 [int]
 
-                // Vector is latched here (after the push, IE/IF re-read).
-                if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) {
-                    log.debug("HANDLING VBLANK\n", .{});
+                self.sp = self.sp -% 1;
+                self.tick_write(self.sp, @truncate(self.pc >> 8)); // M3: push high
+
+                // M4: latch the vector from the (possibly high-byte-modified) IE.
+                const vector: u16 = if (self.bus.interrupt_enable.enable_vblank and self.bus.interrupt_flag.enable_vblank) blk: {
                     self.bus.interrupt_flag.enable_vblank = false;
-                    self.pc = @intFromEnum(ISR.VBlank);
-                } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) {
-                    log.debug("HANDLING LCDSTAT\n", .{});
+                    break :blk @intFromEnum(ISR.VBlank);
+                } else if (self.bus.interrupt_enable.enable_lcd_stat and self.bus.interrupt_flag.enable_lcd_stat) blk: {
                     self.bus.interrupt_flag.enable_lcd_stat = false;
-                    self.pc = @intFromEnum(ISR.LCDStat);
-                } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) {
-                    log.debug("HANDLING TIMER\n", .{});
+                    break :blk @intFromEnum(ISR.LCDStat);
+                } else if (self.bus.interrupt_enable.enable_timer and self.bus.interrupt_flag.enable_timer) blk: {
                     self.bus.interrupt_flag.enable_timer = false;
-                    self.pc = @intFromEnum(ISR.Timer);
-                } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) {
-                    log.debug("HANDLING SERIAL\n", .{});
+                    break :blk @intFromEnum(ISR.Timer);
+                } else if (self.bus.interrupt_enable.enable_serial and self.bus.interrupt_flag.enable_serial) blk: {
                     self.bus.interrupt_flag.enable_serial = false;
-                    self.pc = @intFromEnum(ISR.Serial);
-                } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) {
-                    log.debug("HANDLING JOYPAD\n", .{});
+                    break :blk @intFromEnum(ISR.Serial);
+                } else if (self.bus.interrupt_enable.enable_joypad and self.bus.interrupt_flag.enable_joypad) blk: {
                     self.bus.interrupt_flag.enable_joypad = false;
-                    self.pc = @intFromEnum(ISR.Joypad);
-                } else {
-                    // IF cancelled by the push (overwrote IE/IF): jump to 0x0000.
-                    self.pc = 0x0000;
-                }
-                self.mcycle(); // [int]: load vector into PC
+                    break :blk @intFromEnum(ISR.Joypad);
+                } else 0x0000; // IF cancelled by the high-byte push: vector 0x0000
+
+                self.sp = self.sp -% 1;
+                self.tick_write(self.sp, @truncate(self.pc)); // M4: push low
+
+                self.mcycle(); // M5 [int]: load vector into PC
+                self.pc = vector;
                 self.clock.t_cycles += 20;
                 return true;
             }
