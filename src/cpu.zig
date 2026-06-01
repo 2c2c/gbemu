@@ -611,7 +611,9 @@ pub const CPU = struct {
     /// into IF. Shared by the inline tick() path and gameboy.frame()'s remainder.
     pub fn tick_peripherals_one(self: *CPU) void {
         const enable_timer_flag = self.bus.timer.step();
-        _ = self.bus.apu.step(self.clock);
+        // The APU's frame sequencer is derived from the system DIV counter, which the
+        // timer just advanced for this T-cycle — pass it so DIV writes shift the phase.
+        _ = self.bus.apu.step(self.bus.timer.internal_clock);
         // Serial is clocked off the same system counter the timer just advanced,
         // so the falling-edge detection sees the post-step counter value.
         const serial_irq = self.bus.serial_step(@bitCast(self.bus.timer.internal_clock));

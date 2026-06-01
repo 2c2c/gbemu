@@ -33,7 +33,6 @@ const SDL = if (have_sdl) @import("sdl2") else struct {
 
 const log = std.log.scoped(.apu);
 
-pub var div_ticks: u64 = 0;
 pub const SDL_SAMPLE_SIZE = 2048;
 pub const SAMPLE_RATE = 48000;
 // pub const SAMPLE_RATE = 48000 * 4;
@@ -236,8 +235,15 @@ pub const APU = struct {
     length_step: bool,
     envelope_step: bool,
     sweep_step: bool,
-    frame_sequence: u64,
-    internal_clock: cpu.Clock,
+    // Frame sequencer phase. `frame_step` is the NEXT of the 8 steps (0-7) to run;
+    // it advances on the falling edge of the system DIV bit 12 (tracked via
+    // `prev_div_bit`), so DIV writes shift its phase exactly like real hardware
+    // (blargg 07 / the sync_apu/sync_sweep test helpers).
+    frame_step: u3,
+    prev_div_bit: u1,
+    // Monotonic per-T-cycle counter (never reset by DIV writes) used as the time
+    // reference for the channel-3 wave-RAM access window (blargg 09/10/12).
+    current_tick: u64,
     nr52: NR52,
     nr51: NR51,
     nr50: NR50,
@@ -310,11 +316,12 @@ pub const APU = struct {
                 .left_volume = 0,
                 .vin_left = false,
             },
-            .internal_clock = @bitCast(@as(u64, 0)),
             .length_step = false,
             .envelope_step = false,
             .sweep_step = false,
-            .frame_sequence = 0,
+            .frame_step = 0,
+            .prev_div_bit = 0,
+            .current_tick = 0,
             .channel_1 = Channel1.new(),
             .channel_2 = Channel2.new(),
             .channel_3 = Channel3.new(),
@@ -326,39 +333,46 @@ pub const APU = struct {
         return apu;
     }
 
-    pub fn step(self: *APU, clock: cpu.Clock) void {
-        _ = clock; // autofix
+    /// Steps the APU one T-cycle. `div_clock` is the *system* DIV counter (the
+    /// timer's internal_clock) already advanced for this T-cycle — the frame
+    /// sequencer is derived from it so DIV writes shift its phase.
+    pub fn step(self: *APU, div_clock: cpu.Clock) void {
         var apu_sample_left: f32 = 0;
         var apu_sample_right: f32 = 0;
+
+        self.current_tick +%= 1;
+
+        // DIV bit 12 (= bit 4 of the DIV upper byte) clocks the 512 Hz frame sequencer.
+        const div_bit: u1 = @truncate((div_clock.bits.div >> 4) & 1);
 
         if (self.nr52.audio_on) {
             self.length_step = false;
             self.sweep_step = false;
             self.envelope_step = false;
 
-            var new_clock = self.internal_clock;
-            new_clock.t_cycles += 1;
-            if (new_clock.bits.lower_clock == 0) {
-                div_ticks += 1;
+            // Falling edge of DIV bit 12 -> advance the frame sequencer one step.
+            // Length clocks on steps 0,2,4,6; sweep on 2,6; envelope on 7.
+            if (self.prev_div_bit == 1 and div_bit == 0) {
+                switch (self.frame_step) {
+                    0, 4 => self.length_step = true,
+                    2, 6 => {
+                        self.length_step = true;
+                        self.sweep_step = true;
+                    },
+                    7 => self.envelope_step = true,
+                    else => {},
+                }
+                self.frame_step +%= 1;
             }
 
-            const old_bit = (self.internal_clock.bits.div >> 4) & 1;
-            const new_bit = (new_clock.bits.div >> 4) & 1;
-
-            if (old_bit == 1 and new_bit == 0) {
-                self.frame_sequence += 1;
-                // unsure if these ticks have the same falling edge behavior clock
-                self.length_step = if (self.frame_sequence % 2 == 0) true else false;
-                self.sweep_step = if (self.frame_sequence % 4 == 0) true else false;
-                self.envelope_step = if (self.frame_sequence % 8 == 0) true else false;
-
-                // log.debug("old_clock {b:0>8}", .{self.internal_clock.bits.div});
-                // log.debug("new_clock {b:0>8}", .{new_clock.bits.div});
-                // log.debug("div_ticks = {}", .{div_ticks});
-                div_ticks = 0;
+            // Length counters are clocked even while the channel is disabled (blargg
+            // 02 #11), so they run here independent of each channel's enabled gate.
+            if (self.length_step) {
+                self.channel_1.clock_length();
+                self.channel_2.clock_length();
+                self.channel_3.clock_length();
+                self.channel_4.clock_length();
             }
-
-            self.internal_clock = new_clock;
 
             const ch1_out = self.channel_1.step(self);
             const ch2_out = self.channel_2.step(self);
@@ -393,6 +407,11 @@ pub const APU = struct {
             //     log.debug("apu_sample_left = {}, apu_sample_right = {}", .{ apu_sample_left, apu_sample_right });
             // }
         }
+
+        // Track DIV bit 12 every cycle (even while powered off) so that on power-up
+        // the next frame-sequencer step's timing follows the current DIV phase
+        // rather than a fresh counter (blargg 07).
+        self.prev_div_bit = div_bit;
 
         if (self.mute) {
             apu_sample_left = 0;
@@ -495,6 +514,7 @@ pub const APU = struct {
         self.channel_1.shadow_frequency = 0;
         self.channel_1.sweep_timer = 0;
         self.channel_1.sweep_enable = false;
+        self.channel_1.sweep_negate_used = false;
         self.channel_1.envelope_timer = 0;
         self.channel_1.length_timer = 0;
         self.channel_1.enabled = false;
@@ -522,6 +542,7 @@ pub const APU = struct {
         self.channel_3.timer = 0;
         self.channel_3.length_timer = 0;
         self.channel_3.dac_enabled = false;
+        self.channel_3.sample_time = 0;
 
         self.channel_4.nr41 = @bitCast(@as(u8, 0xFF));
         self.channel_4.nr42 = @bitCast(@as(u8, 0x00));
@@ -547,7 +568,8 @@ pub const APU = struct {
 
         self.audio_buffer = std.mem.zeroes([SDL_SAMPLE_SIZE * 2]f32);
 
-        self.frame_sequence = 0;
+        self.frame_step = 0;
+        self.prev_div_bit = 0;
     }
     pub fn read_apu_register(self: *APU, addr: u16) u8 {
         switch (addr) {
@@ -605,29 +627,75 @@ pub const APU = struct {
             },
             0xFF30...0xFF3F => {
                 const wave_ram_offset = addr - 0xFF30;
+                // While ch3 plays, DMG only exposes wave RAM on the exact tick the wave
+                // unit fetches a byte (then any address reads that byte); otherwise 0xFF.
+                if (self.channel_3.enabled) {
+                    if (self.current_tick == self.channel_3.sample_time) {
+                        return self.channel_3.wave_ram.byte[self.channel_3.current_sample / 2];
+                    }
+                    return 0xFF;
+                }
                 return self.channel_3.wave_ram.byte[wave_ram_offset];
             },
             else => return 0xFF,
         }
     }
 
+    /// True when the frame sequencer's NEXT step (`frame_step`) will NOT clock the
+    /// length counter (odd steps 1,3,5,7). Writing NRx4 to enable length, or
+    /// triggering with a freshly-reloaded length, in this window applies one extra
+    /// immediate length clock — the "extra length clock" quirk (blargg 03).
+    fn extra_length_clock(self: *APU) bool {
+        return (self.frame_step & 1) == 1;
+    }
+
     pub fn write_apu_register(self: *APU, addr: u16, byte: u8) void {
-        // if audio is off and addr isnt equal to waveram or nrx1 addresses we skip
-        // if (!(self.nr52.audio_on or
-        //     addr == 0xFF26 or
-        //     addr >= 0xFF30 and addr <= 0xFF3F or
-        //     addr == 0xFF11 or
-        //     addr == 0xFF16 or
-        //     addr == 0xFF1B or
-        //     addr == 0xFF20))
-        // {
-        //     return;
-        // }
+        // DMG power-off write gate. While the APU is off (NR52 bit 7 = 0) the hardware
+        // ignores writes to every register EXCEPT:
+        //   - NR52 ($FF26) itself (used to power back on),
+        //   - wave RAM ($FF30-$FF3F), still freely accessible,
+        //   - the length-load registers NR11/NR21/NR31/NR41, and only their *length*
+        //     portion (the length counters keep running while powered off — this is the
+        //     DMG-specific exception blargg's 01/08/11 tests probe).
+        // The duty/other bits of NR11/NR21 are NOT writable while off, so we mask.
+        if (!self.nr52.audio_on) {
+            switch (addr) {
+                0xFF26 => {}, // NR52: always writable (power control)
+                0xFF30...0xFF3F => {}, // wave RAM: always accessible
+                0xFF11 => {
+                    self.channel_1.nr11.sound_length = @truncate(byte & 0x3F);
+                    self.channel_1.length_timer = 64 - @as(u16, self.channel_1.nr11.sound_length);
+                    return;
+                },
+                0xFF16 => {
+                    self.channel_2.nr21.sound_length = @truncate(byte & 0x3F);
+                    self.channel_2.length_timer = 64 - @as(u16, self.channel_2.nr21.sound_length);
+                    return;
+                },
+                0xFF1B => {
+                    self.channel_3.nr31.initial_length_timer = byte;
+                    self.channel_3.length_timer = 256 - @as(u16, byte);
+                    return;
+                },
+                0xFF20 => {
+                    self.channel_4.nr41.initial_length_timer = @truncate(byte & 0x3F);
+                    self.channel_4.length_timer = 64 - @as(u16, self.channel_4.nr41.initial_length_timer);
+                    return;
+                },
+                else => return,
+            }
+        }
 
         switch (addr) {
             0xFF10 => {
                 // log.debug("write nr10 {b:0>8}\n", .{byte});
+                const was_negate = self.channel_1.nr10.sweep_direction;
                 self.channel_1.nr10 = @bitCast(byte);
+                // Clearing the negate bit after at least one negate-mode sweep
+                // calculation immediately disables the channel (blargg 05 #4).
+                if (was_negate and !self.channel_1.nr10.sweep_direction and self.channel_1.sweep_negate_used) {
+                    self.channel_1.enabled = false;
+                }
             },
             0xFF11 => {
                 // log.debug("write nr11 {b:0>8}\n", .{byte});
@@ -635,6 +703,8 @@ pub const APU = struct {
                 // (sound_length bits read back as 1); applying it on WRITE forced sound_length
                 // to 63, so any length-enabled note died after one tick (silent SFX, e.g. SML stomp).
                 self.channel_1.nr11 = @bitCast(byte);
+                // Writing NRx1 reloads the length counter immediately (blargg 02 #3).
+                self.channel_1.length_timer = 64 - @as(u16, self.channel_1.nr11.sound_length);
             },
             0xFF12 => {
                 // log.debug("write nr12 {b:0>8}\n", .{byte});
@@ -657,28 +727,57 @@ pub const APU = struct {
             },
             0xFF14 => {
                 // log.debug("write nr14 {b:0>8}\n", .{byte});
-                //   sweep_period                = (NR10 >> 4) & 0x07;
+                const prev_len_en = self.channel_1.nr14.length_enable;
                 self.channel_1.nr14 = @bitCast(byte | 0b0011_1000);
                 // Sync live frequency high bits (see NR13 note above).
                 self.channel_1.frequency = (self.channel_1.frequency & 0x00FF) | (@as(u16, self.channel_1.nr14.period_high) << 8);
-                if (self.channel_1.nr14.trigger) {
+
+                const trigger = self.channel_1.nr14.trigger;
+                const len_en = self.channel_1.nr14.length_enable;
+                const extra = self.extra_length_clock();
+
+                // Enabling length (0->1) in the extra-clock window clocks length once now.
+                if (extra and !prev_len_en and len_en and self.channel_1.length_timer > 0) {
+                    self.channel_1.length_timer -= 1;
+                    if (self.channel_1.length_timer == 0 and !trigger) self.channel_1.enabled = false;
+                }
+
+                if (trigger) {
                     // log.info("TRIGGER write nr14 {b:0>8}\n", .{byte});
                     self.channel_1.enabled = true;
                     self.channel_1.envelope_timer = self.channel_1.nr12.env_sweep_pace;
-                    self.channel_1.length_timer = 64 - @as(u16, self.channel_1.nr11.sound_length);
+                    // Trigger reloads a zeroed length counter to max; if length is now
+                    // enabled and we're in the extra-clock window it's clocked once more.
+                    if (self.channel_1.length_timer == 0) {
+                        self.channel_1.length_timer = 64;
+                        if (len_en and extra) self.channel_1.length_timer -= 1;
+                    }
                     self.channel_1.volume = self.channel_1.nr12.env_initial_volume;
                     self.channel_1._frequency = @as(u16, self.channel_1.nr14.period_high) << 8 | self.channel_1.nr13.period_low;
                     self.channel_1.frequency = self.channel_1._frequency;
                     self.channel_1.shadow_frequency = self.channel_1._frequency;
                     self.channel_1.sweep_timer = if (self.channel_1.nr10.sweep_pace == 0) 8 else self.channel_1.nr10.sweep_pace;
                     self.channel_1.sweep_enable = if (self.channel_1.nr10.sweep_pace > 0 or self.channel_1.nr10.sweep_step > 0) true else false;
+                    self.channel_1.sweep_negate_used = false;
                     self.channel_1.timer = (2048 - self.channel_1.frequency) * 4;
+                    // On trigger, if the sweep shift is non-zero the overflow check runs
+                    // immediately and can disable the channel (blargg 04 #2 / 06).
+                    if (self.channel_1.nr10.sweep_step > 0) {
+                        _ = self.channel_1.sweep_calculate();
+                    }
+                    // A trigger only keeps the channel enabled if its DAC is on. With the
+                    // DAC off (NR12 upper 5 bits = 0) the channel disables again immediately,
+                    // so NR52's status bit reads 0 (blargg 11 subtest #2).
+                    if (self.channel_1.nr12.env_initial_volume == 0 and !self.channel_1.nr12.env_direction) {
+                        self.channel_1.enabled = false;
+                    }
                 }
             },
             0xFF15 => {},
             0xFF16 => {
                 // See NR11 note: don't OR the length bits on write (read-only quirk).
                 self.channel_2.nr21 = @bitCast(byte);
+                self.channel_2.length_timer = 64 - @as(u16, self.channel_2.nr21.sound_length);
             },
             0xFF17 => {
                 // log.info("write nr22 {b:0>8}\n", .{byte});
@@ -694,32 +793,47 @@ pub const APU = struct {
             },
             0xFF19 => {
                 // log.debug("write nr24 {b:0>8}\n", .{byte});
-                //   sweep_period                = (nr20 >> 4) & 0x07;
+                const prev_len_en = self.channel_2.nr24.length_enable;
                 self.channel_2.nr24 = @bitCast(byte | 0b0011_1000);
                 const freq = @as(u16, self.channel_2.nr24.period_high) << 8 | self.channel_2.nr23.period_low;
 
-                if (self.channel_2.nr24.trigger) {
+                const trigger = self.channel_2.nr24.trigger;
+                const len_en = self.channel_2.nr24.length_enable;
+                const extra = self.extra_length_clock();
+
+                if (extra and !prev_len_en and len_en and self.channel_2.length_timer > 0) {
+                    self.channel_2.length_timer -= 1;
+                    if (self.channel_2.length_timer == 0 and !trigger) self.channel_2.enabled = false;
+                }
+
+                if (trigger) {
                     // log.info("TRIGGER write nr24 {b:0>8}\n", .{byte});
                     self.channel_2.enabled = true;
-                    self.channel_2.length_timer = 64 - @as(u16, self.channel_2.nr21.sound_length);
+                    if (self.channel_2.length_timer == 0) {
+                        self.channel_2.length_timer = 64;
+                        if (len_en and extra) self.channel_2.length_timer -= 1;
+                    }
                     self.channel_2.volume = self.channel_2.nr22.env_initial_volume;
                     self.channel_2.timer = (2048 - freq) * 4;
                     self.channel_2.envelope_timer = self.channel_2.nr22.env_sweep_pace;
+                    // DAC-off trigger leaves the channel disabled (see channel 1 note).
+                    if (self.channel_2.nr22.env_initial_volume == 0 and !self.channel_2.nr22.env_direction) {
+                        self.channel_2.enabled = false;
+                    }
                 }
             },
             0xFF1A => {
                 self.channel_3.nr30 = @bitCast(byte | 0b0111_1111);
-
-                // not needed
-                if (self.channel_3.nr30.dac_on) {
-                    self.channel_3.dac_enabled = true;
-                } else {
-                    self.channel_3.dac_enabled = false;
+                self.channel_3.dac_enabled = self.channel_3.nr30.dac_on;
+                // Turning the DAC off immediately disables the channel (blargg 02 #13).
+                if (!self.channel_3.dac_enabled) {
+                    self.channel_3.enabled = false;
                 }
             },
             0xFF1B => {
                 // self.channel_3.nr31 = @bitCast(byte | 0b1111_1111);
                 self.channel_3.nr31 = @bitCast(byte);
+                self.channel_3.length_timer = 256 - @as(u16, byte);
             },
             0xFF1C => {
                 self.channel_3.nr32 = @bitCast(byte | 0b1001_1111);
@@ -728,20 +842,54 @@ pub const APU = struct {
                 self.channel_3.nr33 = @bitCast(byte);
             },
             0xFF1E => {
+                const prev_len_en = self.channel_3.nr34.length_enable;
+                const was_playing = self.channel_3.enabled;
                 self.channel_3.nr34 = @bitCast(byte | 0b0011_1000);
-
                 const freq = @as(u16, self.channel_3.nr34.period_high) << 8 | self.channel_3.nr33.period_low;
-                if (self.channel_3.nr34.trigger and self.channel_3.dac_enabled) {
-                    self.channel_3.enabled = true;
-                    // ?
+
+                const trigger = self.channel_3.nr34.trigger;
+                const len_en = self.channel_3.nr34.length_enable;
+                const extra = self.extra_length_clock();
+
+                if (extra and !prev_len_en and len_en and self.channel_3.length_timer > 0) {
+                    self.channel_3.length_timer -= 1;
+                    if (self.channel_3.length_timer == 0 and !trigger) self.channel_3.enabled = false;
+                }
+
+                if (trigger) {
+                    // DMG wave-RAM corruption: re-triggering while the channel is still
+                    // playing and exactly 2 ticks from fetching the next byte rewrites the
+                    // first bytes of wave RAM (blargg 10).
+                    if (was_playing and self.channel_3.timer == 2) {
+                        const position: u8 = (self.channel_3.current_sample + 1) & 31;
+                        const byte_index: usize = position >> 1;
+                        if (position < 8) {
+                            self.channel_3.wave_ram.byte[0] = self.channel_3.wave_ram.byte[byte_index];
+                        } else {
+                            const src: usize = byte_index & 12;
+                            var i: usize = 0;
+                            while (i < 4) : (i += 1) {
+                                self.channel_3.wave_ram.byte[i] = self.channel_3.wave_ram.byte[src + i];
+                            }
+                        }
+                    }
+
+                    // Trigger effects happen regardless of the DAC, but the channel only
+                    // actually enables if the DAC is on (blargg 03 #11/#12, 02 #14).
+                    self.channel_3.enabled = self.channel_3.dac_enabled;
                     self.channel_3.current_sample = 0;
-                    self.channel_3.length_timer = 256 - @as(u16, self.channel_3.nr31.initial_length_timer);
-                    self.channel_3.timer = (2048 - freq) * 2;
+                    if (self.channel_3.length_timer == 0) {
+                        self.channel_3.length_timer = 256;
+                        if (len_en and extra) self.channel_3.length_timer -= 1;
+                    }
+                    // First fetch after trigger is delayed an extra 6 ticks on DMG.
+                    self.channel_3.timer = (2048 - freq) * 2 + 6;
                 }
             },
             0xFF20 => {
                 // See NR11 note: don't OR the length bits on write (read-only quirk).
                 self.channel_4.nr41 = @bitCast(byte);
+                self.channel_4.length_timer = 64 - @as(u16, self.channel_4.nr41.initial_length_timer);
             },
             0xFF21 => {
                 self.channel_4.nr42 = @bitCast(byte);
@@ -754,14 +902,32 @@ pub const APU = struct {
                 self.channel_4.nr43 = @bitCast(byte);
             },
             0xFF23 => {
+                const prev_len_en = self.channel_4.nr44.length_enable;
                 self.channel_4.nr44 = @bitCast(byte | 0b0011_1111);
-                if (self.channel_4.nr44.trigger) {
+
+                const trigger = self.channel_4.nr44.trigger;
+                const len_en = self.channel_4.nr44.length_enable;
+                const extra = self.extra_length_clock();
+
+                if (extra and !prev_len_en and len_en and self.channel_4.length_timer > 0) {
+                    self.channel_4.length_timer -= 1;
+                    if (self.channel_4.length_timer == 0 and !trigger) self.channel_4.enabled = false;
+                }
+
+                if (trigger) {
                     self.channel_4.enabled = true;
                     self.channel_4.timer = self.channel_4.freq();
-                    self.channel_4.length_timer = 64 - @as(u16, self.channel_4.nr41.initial_length_timer);
+                    if (self.channel_4.length_timer == 0) {
+                        self.channel_4.length_timer = 64;
+                        if (len_en and extra) self.channel_4.length_timer -= 1;
+                    }
                     self.channel_4.volume = self.channel_4.nr42.env_initial_volume;
                     self.channel_4.envelope_timer = self.channel_4.nr42.env_sweep_pace;
                     self.channel_4.lsfr = ~@as(u16, 0);
+                    // DAC-off trigger leaves the channel disabled (see channel 1 note).
+                    if (self.channel_4.nr42.env_initial_volume == 0 and !self.channel_4.nr42.env_direction) {
+                        self.channel_4.enabled = false;
+                    }
                 }
             },
             0xFF24 => {
@@ -777,14 +943,27 @@ pub const APU = struct {
                 const enabled = (byte & 0x80) != 0;
                 if (!enabled and self.nr52.audio_on) {
                     // Power off: clear all sound registers (NR10-NR51) and disable.
+                    // On DMG the length counters are NOT reset by power-off (blargg 08),
+                    // so save/restore them around the register-clearing writes (which
+                    // would otherwise reload them via the NRx1 length-load side effect).
+                    const l1 = self.channel_1.length_timer;
+                    const l2 = self.channel_2.length_timer;
+                    const l3 = self.channel_3.length_timer;
+                    const l4 = self.channel_4.length_timer;
                     for (0xFF10..0xFF26) |reset_addr| {
                         self.write_apu_register(@truncate(reset_addr), 0);
                     }
+                    self.channel_1.length_timer = l1;
+                    self.channel_2.length_timer = l2;
+                    self.channel_3.length_timer = l3;
+                    self.channel_4.length_timer = l4;
                     self.nr52.audio_on = false;
                 } else if (enabled and !self.nr52.audio_on) {
-                    // Power on (off -> on transition): reset the frame sequencer.
+                    // Power on (off -> on transition): reset the frame-sequencer phase
+                    // to step 0. prev_div_bit is intentionally left as-is so the first
+                    // step fires at the next DIV bit-12 falling edge (blargg 07).
                     self.nr52.audio_on = true;
-                    self.frame_sequence = 0;
+                    self.frame_step = 0;
                     self.channel_1.duty_pos = 0;
                     self.channel_2.duty_pos = 0;
                     self.channel_3.current_sample = 0;
@@ -792,7 +971,15 @@ pub const APU = struct {
             },
             0xFF30...0xFF3F => {
                 const wave_ram_offset = addr - 0xFF30;
-                self.channel_3.wave_ram.byte[wave_ram_offset] = byte;
+                // Mirror the read window: while playing, a write only lands (on the byte
+                // being fetched) during the access tick; otherwise it is dropped (blargg 12).
+                if (self.channel_3.enabled) {
+                    if (self.current_tick == self.channel_3.sample_time) {
+                        self.channel_3.wave_ram.byte[self.channel_3.current_sample / 2] = byte;
+                    }
+                } else {
+                    self.channel_3.wave_ram.byte[wave_ram_offset] = byte;
+                }
             },
             else => {},
         }
@@ -816,6 +1003,10 @@ const Channel1 = struct {
     length_timer: u16,
     sweep_timer: u16,
     sweep_enable: bool,
+    // True once a sweep calculation has run in negate (decrease) mode since the
+    // last trigger. Clearing NR10's negate bit afterwards disables the channel
+    // (blargg 05 #4 "Exiting negate mode after calculation disables channel").
+    sweep_negate_used: bool,
 
     volume: u4,
     duty_pos: u16,
@@ -857,7 +1048,62 @@ const Channel1 = struct {
             .shadow_frequency = 0,
             .sweep_timer = 0,
             .sweep_enable = false,
+            .sweep_negate_used = false,
         };
+    }
+
+    // Sweep frequency calculation + overflow check. Takes the shadow frequency,
+    // shifts it right by the sweep shift (NR10 bits 0-2), optionally negates, and
+    // sums with the shadow. If the result overflows (> 2047) the channel is
+    // disabled. The new frequency is returned but NOT written back here — the
+    // caller decides whether to commit it (gbdev "Frequency Sweep").
+    fn sweep_calculate(self: *Channel1) u16 {
+        const delta: u16 = self.shadow_frequency >> self.nr10.sweep_step;
+        const new_freq: u16 = if (self.nr10.sweep_direction)
+            self.shadow_frequency -% delta
+        else
+            self.shadow_frequency +% delta;
+        if (self.nr10.sweep_direction) self.sweep_negate_used = true;
+        if (new_freq > 2047) {
+            self.enabled = false;
+        }
+        return new_freq;
+    }
+
+    // One 128 Hz sweep-unit clock. Decrement the timer; on underflow reload it
+    // (period 0 reloads as 8 — blargg 05 "Timer treats period 0 as 8") and, if the
+    // sweep is enabled with a non-zero period, run the calculate→write-back→
+    // calculate-again sequence. The first calc may disable on overflow; if it
+    // survives and the shift is non-zero, the result is committed to the shadow +
+    // live frequency (and NR13/NR14) and a second calc runs purely for its overflow
+    // check (which can still disable the channel).
+    fn sweep_clock(self: *Channel1) void {
+        if (self.sweep_timer > 0) self.sweep_timer -= 1;
+        if (self.sweep_timer != 0) return;
+
+        self.sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
+
+        if (self.sweep_enable and self.nr10.sweep_pace > 0) {
+            const new_freq = self.sweep_calculate();
+            if (new_freq <= 2047 and self.nr10.sweep_step > 0) {
+                self.shadow_frequency = new_freq;
+                self.frequency = new_freq;
+                self.nr13.period_low = @truncate(new_freq & 0xFF);
+                self.nr14.period_high = @truncate((new_freq >> 8) & 0x7);
+                // Second calculation — overflow check only, result discarded.
+                _ = self.sweep_calculate();
+            }
+        }
+    }
+
+    // Clock the length counter (called on frame-sequencer length steps regardless
+    // of whether the channel is enabled — blargg 02 #11). When it reaches zero the
+    // channel is disabled.
+    fn clock_length(self: *Channel1) void {
+        if (self.nr14.length_enable and self.length_timer > 0) {
+            self.length_timer -= 1;
+            if (self.length_timer == 0) self.enabled = false;
+        }
     }
 
     pub fn step(self: *Channel1, apu: *APU) f32 {
@@ -884,13 +1130,6 @@ const Channel1 = struct {
         //     .amp = amp,
         // });
 
-        if (apu.length_step and self.nr14.length_enable) {
-            if (self.length_timer > 0) self.length_timer -= 1;
-            if (self.length_timer == 0) {
-                self.enabled = false;
-            }
-        }
-
         if (apu.envelope_step and self.nr12.env_sweep_pace != 0) {
             log.debug("envelope_timer {}", .{self.envelope_timer});
             if (self.envelope_timer > 0) self.envelope_timer -= 1;
@@ -908,29 +1147,7 @@ const Channel1 = struct {
         }
 
         if (apu.sweep_step) {
-            if (self.sweep_timer > 0) self.sweep_timer -= 1;
-            if (self.sweep_timer == 0) {
-                self.sweep_timer = if (self.nr10.sweep_pace == 0) 8 else self.nr10.sweep_pace;
-
-                if (self.sweep_enable and self.nr10.sweep_pace > 0) {
-                    var new_freq: u16 = self.shadow_frequency >> self.nr10.sweep_step;
-
-                    if (self.nr10.sweep_direction) {
-                        new_freq = self.shadow_frequency -% new_freq;
-                    } else {
-                        new_freq = self.shadow_frequency +% new_freq;
-                    }
-
-                    if (new_freq >= 2048 or new_freq == 0) {
-                        self.enabled = false;
-                    }
-
-                    if (self.enabled and apu.sweep_step) {
-                        self.frequency = new_freq;
-                        self.shadow_frequency = new_freq;
-                    }
-                }
-            }
+            self.sweep_clock();
         }
 
         return dac_volume_convert(amp * self.volume);
@@ -979,6 +1196,13 @@ const Channel2 = struct {
         };
     }
 
+    fn clock_length(self: *Channel2) void {
+        if (self.nr24.length_enable and self.length_timer > 0) {
+            self.length_timer -= 1;
+            if (self.length_timer == 0) self.enabled = false;
+        }
+    }
+
     pub fn step(self: *Channel2, apu: *APU) f32 {
         // log.debug("in ch1.step", .{});
         if (!self.enabled) {
@@ -1002,13 +1226,6 @@ const Channel2 = struct {
         //     .pos = self.duty_pos,
         //     .amp = amp,
         // });
-
-        if (apu.length_step and self.nr24.length_enable) {
-            if (self.length_timer > 0) self.length_timer -= 1;
-            if (self.length_timer == 0) {
-                self.enabled = false;
-            }
-        }
 
         if (apu.envelope_step and self.nr22.env_sweep_pace != 0) {
             if (self.envelope_timer > 0) self.envelope_timer -= 1;
@@ -1040,6 +1257,9 @@ const Channel3 = struct {
     timer: u16,
     length_timer: u16,
     dac_enabled: bool,
+    // Absolute APU tick at which the wave unit last fetched a byte. On DMG the CPU
+    // can only see/alter wave RAM on that exact tick (blargg 09/10/12).
+    sample_time: u64,
 
     wave_ram: WaveRam,
 
@@ -1050,6 +1270,7 @@ const Channel3 = struct {
             .timer = 0,
             .length_timer = 0,
             .dac_enabled = false,
+            .sample_time = 0,
             .wave_ram = WaveRam{
                 .byte = @splat(0),
             },
@@ -1077,6 +1298,13 @@ const Channel3 = struct {
         };
     }
 
+    fn clock_length(self: *Channel3) void {
+        if (self.nr34.length_enable and self.length_timer > 0) {
+            self.length_timer -= 1;
+            if (self.length_timer == 0) self.enabled = false;
+        }
+    }
+
     pub fn step(self: *Channel3, apu: *APU) f32 {
         // log.debug("in ch1.step", .{});
         if (!self.enabled) {
@@ -1090,6 +1318,9 @@ const Channel3 = struct {
         if (self.timer == 0) {
             self.timer = initial_freq;
             self.current_sample = (self.current_sample + 1) % 32;
+            // Mark the tick of this wave-RAM fetch — the only moment a CPU access
+            // to wave RAM lands on the byte being played (DMG access window).
+            self.sample_time = apu.current_tick;
         }
 
         const amp_byte = @as(u8, self.wave_ram.byte[self.current_sample / 2]);
@@ -1112,13 +1343,6 @@ const Channel3 = struct {
         //     self.nr32.output_level,
         //     self.current_samp_nibblele,
         // });
-
-        if (apu.length_step and self.nr34.length_enable) {
-            if (self.length_timer > 0) self.length_timer -= 1;
-            if (self.length_timer == 0) {
-                self.enabled = false;
-            }
-        }
 
         // log.debug("amp_nibble = {} volume = {}", .{ amp_nibble, self.volume });
         if (!self.dac_enabled) {
@@ -1189,6 +1413,13 @@ const Channel4 = struct {
         return base << self.nr43.clock_shift;
     }
 
+    fn clock_length(self: *Channel4) void {
+        if (self.nr44.length_enable and self.length_timer > 0) {
+            self.length_timer -= 1;
+            if (self.length_timer == 0) self.enabled = false;
+        }
+    }
+
     pub fn step(self: *Channel4, apu: *APU) f32 {
         if (!self.enabled) {
             return 0;
@@ -1219,13 +1450,6 @@ const Channel4 = struct {
 
         // log.debug("lsfr = {}", .{self.lsfr});
         // log.debug("amp = {}", .{amp});
-
-        if (apu.length_step and self.nr44.length_enable) {
-            if (self.length_timer > 0) self.length_timer -= 1;
-            if (self.length_timer == 0) {
-                self.enabled = false;
-            }
-        }
 
         if (apu.envelope_step and self.nr42.env_sweep_pace != 0) {
             // log.debug("envelope_step = {} env_sweep_pace = {}", .{ apu.envelope_step, self.nr42.env_sweep_pace });
