@@ -198,6 +198,26 @@ pub const GPU = struct {
     /// is the "STAT blocking" behaviour mooneye stat_irq_blocking checks.
     stat_irq_line: bool = false,
 
+    /// The PPU's true current mode, used for the STAT-interrupt sources, the
+    /// mode-change edges (VBlank IRQ, scanline render), and LCD-on bookkeeping.
+    /// The mode reported in the STAT *register* (`stat.ppu_mode`) lags this by one
+    /// dot — a CPU read latches near the end of its M-cycle and sees the previous
+    /// dot's mode, which is the boundary mooneye intr_2_mode0/mode3_timing pin.
+    internal_mode: u2 = 1,
+
+    /// The PPU's true current LY==LYC coincidence. The flag reported in the STAT
+    /// register (`stat.lyc_ly_compare`) lags this by one dot: when LY increments
+    /// into a match the register bit sets a dot later (mooneye lcdon_timing-GS).
+    /// The STAT interrupt source uses this immediate value, not the delayed one.
+    internal_lyc_compare: bool = true,
+
+    /// Set when the LCD is switched on, cleared once LY leaves line 0. The first
+    /// scanline after enabling the LCD is special: there is no OAM scan (mode 2),
+    /// so the would-be mode-2 window reads as mode 0 and fires no OAM STAT IRQ, and
+    /// the line is 4 dots short (LY reaches 1 at dot 452, not 456). mooneye
+    /// lcdon_timing-GS / lcdon_write_timing-GS pin this.
+    lcd_first_line: bool = false,
+
     pub fn new() GPU {
         // const obp: [2]Palette = .{
         //     .{
@@ -254,6 +274,8 @@ pub const GPU = struct {
             .objects = objects,
             .window_position = .{ .wy = 0, .wx = 0 },
             .cycles = 0,
+            .internal_mode = 1,
+            .internal_lyc_compare = true,
         };
     }
 
@@ -264,6 +286,7 @@ pub const GPU = struct {
     };
     // PPU timing (DMG, in dots == T-cycles).
     const DOTS_PER_LINE: usize = 456;
+    const FIRST_LINE_DOTS: usize = 452; // line 0 after LCD-on is 4 dots short
     const MODE2_DOTS: usize = 80; // OAM scan
     const MODE3_BASE: u16 = 172; // pixel transfer, before SCX/sprite penalties
     const VBLANK_LY: u8 = 144;
@@ -284,11 +307,14 @@ pub const GPU = struct {
     /// a scanline when pixel transfer (mode 3) ends, and raises the STAT IRQ on
     /// the rising edge of the combined (mode + LYC) STAT line.
     fn tick_dot(self: *GPU, flags: *IFEnableRequests) void {
-        // Advance the horizontal dot; wrap to the next scanline every 456 dots.
+        // Advance the horizontal dot; wrap to the next scanline. Line 0 after
+        // LCD-on is 4 dots short (FIRST_LINE_DOTS); every other line is 456.
         self.cycles += 1;
-        if (self.cycles >= DOTS_PER_LINE) {
+        const line_len: usize = if (self.lcd_first_line) FIRST_LINE_DOTS else DOTS_PER_LINE;
+        if (self.cycles >= line_len) {
             self.cycles = 0;
             self.ly += 1;
+            self.lcd_first_line = false; // the special first line is over
             if (self.ly >= TOTAL_LINES) {
                 self.ly = 0;
                 self.internal_window_counter = 0;
@@ -296,52 +322,124 @@ pub const GPU = struct {
         }
         const dot = self.cycles;
 
+        // The first line after LCD-on has no OAM scan and its pixel transfer
+        // begins one dot early (at dot 79, not 80) — the whole mode-3 window is
+        // shifted left by one so the 1-dot-delayed STAT register and the mode-gated
+        // VRAM/OAM access both show mode 3 over [80,252) (mooneye lcdon_timing-GS).
+        const m3_start: usize = if (self.lcd_first_line) MODE2_DOTS - 1 else MODE2_DOTS;
+
         // Latch this line's mode-3 length when pixel transfer begins (samples SCX).
-        if (self.ly < VBLANK_LY and dot == MODE2_DOTS) {
+        if (self.ly < VBLANK_LY and dot == m3_start) {
             self.line3_len = self.mode3_length();
         }
 
-        // Mode implied by the current (ly, dot).
+        // Mode implied by the current (ly, dot) — the PPU's true internal mode,
+        // which drives the interrupt sources, the mode-change edges, and rendering.
         const mode: u2 = if (self.ly >= VBLANK_LY)
             1
-        else if (dot < MODE2_DOTS)
-            2
-        else if (dot < MODE2_DOTS + self.line3_len)
+        else if (dot < m3_start)
+            // Before pixel transfer: OAM scan (mode 2), except the first line after
+            // LCD-on has no OAM scan and reads as mode 0.
+            (if (self.lcd_first_line) @as(u2, 0) else 2)
+        else if (dot < m3_start + self.line3_len)
             3
         else
             0;
 
-        if (mode != self.stat.ppu_mode) {
+        if (mode != self.internal_mode) {
             // Pixel transfer just finished: emit the scanline for this line.
-            if (mode == 0 and self.stat.ppu_mode == 3) self.render_scanline();
+            if (mode == 0 and self.internal_mode == 3) self.render_scanline();
             // Entering VBlank (LY=144) requests the VBlank interrupt.
             if (mode == 1) flags.vblank = true;
-            self.stat.ppu_mode = mode;
         }
 
-        // LYC==LY comparison is evaluated continuously.
-        self.stat.lyc_ly_compare = (self.ly == self.lyc);
+        // The STAT register reports the mode one dot late: set it to the *previous*
+        // dot's mode (still held in internal_mode) before advancing internal_mode.
+        self.stat.ppu_mode = self.internal_mode;
+        self.internal_mode = mode;
 
-        // STAT interrupt: the combined source line is the OR of the enabled mode
-        // and LYC sources; the interrupt fires only on its rising edge (this is
-        // the STAT-blocking behaviour). The OAM (mode 2) source also pulses at the
-        // start of line 144 — the VBlank line triggers the OAM-scan STAT signal in
-        // addition to the VBlank one (mooneye vblank_stat_intr).
-        const oam_source = mode == 2 or (self.ly == VBLANK_LY and dot < MODE2_DOTS);
-        const stat_line =
-            (self.stat.mode_0_interrupt_enabled and mode == 0) or
-            (self.stat.mode_1_interrupt_enabled and mode == 1) or
-            (self.stat.mode_2_interrupt_enabled and oam_source) or
-            (self.stat.lyc_int_interrupt_enabled and self.stat.lyc_ly_compare);
-        if (stat_line and !self.stat_irq_line) flags.lcd_stat = true;
-        self.stat_irq_line = stat_line;
+        // LYC==LY: the compare is redone one dot into each line, so on the first
+        // dot (cycles==0, right after LY changed) the register bit reads 0 even on
+        // a match; from the next dot it reflects ly==lyc (mooneye lcdon_timing-GS).
+        // The interrupt source uses the immediate compare (internal_lyc_compare).
+        self.stat.lyc_ly_compare = (self.cycles != 0) and (self.ly == self.lyc);
+        self.internal_lyc_compare = (self.ly == self.lyc);
+
+        // Re-evaluate the combined STAT line; fire on its rising edge.
+        if (self.refresh_stat_line()) flags.lcd_stat = true;
+    }
+
+    /// Recompute the combined STAT interrupt line (OR of the enabled mode/LYC
+    /// sources) from the current state, latch it, and return true if it just rose.
+    /// The interrupt fires only on this rising edge — the "STAT blocking" behaviour
+    /// (mooneye stat_irq_blocking). Driven every dot by tick_dot and also after the
+    /// register writes that change the line combinationally (LCD enable, LYC, STAT
+    /// enable bits), so e.g. enabling the LCD into a fresh LY==LYC match fires
+    /// immediately (mooneye stat_lyc_onoff).
+    pub fn refresh_stat_line(self: *GPU) bool {
+        var line = false;
+        if (self.lcdc.lcd_enable) {
+            const mode = self.internal_mode;
+            // The OAM (mode 2) source also pulses at the start of line 144 — the
+            // VBlank line triggers the OAM-scan STAT signal in addition to the
+            // VBlank one (mooneye vblank_stat_intr).
+            const oam_source = mode == 2 or (self.ly == VBLANK_LY and self.cycles < MODE2_DOTS);
+            line =
+                (self.stat.mode_0_interrupt_enabled and mode == 0) or
+                (self.stat.mode_1_interrupt_enabled and mode == 1) or
+                (self.stat.mode_2_interrupt_enabled and oam_source) or
+                (self.stat.lyc_int_interrupt_enabled and self.internal_lyc_compare);
+        } else {
+            // LCD off: the mode sources are quiet, but the LYC comparator is frozen
+            // and can still hold the line high.
+            line = self.stat.lyc_int_interrupt_enabled and self.internal_lyc_compare;
+        }
+        const rose = line and !self.stat_irq_line;
+        self.stat_irq_line = line;
+        return rose;
     }
 
     /// Mode 3 (pixel transfer) length for the current line: base 172 dots plus the
     /// SCX fine-scroll penalty (the first SCX&7 pixels are discarded, extending
-    /// mode 3 by that many dots). Sprite/window penalties are added later.
+    /// mode 3 by that many dots) plus the per-object penalty.
+    ///
+    /// Object penalty (Pan Docs): every object the PPU fetches costs a 6-dot base.
+    /// The first object on a given background tile column additionally waits for
+    /// the in-progress BG fetch — `5 - min(5, (x+SCX)&7)` dots — so a sprite hard
+    /// against the left of its tile costs the full 11, one further right costs
+    /// less, and a run of objects sharing a tile column pays that wait only once.
+    /// Objects are selected by the OAM scan (vertical overlap only, max 10); one
+    /// fully off the right edge (OAM x >= 168) is selected but never fetched.
+    /// (mooneye intr_2_mode0_timing_sprites pins every step of this.)
     fn mode3_length(self: *GPU) u16 {
-        return MODE3_BASE + (self.background_viewport.scx & 7);
+        var len: u16 = MODE3_BASE + (self.background_viewport.scx & 7);
+        if (!self.lcdc.obj_enable) return len;
+
+        const obj_height: i16 = if (self.lcdc.obj_size) 16 else 8;
+        const scx: u16 = self.background_viewport.scx;
+        const ly_i: i16 = @intCast(self.ly);
+
+        var count: u8 = 0;
+        var last_tile: i32 = -1; // tile column of the previously penalised object
+        for (self.objects) |obj| {
+            // Selected by the OAM scan when the object covers this line vertically.
+            if (obj.y <= ly_i and obj.y + obj_height > ly_i) {
+                count += 1;
+                if (count > 10) break;
+                // objects store screen x (= OAM x - 8); recover OAM x. One whose
+                // left edge is past pixel 159 (OAM x >= 168) is never fetched.
+                const oam_x: i16 = obj.x + 8;
+                if (oam_x >= 168) continue;
+                const xs: u16 = @intCast(oam_x); // 0..167
+                len += 6; // base object fetch
+                const tile_col: i32 = @intCast((xs + scx) >> 3);
+                if (tile_col != last_tile) {
+                    len += 5 - @min(@as(u16, 5), (xs + scx) & 7);
+                    last_tile = tile_col;
+                }
+            }
+        }
+        return len;
     }
 
     fn render_scanline(self: *GPU) void {
@@ -719,6 +817,41 @@ pub const GPU = struct {
             }
         }
     }
+    /// Whether the CPU is locked out of OAM (mode 2/3). The lock is asymmetric: it
+    /// engages immediately when the PPU enters mode 2/3 (true internal_mode) but
+    /// releases one dot late (the register mode lags) — so OAM stays locked through
+    /// the last dot of mode 3 (mooneye intr_2_oam_ok_timing) yet locks on the very
+    /// first dot of the next line's OAM scan (mooneye lcdon_timing-GS).
+    pub fn oam_locked(self: *const GPU) bool {
+        if (!self.lcdc.lcd_enable) return false;
+        return self.internal_mode == 2 or self.internal_mode == 3 or
+            self.stat.ppu_mode == 2 or self.stat.ppu_mode == 3;
+    }
+
+    /// Whether the CPU is locked out of VRAM (mode 3), with the same immediate-lock
+    /// / delayed-release asymmetry as oam_locked.
+    pub fn vram_locked(self: *const GPU) bool {
+        if (!self.lcdc.lcd_enable) return false;
+        return self.internal_mode == 3 or self.stat.ppu_mode == 3;
+    }
+
+    /// Whether a CPU *write* to OAM is dropped. Writes lock a dot later than reads:
+    /// at the mode 0->2 line boundary the write still lands (register mode is still
+    /// 0) and at the mode 2->3 boundary there is a one-dot window where the write
+    /// lands again (register mode 2, internal already 3) — so the block is the
+    /// delayed register mode minus that transition dot (mooneye lcdon_write_timing).
+    pub fn oam_write_blocked(self: *const GPU) bool {
+        if (!self.lcdc.lcd_enable) return false;
+        return self.stat.ppu_mode == 3 or (self.stat.ppu_mode == 2 and self.internal_mode == 2);
+    }
+
+    /// Whether a CPU *write* to VRAM is dropped — purely the delayed register mode 3
+    /// (writes lock/release a dot later than reads; mooneye lcdon_write_timing-GS).
+    pub fn vram_write_blocked(self: *const GPU) bool {
+        if (!self.lcdc.lcd_enable) return false;
+        return self.stat.ppu_mode == 3;
+    }
+
     pub fn read_vram(self: *const GPU, address: usize) u8 {
         return self.vram[address];
     }

@@ -250,7 +250,9 @@ pub const MemoryBus = struct {
                 }
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
-                // log.debug("Vram byte read\n", .{});
+                // VRAM is inaccessible to the CPU during mode 3: a read returns open
+                // bus (see GPU.vram_locked for the immediate-lock/delayed-release).
+                if (self.gpu.vram_locked()) return 0xFF;
                 return self.gpu.read_vram(address);
             },
             // external ram
@@ -265,6 +267,9 @@ pub const MemoryBus = struct {
                 return self.memory[new_addr];
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
+                // OAM is inaccessible during mode 2 (OAM scan) and mode 3: a read
+                // returns open bus (mooneye intr_2_oam_ok_timing / lcdon_timing-GS).
+                if (self.gpu.oam_locked()) return 0xFF;
                 // OAM is stored in the GPU's memory (where write_oam puts it), not
                 // the flat `memory` array — read it back from the same place.
                 return self.gpu.read_vram(address);
@@ -292,6 +297,8 @@ pub const MemoryBus = struct {
                 return;
             },
             gpu.VRAM_BEGIN...gpu.VRAM_END => {
+                // CPU writes to VRAM are dropped during mode 3 (pixel transfer).
+                if (self.gpu.vram_write_blocked()) return;
                 self.gpu.write_vram(address, byte);
                 return;
             },
@@ -310,8 +317,10 @@ pub const MemoryBus = struct {
                 return;
             },
             gpu.OAM_BEGIN...gpu.OAM_END => {
-                // CPU writes to OAM are dropped while the DMA holds the bus.
+                // CPU writes to OAM are dropped while the DMA holds the bus, and
+                // during mode 2/3 when the PPU owns OAM.
                 if (self.dma.active) return;
+                if (self.gpu.oam_write_blocked()) return;
                 self.gpu.write_oam(address, byte);
                 return;
             },
@@ -492,13 +501,31 @@ pub const MemoryBus = struct {
                         self.gpu.cycles = 0;
                         self.gpu.internal_window_counter = 0;
                         self.gpu.stat.ppu_mode = 0;
-                        self.gpu.stat_irq_line = false;
+                        self.gpu.internal_mode = 0;
+                        // The mode sources go quiet, but the LYC coincidence is
+                        // frozen with the comparator (lyc_ly_compare keeps its last
+                        // ticked value) — re-latch the STAT line so re-enabling the
+                        // LCD while LY==LYC stays true produces no rising edge
+                        // (mooneye stat_lyc_onoff round 2).
+                        _ = self.gpu.refresh_stat_line();
                     } else if (!was_on) {
                         // LCD just turned on: start a fresh frame at LY0/dot0 so the
                         // first VBlank (and the boot-time PPU phase) is deterministic.
+                        // Mark the special first scanline (no mode 2, 4 dots short).
                         self.gpu.cycles = 0;
+                        self.gpu.ly = 0;
                         self.gpu.stat.ppu_mode = 0;
-                        self.gpu.stat_irq_line = false;
+                        self.gpu.internal_mode = 0;
+                        self.gpu.lcd_first_line = true;
+                        // Re-evaluate the (now unfrozen) LYC comparator against the
+                        // fresh LY=0 and re-latch the STAT line: enabling the LCD
+                        // into a new LY==LYC match is a rising edge and must fire the
+                        // STAT IRQ now (mooneye stat_lyc_onoff round 4), while a
+                        // match that was already true stays low (round 2).
+                        const coincide = self.gpu.ly == self.gpu.lyc;
+                        self.gpu.internal_lyc_compare = coincide;
+                        self.gpu.stat.lyc_ly_compare = coincide;
+                        if (self.gpu.refresh_stat_line()) self.interrupt_flag.enable_lcd_stat = true;
                     }
                 },
                 0xFF41 => {

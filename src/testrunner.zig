@@ -255,6 +255,81 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    // Debug mode: run a mooneye PPU timing test to its result, then dump the
+    // measured register snapshot (regs_save, FF80-FF87) against the expected
+    // values (regs_assert, FF89-FF90) and the check mask (regs_flags, FF88).
+    // The save/assert layout is f,a,c,b,e,d,l,h (see the *.sym files).
+    //   testrunner ppudump <rom>
+    if (std.mem.eql(u8, mode, "ppudump")) {
+        const rom_path = args[2];
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var i: u32 = 0;
+        while (i < MOONEYE_FRAMES) : (i += 1) {
+            gb.frame();
+            const r = &gb.cpu.registers;
+            const passed = r.B == 3 and r.C == 5 and r.D == 8 and r.E == 13 and r.H == 21 and r.L == 34;
+            const failed = r.B == 0x42 and r.C == 0x42 and r.D == 0x42;
+            if (passed or failed) break;
+        }
+        const flags = gb.memory_bus.read_byte(0xFF88);
+        // save:   FF80=F FF81=A FF82=C FF83=B FF84=E FF85=D FF86=L FF87=H
+        // assert: FF89=F FF8A=A FF8B=C FF8C=B FF8D=E FF8E=D FF8F=L FF90=H
+        const names = [_][]const u8{ "F", "A", "C", "B", "E", "D", "L", "H" };
+        std.debug.print("regs_flags(FF88) = 0x{X:0>2}\n", .{flags});
+        std.debug.print("reg  actual  expected\n", .{});
+        for (names, 0..) |name, idx| {
+            const actual = gb.memory_bus.read_byte(@intCast(0xFF80 + idx));
+            const expected = gb.memory_bus.read_byte(@intCast(0xFF89 + idx));
+            std.debug.print("  {s}   0x{X:0>2}    0x{X:0>2}\n", .{ name, actual, expected });
+        }
+        return;
+    }
+
+    // Debug mode: run lcdon_timing-GS until the Nth call of verify_results
+    // (PC=0x4B89), then dump the 24-byte measured buffer (FF80-FF97) beside the
+    // expected table that DE points at, so mismatched samples are obvious.
+    //   testrunner lcdondump <rom> <which: 0=LY 1=STAT0 2=STAT1 3=OAM 4=VRAM>
+    if (std.mem.eql(u8, mode, "lcdondump")) {
+        const rom_path = args[2];
+        const which = try std.fmt.parseInt(u32, args[3], 10);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        var hits: u32 = 0;
+        var steps: u64 = 0;
+        while (steps < 200_000_000) : (steps += 1) {
+            if (gb.cpu.pc == 0x4B89) {
+                if (hits == which) {
+                    const de = (@as(u16, gb.cpu.registers.D) << 8) | gb.cpu.registers.E;
+                    std.debug.print("verify #{d}  expected_table=0x{X:0>4}\n", .{ which, de });
+                    std.debug.print("idx  off   actual expected\n", .{});
+                    const offs = [_]u16{ 8, 76, 248, 448, 528, 704, 904, 984, 12, 80, 252, 452, 532, 708, 908, 988, 16, 84, 256, 456, 536, 712, 912, 992 };
+                    var i: u16 = 0;
+                    while (i < 24) : (i += 1) {
+                        const actual = gb.memory_bus.read_byte(0xFF80 + i);
+                        const expected = gb.memory_bus.read_byte(de + i);
+                        const mark = if (actual != expected) " <--" else "";
+                        std.debug.print("{d:2}  {d:4}   0x{X:0>2}    0x{X:0>2}{s}\n", .{ i, offs[i], actual, expected, mark });
+                    }
+                    return;
+                }
+                hits += 1;
+            }
+            _ = gb.cpu.step();
+            gb.cpu.hit_vblank = false;
+            var rem = gb.cpu.pending_t_cycles - gb.cpu.inline_ticked;
+            while (rem > 0) : (rem -= 1) gb.cpu.tick_peripherals_one();
+        }
+        std.debug.print("verify_results #{d} never reached\n", .{which});
+        return;
+    }
+
     const is_blargg = std.mem.eql(u8, mode, "blargg");
 
     var pass: u32 = 0;
