@@ -322,7 +322,7 @@ could only fake. Remaining residuals are the sub-dot phase (e.g. `scx_high` 35 p
 8-px tile columns scrambled at the SCX-write point). `m3_wx_4_change_sprites` stayed at
 10 px (its residual is the window-edge sub-dot, Bucket E, not sprite pacing).
 
-### Bucket E — window activation / WX edges — **deferred (root-caused)**
+### Bucket E — window activation / WX edges — **deferred (state machine attempted)**
 
 Exact dot the window turns on, the WX<7 / WX=0 lead-in discard, and mid-line LCDC.5
 toggles. `fifo_check_window` (`src/gpu.zig`) is close for the simple case
@@ -338,16 +338,23 @@ once and never deactivates, so:
 - `m3_wx_6_change` (13799) is almost entirely wrong: mid-line `WX` changes that the
   once-only trigger never re-evaluates.
 
-**Why deferred (not a risk worth taking now).** The fix is a re-evaluate-**every-dot**
-window state machine: switch the fetcher window↔BG on each `LCDC.5`/condition edge, with
-the correct BG-resume column (`fetch_col` for screen `lcd_x`: `((lcd_x+scx)>>3)−(scx>>3)`
-+ a `(lcd_x+scx)&7` re-align discard) and a window restart at col 0 on each (re)activation
-(the reference's periodicity confirms the restart). It is rendering-only (12/12-safe like
-Bucket D) **but** it still won't reach 0 px (the toggle points carry the same sub-dot
-residual), and it risks regressing the *passing* `m2_win_en_toggle` and every game's
-status-bar window — only the render byte-compare guards that. Net: structural px wins are
-available here, but with a real regression surface and no test pass, so it waits behind a
-careful bring-up (keep `m2_win_en_toggle` at 0 and renders byte-identical at every step).
+**Attempted, reverted (the every-dot state machine isn't enough).** Built the
+re-evaluate-**every-dot** window: switch the fetcher window↔BG on each edge, with the
+BG-resume column (`fetch_col = ((lcd_x+scx)>>3)−(scx>>3)`, re-align discard `(lcd_x+scx)&7`)
+and a window restart at col 0 on each activation; deactivation gated on the *enable* bits
+only (LCDC.5/.0, LY≥WY) — a one-way `lcd_x≥WX-7` activation trigger, since a mid-line WX
+*increase* must **not** turn an already-on window off (gating deactivation on `lcd_x≥win_x`
+instead blew up `m3_wx_4/5_change` to 10k+). With that corrected, `m2_win_en_toggle` stays
+0 and `m3_wx_4/5_change` stay at baseline — but the multi-toggle target **did not improve**
+(`win_en_multiple` 8316→8334, `wx_6` unchanged). So the structural switch is necessary but
+not sufficient: the rapid-toggle result is dominated by the **per-toggle window-fetch
+timing** (how many dots the fetcher stalls on each re-activation, and the exact sub-dot
+restart phase) — the same fractional-dot class as `m3_bgp_change`'s 820 floor. Reverted;
+the state-machine sketch is correct and worth reusing, but it needs the per-toggle fetch
+cadence modelled before it pays off. Code parked in this commit's history.
+
+Closest window targets if revisited: `m3_window_timing` (99 px — the activation-edge
+fetch-stall length) and `m3_wx_4_change_sprites` (10 px — window-edge sub-dot at a sprite).
 
 ---
 
@@ -363,7 +370,7 @@ careful bring-up (keep `m2_win_en_toggle` at 0 and renders byte-identical at eve
 | Bucket B — **pixel-output latch (`PIXEL_OUTPUT_LATCH=1`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_scx_high_5_bits` (35→0) |
 | Bucket B — **output-stage delay line (`OUTPUT_STAGE_DELAY=2`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_obp0_change` (74→0) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
-| Bucket E — window/WX activation timing | 📋 planned, root-caused (biggest remaining px: `wx_6` 13799, `win_en_multiple` 8316 — see Bucket E) |
+| Bucket E — window/WX activation timing | ⏸️ state machine attempted + reverted (structural switch necessary but not sufficient — needs per-toggle fetch cadence; see Bucket E) |
 | **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_lcdc_obj_size_change_scx` 190) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
