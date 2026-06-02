@@ -353,8 +353,20 @@ restart phase) — the same fractional-dot class as `m3_bgp_change`'s 820 floor.
 the state-machine sketch is correct and worth reusing, but it needs the per-toggle fetch
 cadence modelled before it pays off. Code parked in this commit's history.
 
-Closest window targets if revisited: `m3_window_timing` (99 px — the activation-edge
-fetch-stall length) and `m3_wx_4_change_sprites` (10 px — window-edge sub-dot at a sprite).
+Closest window targets if revisited: `m3_window_timing` (99 px) and
+`m3_wx_4_change_sprites` (10 px). Both probed with a `lcd_x > win_x` (window 1 px
+later) diagnostic:
+- `m3_wx_4_change_sprites` is **not** a window-position bug — the diagnostic left it at
+  10 px. Its 10 diffs (all on `x = y−7`) are *sprite visibility*: behind-priority sprites
+  that hardware shows for 1 px where the BG/window colour at the activation column is 0,
+  but we hide because our colour there is non-zero — i.e. the window *content* at the
+  mid-line activation column is off by the sub-dot phase, not the edge.
+- `m3_window_timing` (99→78), `m3_lcdc_win_map_change` (1778→284), `m3_lcdc_tile_sel_win_change`
+  (2360→1170) all *want* the window 1 px later — but that **breaks the passing
+  `m2_win_en_toggle`** (0→3797). So the steady-state window edge and the mid-line window
+  content are entangled at the same sub-dot phase: no integer window shift satisfies both.
+Both reduce to the fractional-dot wall (`m3_bgp_change`'s 820 floor), now the single
+open problem across Buckets B and E.
 
 ---
 
