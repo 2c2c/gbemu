@@ -304,6 +304,31 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    // mealybug write-phase trace: run a ROM to LD B,B with FIFO tracing on for one
+    // scanline, then dump the dot/lcd_x of every BGP write and the dot/bgp of every
+    // emitted pixel for that line. Ground truth for the sub-dot write-phase work.
+    //   testrunner mbtrace <rom> <ly>
+    if (std.mem.eql(u8, mode, "mbtrace")) {
+        const rom_path = args[2];
+        const ly: i32 = try std.fmt.parseInt(i32, args[3], 10);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        gpu.dbg_trace_ly = ly;
+        _ = runToLdBB(&gb);
+        std.debug.print("=== mbtrace ly={d} : BGP writes (dot, lcd_x, bgp) ===\n", .{ly});
+        var i: usize = 0;
+        while (i < gpu.dbg_wr_n) : (i += 1)
+            std.debug.print("  write[{d}] dot={d} lcd_x={d} bgp=0x{X:0>2}\n", .{ i, gpu.dbg_wr_dot[i], gpu.dbg_wr_x[i], gpu.dbg_wr_bgp[i] });
+        std.debug.print("=== emitted pixels (lcd_x: dot bgp) ===\n", .{});
+        var x: usize = 0;
+        while (x < 160) : (x += 1)
+            std.debug.print("  x={d} dot={d} bgp=0x{X:0>2}\n", .{ x, gpu.dbg_emit_dot[x], gpu.dbg_emit_bgp[x] });
+        return;
+    }
+
     // Debug mode: step a ROM until PC hits a watch address, print registers.
     //   testrunner watch <rom> <hexaddr>
     if (std.mem.eql(u8, mode, "watch")) {

@@ -13,12 +13,33 @@ pub const PALETTE_DEBUG_WIDTH: usize = 8;
 pub const DRAW_WIDTH: usize = SCREEN_WIDTH;
 pub const DRAW_HEIGHT: usize = SCREEN_HEIGHT;
 
-// Debug calibration knob (default 0 = no effect on production/wasm/games). When
-// >0, the pixel FIFO delays the start of visible emission by this many dots,
-// modelling a pixel-output latch so a mid-mode-3 register write lands on the
-// correct pixel (mealybug Bucket B). Set by testrunner from $EMIT_LEAD; never
-// touched by gameboy.frame(), so games are unaffected unless this is changed.
-pub var dbg_emit_lead: u8 = 0;
+// Pixel-output latch: the FIFO delays the start of visible emission by this many
+// dots so a mid-mode-3 register write lands on the pixel hardware draws it (the
+// FIFO otherwise emits its first pixel ~1 dot too early relative to the BGP/SCX
+// application point). Calibrated to 1 against the mealybug suite — it makes
+// m3_scx_high_5_bits pixel-exact and improves the whole m3_* cluster with no
+// regression. `dbg_emit_lead` overrides it for calibration sweeps (255 = use the
+// structural default; set from $EMIT_LEAD by testrunner).
+const PIXEL_OUTPUT_LATCH: u8 = 1;
+pub var dbg_emit_lead: u8 = 255;
+
+fn emit_latch() u8 {
+    return if (dbg_emit_lead == 255) PIXEL_OUTPUT_LATCH else dbg_emit_lead;
+}
+
+// Debug trace (Bucket-B research): when dbg_trace_ly >= 0, the FIFO records, for
+// that scanline's mode 3, the dot+lcd_x of every BGP change and the dot+bgp of
+// every emitted pixel into the buffers below. Overwritten each time the line is
+// drawn, so after a run they hold the last (stable) occurrence. Dumped by
+// `testrunner mbtrace`. No effect when -1 (production default).
+pub var dbg_trace_ly: i32 = -1;
+pub var dbg_emit_dot: [160]u16 = @splat(0); // dot each lcd_x emitted at
+pub var dbg_emit_bgp: [160]u8 = @splat(0); // bgp in effect at each lcd_x
+pub var dbg_wr_dot: [96]u16 = @splat(0); // dot of each BGP write
+pub var dbg_wr_x: [96]u16 = @splat(0); // lcd_x when each BGP write landed
+pub var dbg_wr_bgp: [96]u8 = @splat(0); // new bgp value
+pub var dbg_wr_n: usize = 0;
+var dbg_prev_bgp: u16 = 0x100; // sentinel != any u8
 
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
@@ -581,9 +602,15 @@ pub const GPU = struct {
             }
         }
 
-        // Calibration: optionally stall the first visible pixel by dbg_emit_lead
-        // dots (pixel-output latch model). 0 in production, so no effect on games.
-        f.warmup = dbg_emit_lead;
+        // Pixel-output latch: stall the first visible pixel so mid-mode-3 writes
+        // land on the correct pixel (see PIXEL_OUTPUT_LATCH).
+        f.warmup = emit_latch();
+
+        // Debug trace: reset the per-line capture when entering the traced line.
+        if (@as(i32, self.ly) == dbg_trace_ly) {
+            dbg_wr_n = 0;
+            dbg_prev_bgp = 0x100;
+        }
     }
 
     /// Advance the FIFO one dot: maybe activate the window, step the fetcher, then
@@ -592,6 +619,19 @@ pub const GPU = struct {
     /// CPU's mode-3 access lock.
     fn fifo_tick(self: *GPU) void {
         const f = &self.fifo;
+
+        // Debug trace: record BGP writes that land during this line's mode 3.
+        if (@as(i32, self.ly) == dbg_trace_ly) {
+            const bgp_now: u8 = @bitCast(self.bgp);
+            if (bgp_now != dbg_prev_bgp and dbg_wr_n < dbg_wr_dot.len) {
+                dbg_wr_dot[dbg_wr_n] = @intCast(self.cycles);
+                dbg_wr_x[dbg_wr_n] = f.lcd_x;
+                dbg_wr_bgp[dbg_wr_n] = bgp_now;
+                dbg_wr_n += 1;
+                dbg_prev_bgp = bgp_now;
+            }
+        }
+
         if (f.lcd_x >= SCREEN_WIDTH) return;
 
         self.fifo_check_window();
@@ -819,6 +859,12 @@ pub const GPU = struct {
         self.canvas[px * 3] = c;
         self.canvas[px * 3 + 1] = c;
         self.canvas[px * 3 + 2] = c;
+
+        // Debug trace: record the dot + bgp used for each emitted pixel of the line.
+        if (@as(i32, self.ly) == dbg_trace_ly and f.lcd_x < 160) {
+            dbg_emit_dot[f.lcd_x] = @intCast(self.cycles);
+            dbg_emit_bgp[f.lcd_x] = @bitCast(self.bgp);
+        }
 
         var i: usize = 0;
         while (i < 7) : (i += 1) {

@@ -235,11 +235,30 @@ raster) and behind the `mode3_length()` parity assert.
 Corollary, **structural vs phase**: the *flat* tests above don't respond to either
 knob — their error is a genuine FIFO-structure gap (fine-scroll re-latch, window
 re-trigger, multi-toggle), i.e. Buckets D/E, not the sub-dot phase. The
-*phase-sensitive* tests are gated on the output-latch depth fix. A productionised
-SCX-only early-commit was measured (timing-safe, ppu 12/12) but **not shipped**: it
-churns the `links_awakening` golden for no test pass — the same reason `EMIT_LEAD`
-was rejected. Reproduce any of this with the two env knobs; nothing is committed to
-the production path.
+*phase-sensitive* tests are gated on the output-latch depth fix.
+
+**Resolution — the output latch landed (after Bucket D).** Once Bucket D's sprite
+stalls made the FIFO pace over the *full* mode-3 window, the emit latch stopped
+being a content-corrupting fudge and became principled: re-sweeping `$EMIT_LEAD`
+post-Bucket-D, **every** responsive test improves monotonically (incl. `m3_scy_change`,
+which previously *worsened*), and the FIFO simply emits its first pixel ~1 dot too
+early. Baking in `PIXEL_OUTPUT_LATCH = 1` (`fifo_start`) makes `m3_scx_high_5_bits`
+**pixel-exact (35→0)** and improves the whole `m3_*` cluster — **regression-free AND
+golden-neutral** (renders 29/29 byte-identical: no game's mid-mode-3 write crosses a
+pixel boundary at 1 dot, and the latch is timing-neutral — `mode3_length()` still
+owns mode-3 length, the line just completes 1 dot later via `fifo_flush`). Score
+**1/24 → 2/24**. The `$EMIT_LEAD` knob now *overrides* the structural latch (sentinel
+255 = use the default) for further sweeps. The old SCX-early-commit idea is retired —
+the latch subsumes it without the golden churn.
+
+**Remaining sub-dot residual (the obp0 gap).** The fetch stage wants latch 1
+(`scx_high` = 0 @ L1) but the output stage wants latch 3 (`m3_obp0_change` = 0 @ L3,
+`m3_bgp_change` floors ~798 @ L2) — a stable **+2 output-vs-fetch** offset = the FIFO
+fetch→output pipeline depth. Closing it (to also pass `m3_obp0_change`) needs the
+output/palette-application stage delayed 2 dots beyond the BG-index pop: a 2-deep
+output queue that holds (bg index, obj pixel) at latch-1 timing and applies
+`BGP`/`OBP`/`LCDC.0/.1/.2` two dots later. `m3_bgp_change`'s ~798 floor is the true
+fractional-dot residual (13/60/11/60 band widths) that no integer latch reaches.
 
 ### Bucket C — `(ly+scy) % 255` off-by-one — **DONE**
 
@@ -335,11 +354,11 @@ careful bring-up (keep `m2_win_en_toggle` at 0 and renders byte-identical at eve
 | Bucket C — `(ly+scy) %255 → %256` (`gpu.zig`) | ✅ done, regression-free |
 | Bucket B — palette-write reorder (`cpu.zig:tick_write`) | ✅ done, regression-free |
 | Bucket B — calibration benches (`$EMIT_LEAD`, `$WRITE_K`) + fetch/output split characterised | ✅ done (debug-only, no-op in prod) |
-| Bucket B — FIFO output-latch depth fix (the actual gate) | 📋 planned (see "Calibration-sweep findings") |
-| Bucket B — SCX/SCY/WX/LCDC commit extension | ⚠️ blocked: `LCDC` mixes fetch+output bits → needs the latch fix first, not per-reg commit timing |
+| Bucket B — **pixel-output latch (`PIXEL_OUTPUT_LATCH=1`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_scx_high_5_bits` (35→0) |
+| Bucket B — sub-dot residual (output stage wants +2 more than fetch) | 📋 next: split output-palette delay to also pass `m3_obp0_change` (74→0 @ +2) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
 | Bucket E — window/WX activation timing | 📋 planned, root-caused (deferred: real regression surface, no test pass — see Bucket E) |
-| **mealybug score** | **1/24** (closest: `m3_wx_4_change_sprites` 10 px, `m3_scx_high_5_bits` 35 px; every failing `m3_*` is gated on the sub-dot output-latch depth) |
+| **mealybug score** | **2/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`; closest next: `m3_wx_4_change_sprites` 10, `m3_obp0_change` 74) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
 Standing rule for every step below: re-run `tools/mealybug.sh` (score up, no test
