@@ -409,6 +409,59 @@ from hardware. This is a structural content bug, not the sub-dot phase, but root
 needs cross-checking against SameBoy's window fetcher (don't guess). It is the bulk of
 `m3_wx_6_change`'s 13799 px.
 
+#### SameBoy reference oracle — set up + the validated window algorithm
+
+A SameBoy oracle is now built and instrumented (clone in `/tmp/SameBoy`; rebuild with
+`brew install rgbds && make -C /tmp/SameBoy tester` — it builds its own DMG boot ROM).
+Run a mealybug ROM with `build/bin/tester/sameboy_tester --dmg --length 4 <rom.gb>` →
+writes `<rom>.bmp` (top-down 32bpp; SameBoy's DMG palette is greenish, **3 shades** here,
+so quantise by luminance rank — it then matches the mealybug greyscale reference exactly,
+**confirmed for wx_6/window_timing/win_en_multiple**). `Core/display.c` has a `getenv("SBTRACE")`
+hook (set `SBTRACE=<ly>`) that dumps per-tile `line/pos/win/window_y/win_tile_x/tile/lo/hi`
+at the window/BG fetch — the ground-truth for the algorithm below.
+
+**The DMG window engine, traced from SameBoy (`Core/display.c`), validated against ours:**
+
+1. **`position_in_line`** starts at **−16** at mode-3 start; the SCX fine-scroll discard
+   advances it to −8; it then increments **once per pixel shifted out** through −7…159
+   (`lcd_x` only counts the visible 0…159). So in the visible region **`position == lcd_x`**.
+2. **Window activation is an *equality* check, live every pixel:** `WX == (uint8_t)(position
+   + 7)` (plus `wy_triggered` and `LCDC.5`). Not a threshold. A *transient* WX whose match
+   position has already passed never triggers; a later WX triggers at *its* position.
+3. On activation: **`window_y++`** (frame-scoped row counter, init −1), `window_tile_x = 0`,
+   clear BG FIFO, restart fetcher. The fetch row is `window_y` (`window_y/8` map row,
+   `window_y&7` tile row); `window_tile_x` is the map column.
+4. **Deactivation:** when `LCDC.5` (WIN_ENABLE) is cleared, `wx_triggered = false` (it can
+   re-trigger later) — this is what the rapid-toggle `win_en_multiple` cluster needs.
+
+**Why our model diverges (and only here).** Our trigger is a threshold (`lcd_x >= win_x`,
+latched once), and our `internal_window_counter` is *predictive* (incremented per line in
+`fifo_start`). For **stable per-line WX** (games, `window_timing`, `m2_win_en_toggle`) this
+is *equivalent* — SameBoy traces confirm window triggers at `lcd_x == WX−7` and `window_y ==
+ly`, exactly matching us — which is why those render correctly. The divergence is **only**
+mid-line WX/enable changes:
+
+- `m3_wx_6_change` ly=40 (SameBoy): WX=6 is transient (its match position −1 is passed
+  before WX settles), then WX→40 triggers the window at **pos=33** with **window_y=34**,
+  reading tile `0x57` row 2 (`lo=FF hi=9D`). For x0–32 it shows **BG** (tile `0x42` = the
+  `{3,3,3,3,3,3,3,0}` stripe). Ours triggers at `lcd_x=0` on the transient WX=6 → window
+  everywhere, `wrow=36` (row 4, `lo=FF hi=95`). The stripe is **background**, not window —
+  we had it backwards.
+
+**Implementation spec for the next session (the remaining structural work).** Replace the
+window activation with SameBoy's: a signed `position` counter covering a fixed −16…159
+pre-region (independent of SCX, unlike our variable `discard`), an **equality** trigger on
+live WX, `window_y` incremented **on activation** (frame-scoped, replacing the predictive
+`internal_window_counter`), and **deactivate on `LCDC.5` clear**. This is a meaningful
+rewrite of the line-start/discard region and is **entangled with the SCX fine-scroll** (the
+−16→−8 jump) and the `mode3_length()` timing contract, so it must be built incrementally
+against the SameBoy oracle **and** `tools/ppu_regress.sh` (12/12, 29/29 byte-identical).
+Note `wx_6`'s exact trigger also depends on *when* the transient WX=6 write lands vs
+position −1 — a sub-dot write-timing component shared with `m3_bgp_change`'s 820 floor — so
+even a faithful engine may not reach 0 there without the sub-T-cycle commit. The cleanest
+wins from this rewrite are the **enable-toggle** cluster (`win_en_multiple`, deactivation)
+and the WX≥7 mid-line cases.
+
 ---
 
 ## Status summary
@@ -424,7 +477,7 @@ needs cross-checking against SameBoy's window fetcher (don't guess). It is the b
 | Bucket B — **output-stage delay line (`OUTPUT_STAGE_DELAY=2`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_obp0_change` (74→0) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
 | Bucket E — window **line-start** activation latch (`fifo_check_window`, `warmup += 13+win_x`) | ✅ done, regression-free + golden-neutral — `m3_window_timing` 99→15, `m3_window_timing_wx_0` 1490→634 |
-| Bucket E — window/WX **mid-line** re-evaluation + content | ⏸️ open: `m3_wx_6_change` reads wrong window tile (needs SameBoy); rapid-toggle (`win_en_multiple`) needs per-toggle fetch cadence; WX≥7 edge is sub-dot |
+| Bucket E — window/WX **mid-line** re-evaluation + content | ⏸️ open, but now **fully spec'd via the SameBoy oracle** (equality trigger on live WX, `position_in_line` −16…159, `window_y`-on-activation, deactivate-on-`LCDC.5`-clear). `m3_wx_6_change`: the stripe is BG, window triggers at pos=33 on WX→40 — we wrongly trigger at line-start on transient WX=6. Implementation = a guarded line-start/discard rewrite (see "SameBoy reference oracle" above) |
 | **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_window_timing` 15, `m3_lcdc_obj_en_change` 136) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
