@@ -251,14 +251,20 @@ owns mode-3 length, the line just completes 1 dot later via `fifo_flush`). Score
 255 = use the default) for further sweeps. The old SCX-early-commit idea is retired —
 the latch subsumes it without the golden churn.
 
-**Remaining sub-dot residual (the obp0 gap).** The fetch stage wants latch 1
-(`scx_high` = 0 @ L1) but the output stage wants latch 3 (`m3_obp0_change` = 0 @ L3,
-`m3_bgp_change` floors ~798 @ L2) — a stable **+2 output-vs-fetch** offset = the FIFO
-fetch→output pipeline depth. Closing it (to also pass `m3_obp0_change`) needs the
-output/palette-application stage delayed 2 dots beyond the BG-index pop: a 2-deep
-output queue that holds (bg index, obj pixel) at latch-1 timing and applies
-`BGP`/`OBP`/`LCDC.0/.1/.2` two dots later. `m3_bgp_change`'s ~798 floor is the true
-fractional-dot residual (13/60/11/60 band widths) that no integer latch reaches.
+**The obp0 gap — closed (output-stage delay line).** The fetch stage wants latch 1
+(`scx_high` = 0 @ L1) but the output stage wants latch 3 (`m3_obp0_change` = 0 @ L3) —
+a stable **+2 output-vs-fetch** offset = the FIFO fetch→output pipeline depth. Landed
+as `OUTPUT_STAGE_DELAY = 2` (`fifo_emit_pixel`/`od_write`/`od_flush`): a small delay
+line captures the BG colour-index and front OBJ pixel when a pixel is shifted out
+(fetch-timed, latch 1) and applies `BGP`/`OBP`/`LCDC.0/.1/.2`/priority two dots later
+(output latch 3). Passes `m3_obp0_change` (74→0) **and** keeps `m3_scx_high_5_bits` at
+0, improves the cluster again (`bgp_change` 1508→820, `window_timing` 360→99,
+`obj_en_change` 186→136), **regression-free and golden-neutral** (renders 29/29
+byte-identical). Score **2/24 → 3/24**.
+
+`m3_bgp_change`'s ~820 floor is the true fractional-dot residual (13/60/11/60 band
+widths) that no integer latch reaches — the genuine sub-T-cycle phase, and the only
+part of Bucket B still open. The rest of the failures are Bucket E (window) structure.
 
 ### Bucket C — `(ly+scy) % 255` off-by-one — **DONE**
 
@@ -355,10 +361,10 @@ careful bring-up (keep `m2_win_en_toggle` at 0 and renders byte-identical at eve
 | Bucket B — palette-write reorder (`cpu.zig:tick_write`) | ✅ done, regression-free |
 | Bucket B — calibration benches (`$EMIT_LEAD`, `$WRITE_K`) + fetch/output split characterised | ✅ done (debug-only, no-op in prod) |
 | Bucket B — **pixel-output latch (`PIXEL_OUTPUT_LATCH=1`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_scx_high_5_bits` (35→0) |
-| Bucket B — sub-dot residual (output stage wants +2 more than fetch) | 📋 next: split output-palette delay to also pass `m3_obp0_change` (74→0 @ +2) |
+| Bucket B — **output-stage delay line (`OUTPUT_STAGE_DELAY=2`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_obp0_change` (74→0) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
-| Bucket E — window/WX activation timing | 📋 planned, root-caused (deferred: real regression surface, no test pass — see Bucket E) |
-| **mealybug score** | **2/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`; closest next: `m3_wx_4_change_sprites` 10, `m3_obp0_change` 74) |
+| Bucket E — window/WX activation timing | 📋 planned, root-caused (biggest remaining px: `wx_6` 13799, `win_en_multiple` 8316 — see Bucket E) |
+| **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_lcdc_obj_size_change_scx` 190) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
 Standing rule for every step below: re-run `tools/mealybug.sh` (score up, no test

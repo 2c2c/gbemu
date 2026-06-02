@@ -21,6 +21,9 @@ pub const DRAW_HEIGHT: usize = SCREEN_HEIGHT;
 // regression. `dbg_emit_lead` overrides it for calibration sweeps (255 = use the
 // structural default; set from $EMIT_LEAD by testrunner).
 const PIXEL_OUTPUT_LATCH: u8 = 1;
+// Extra dots the output stage (palette/enable application) lags the fetch stage.
+// Total output latch = PIXEL_OUTPUT_LATCH + OUTPUT_STAGE_DELAY = 3, fetch = 1.
+const OUTPUT_STAGE_DELAY: u8 = 2;
 pub var dbg_emit_lead: u8 = 255;
 
 fn emit_latch() u8 {
@@ -304,6 +307,20 @@ pub const GPU = struct {
 
         window_triggered: bool = false, // window already activated on this line
         warmup: u8 = 0, // dbg_emit_lead: dots to stall before the first visible pixel
+
+        // Output-stage delay line. The BG colour index and the front OBJ-FIFO pixel
+        // are captured when a pixel is shifted out (fetch-timed = latch 1), but the
+        // palette/enable application (BGP/OBP, LCDC.0 bg-enable, LCDC.1/.2 obj-enable,
+        // OBJ priority) happens OUTPUT_STAGE_DELAY dots later — so the output stage
+        // sees latch 1+2=3 while the fetch stage stays at 1, matching the FIFO's
+        // fetch→output pipeline depth (mealybug: m3_obp0_change wants +2 vs m3_scx_*).
+        od_raw: [4]u2 = @splat(0), // captured BG colour index
+        od_oc: [4]u2 = @splat(0), // captured OBJ colour (0 = none)
+        od_op: [4]u1 = @splat(0), // captured OBJ palette select
+        od_opri: [4]bool = @splat(false), // captured OBJ behind-BG priority
+        od_x: [4]u8 = @splat(0), // canvas column for the captured pixel
+        od_head: u8 = 0,
+        od_count: u8 = 0,
     };
 
     pub fn new() GPU {
@@ -684,6 +701,8 @@ pub const GPU = struct {
         while (self.fifo.lcd_x < SCREEN_WIDTH and guard < 4000) : (guard += 1) {
             self.fifo_tick();
         }
+        // Drain the output-stage delay line (the last OUTPUT_STAGE_DELAY pixels).
+        self.od_flush();
     }
 
     /// Activate the window the first dot the current column reaches it. Clears the
@@ -837,34 +856,61 @@ pub const GPU = struct {
         }
     }
 
-    /// Shift one finished pixel to the LCD: mix the BG/window colour-index with the
-    /// front OBJ FIFO slot (respecting LCDC.0 BG-enable, OBJ-behind-BG priority, and
-    /// transparency), write it to the canvas, then advance the OBJ FIFO and lcd_x.
-    fn fifo_emit_pixel(self: *GPU) void {
+    /// Apply the output-stage registers (sampled now, OUTPUT_STAGE_DELAY dots after
+    /// the pixel was shifted out) to the oldest captured pixel and write it to the
+    /// canvas: mix the BG colour-index with the captured OBJ pixel honouring LCDC.0
+    /// BG-enable, LCDC.1/.2 OBJ-enable, OBJ-behind-BG priority and the palettes.
+    fn od_write(self: *GPU) void {
         const f = &self.fifo;
-        self.fifo_merge_sprites();
-
-        const bg_raw = self.fifo_pop_bg();
-        const bg_id: u2 = if (self.lcdc.bg_window_enable) bg_raw else 0;
+        const s = f.od_head;
+        const bg_id: u2 = if (self.lcdc.bg_window_enable) f.od_raw[s] else 0;
         var color = GPU.color_from_palette(self.bgp, bg_id);
 
-        const oc = f.obj_color[0];
+        const oc = f.od_oc[s];
         if (self.lcdc.obj_enable and oc != 0) {
-            const behind = f.obj_prio[0] and bg_id != 0;
-            if (!behind) color = GPU.color_from_palette(self.obp[f.obj_pal[0]], oc);
+            const behind = f.od_opri[s] and bg_id != 0;
+            if (!behind) color = GPU.color_from_palette(self.obp[f.od_op[s]], oc);
         }
 
-        const px = @as(usize, self.ly) * SCREEN_WIDTH + f.lcd_x;
+        const x = f.od_x[s];
+        const px = @as(usize, self.ly) * SCREEN_WIDTH + x;
         const c = color.to_color();
         self.canvas[px * 3] = c;
         self.canvas[px * 3 + 1] = c;
         self.canvas[px * 3 + 2] = c;
 
-        // Debug trace: record the dot + bgp used for each emitted pixel of the line.
-        if (@as(i32, self.ly) == dbg_trace_ly and f.lcd_x < 160) {
-            dbg_emit_dot[f.lcd_x] = @intCast(self.cycles);
-            dbg_emit_bgp[f.lcd_x] = @bitCast(self.bgp);
+        // Debug trace: record the dot + bgp actually applied to each pixel.
+        if (@as(i32, self.ly) == dbg_trace_ly and x < 160) {
+            dbg_emit_dot[x] = @intCast(self.cycles);
+            dbg_emit_bgp[x] = @bitCast(self.bgp);
         }
+
+        f.od_head = (f.od_head + 1) % 4;
+        f.od_count -= 1;
+    }
+
+    /// Drain any pixels still held in the output-stage delay line at the end of the
+    /// line (their palettes apply at the final mode-3 register state).
+    fn od_flush(self: *GPU) void {
+        while (self.fifo.od_count > 0) self.od_write();
+    }
+
+    /// Shift one finished pixel out of the BG/OBJ FIFOs: capture its BG colour-index
+    /// and front OBJ pixel into the output-stage delay line (fetch-timed), advance
+    /// the OBJ FIFO and lcd_x, then drain the pixel that is now OUTPUT_STAGE_DELAY
+    /// dots old (palettes applied in od_write at that later dot).
+    fn fifo_emit_pixel(self: *GPU) void {
+        const f = &self.fifo;
+        self.fifo_merge_sprites();
+
+        const bg_raw = self.fifo_pop_bg();
+        const slot = (f.od_head + f.od_count) % 4;
+        f.od_raw[slot] = bg_raw;
+        f.od_oc[slot] = f.obj_color[0];
+        f.od_op[slot] = f.obj_pal[0];
+        f.od_opri[slot] = f.obj_prio[0];
+        f.od_x[slot] = f.lcd_x;
+        f.od_count += 1;
 
         var i: usize = 0;
         while (i < 7) : (i += 1) {
@@ -875,6 +921,9 @@ pub const GPU = struct {
         f.obj_color[7] = 0;
         f.obj_pal[7] = 0;
         f.obj_prio[7] = false;
+
+        // Apply + write the pixel shifted out OUTPUT_STAGE_DELAY dots ago.
+        if (f.od_count > OUTPUT_STAGE_DELAY) self.od_write();
 
         f.lcd_x += 1;
     }
