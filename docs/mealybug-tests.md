@@ -390,50 +390,102 @@ Standing rule for every step below: re-run `tools/mealybug.sh` (score up, no tes
 regresses) **and** `tools/ppu_regress.sh` (ppu 12/12, blargg 25/25, emu-only 28/28,
 render byte-compare). The timing contract stays owned by `mode3_length()`.
 
-## Action plan to fix (implementer's recipe)
+## Plan of attack (current — for the next session)
 
-**Step 1 — model the FIFO output-latch depth (the real gate; supersedes "sub-T-cycle
-write commit for palettes").** The calibration sweeps above (see "Calibration-sweep
-findings") proved the residual is **not** fixable by tuning *when the store commits* —
-because `LCDC` carries both fetch-stage bits (`.3/.4/.5`, want early commit) and
-output-stage bits (`.0/.1/.2`, want late), one commit time can't satisfy both. The
-root cause is that our FIFO emits ~1 M-cycle too eagerly, so the gap between the
-fetch sample and the output sample is too small. Fix the *depth*, not the commit:
-- The instrumentation already exists: `gpu.dbg_emit_lead` (output-latch dots) and
-  `cpu.CPU.dbg_write_k` (intra-M-cycle commit via `tick_write_at`), both set from
-  `$EMIT_LEAD`/`$WRITE_K` in `testrunner`, no-op by default. Use them as the bench.
-- Add a **real** pixel-output latch in the FIFO (not the global first-pixel stall the
-  `dbg_emit_lead` knob uses — that lets the fetcher run ahead and corrupts SCY
-  content; that's why `m3_scy_change` worsens). Model it so fetch-stage and
-  output-stage samples are separated by the hardware depth (~8–12 dots) *for the same
-  commit time*, leaving `BGP`-vs-`bg_map` and `tile_sel`-vs-`bg_en` simultaneously
-  correct. Validate against `m3_bgp_change` (output) **and** `m3_scx_high_5_bits`
-  (fetch) at once — both must drop together, with the row-40 transition trace matching
-  the reference 13/60/11/60 band widths.
-- Content-neutrality: the latch shifts `links_awakening`'s mid-line SCX raster — that
-  is expected and a *correctness* change, so re-baseline that one golden and eyeball
-  it (as Bucket C did for the `%256` fix), don't gate on byte-identity.
-- Guard: timer writes (`FF04`–`FF07`) must keep tick-before-write (cycle-accurate plan
-  pitfall #3). Keep the `mode3_length()` parity assert on through bring-up.
+**State: 3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`). Landed,
+all regression-free + golden-neutral: Bucket C (`%256`), Bucket D (sprite FIFO stalls),
+the **pixel-output latch** (`PIXEL_OUTPUT_LATCH=1`, fetch stage) and the **output-stage
+delay line** (`OUTPUT_STAGE_DELAY=2`, output stage). The FIFO now models the fetch→output
+pipeline as **fetch latch 1 / output latch 3**, which is why two "may-never-pass" tests
+became pixel-exact.
 
-(Per-register commit-time tuning — the old Step 1/2 — is a dead end for `LCDC`; it is
-left available behind `$WRITE_K` only as a measurement tool.)
+### The one remaining problem
 
-**Step 3 — Bucket D, per-sprite FIFO stalls.** Move the per-object mode-3 penalty out
-of analytic `mode3_length()` and into the FIFO's pixel pacing (`fifo_merge_sprites`,
-`gpu.zig:689`): stall emission for the fetch cost when an object is due at `lcd_x`, so
-a mid-mode-3 write near a sprite lands on the right pixel. Total length must still
-equal `mode3_length()` (parity assert). Unblocks `m3_lcdc_obj_en_change(+variant)`,
-`m3_lcdc_obj_size_change(+scx)`, `m3_wx_4_change_sprites` (10 px), the sprite half of
-`m3_bgp_change_sprites`.
+Every remaining failure is the **fractional (sub-T-cycle) CPU↔PPU phase** — finer than
+the 1-dot granularity the PPU steps at. Confirmed from three independent directions:
 
-**Step 4 — Bucket E, window/WX activation.** In `fifo_check_window` (`gpu.zig:579`):
-exact dot the window turns on, the `WX<7`/`WX=0` lead-in discard, and mid-line
-`LCDC.5` toggles. Unblocks `m3_window_timing(+wx_0)`, `m3_wx_4/5/6_change`,
-`m3_lcdc_win_en_change_multiple(+wx)` (`m3_wx_6_change`, 13799 px, is the worst).
+1. **BGP band widths** (`m3_bgp_change`, 820 px floor). Writes are spaced a uniform 12
+   dots, but the reference's two short bands render **13 and 11** px wide (ours 12/12).
+   13+11 = 24 = 2×12, so it's a ±1 oscillation with a 24-dot period — the write-dot→
+   first-coloured-pixel boundary sits at a **non-integer (~2.5 dot)** offset. No integer
+   latch reaches it (proven by the `$EMIT_LEAD` sweep: floors at ~796–820).
+2. **Window edge vs content** (`m3_window_timing` 99, `m3_lcdc_win_map_change` 1778,
+   `m3_lcdc_tile_sel_win_change` 2360). A `lcd_x > win_x` (window 1 px later) diagnostic
+   *helps* all three (99→78, 1778→284, 2360→1170) but **breaks the passing
+   `m2_win_en_toggle`** (0→3797). The steady-state window edge and the mid-line window
+   content are at the same sub-dot phase — no integer window shift satisfies both.
+3. **Sprite-at-activation** (`m3_wx_4_change_sprites`, 10 px). Not a position bug (the
+   diagnostic left it at 10); the 10 diffs on `x=y−7` are behind-priority sprites that
+   hardware shows for 1 px where the window *content* colour at the activation column is
+   0 — again the sub-dot content phase.
 
-Dependency note: Steps 3–4 also write registers mid-mode-3, so they inherit Step 1's
-commit-phase fix — do Step 1 first.
+### Guardrails (must stay green at every step)
+
+`tools/ppu_regress.sh` → ppu **12/12**, blargg **25/25**, emu-only **28/28**, acceptance
+fail-set unchanged, **renders 29/29 byte-identical**. `tools/mealybug.sh` → score up, no
+test regresses. Timing owned by `mode3_length()`. The render byte-compare is the only
+guard on game windows, so watch it like a hawk when touching `fifo_check_window`.
+
+### Tooling already in place
+
+- `testrunner mbtrace <rom> <ly>` — dumps the exact dot/lcd_x of every BGP write and the
+  dot/bgp applied to every emitted pixel of a scanline. The ground-truth bench.
+- `$EMIT_LEAD` (overrides `PIXEL_OUTPUT_LATCH`) and `$WRITE_K` (intra-M-cycle commit via
+  `cpu.CPU.dbg_write_k` / `tick_write_at`) — calibration knobs, no-op by default.
+- `/tmp/rle.py <test> <rows>` and `/tmp/diffpx.py <test>` (rebuild as needed) — RLE a row
+  of shot-vs-ref, and list every differing pixel. Indispensable for reading residuals.
+
+### Approach 1 — window cluster (DO THIS FIRST: biggest px, partially structural)
+
+`wx_6` 13799 + `win_en_multiple` 8316 + `…_wx` 6013 ≈ 28k px, the largest remaining mass,
+and only *partly* fractional. The every-dot window state machine (parked in `b43b2e2`'s
+history) is the right skeleton — re-land it, then add the two things it was missing:
+
+1. **Per-toggle window-fetch cadence.** On each activation the BG fetcher restarts; model
+   the exact dot-cost of that refetch (the rapid-toggle `win_en_multiple` is dominated by
+   it). Cross-check the dot count against a reference emulator (SameBoy debugger) or the
+   Pan Docs fetcher state machine — don't guess.
+2. **Window content latch.** The 1-px window-content phase (finding #2) is almost certainly
+   the same fetch/output split already solved for BG: when the window fetcher restarts it
+   does **not** re-apply the line-start `PIXEL_OUTPUT_LATCH`, so window content lands 1 dot
+   off relative to BG. Try re-deriving the window fetch so its content gets the latch while
+   the activation *edge* (the trigger `lcd_x`) is untouched — that is exactly the
+   edge-vs-content split that the `lcd_x>win_x` diagnostic showed (it shifted *both*; you
+   want to shift only content). If that lands, `win_map_change`/`tile_sel_win_change`/
+   `window_timing` should drop hard, and `m2_win_en_toggle` stays at 0.
+
+Keep `m2_win_en_toggle` at 0 px and renders byte-identical after **every** edit.
+
+### Approach 2 — the fractional-dot core (the hard wall: `bgp` 820 and the residuals)
+
+The non-uniform 13/11 band widths can only come from **non-uniform pixel emission** — i.e.
+the real BG fetcher does *not* emit a clean 1 px/dot; it has a sub-dot cadence we flattened.
+Two ways in, in order of preference:
+
+1. **Model the real fetcher cadence.** Replicate the DMG pixel-FIFO fetcher dot-for-dot
+   (tile/low/high/push with the exact push-stall rule) so steady-state emission is
+   naturally non-uniform and reproduces 13/11. This is content-neutral for static frames
+   (renders stay byte-identical) by construction — verify that first, then check `bgp`.
+   Use `mbtrace` to confirm the per-pixel emit dots become non-linear in the right places.
+2. **Half-dot PPU stepping** (last resort, invasive). Step the PPU at 2× (half-dot) and
+   commit writes at the true sub-dot, directly modelling the ~2.5-dot offset. High blast
+   radius — re-validates every timing test — so only if (1) can't reproduce 13/11.
+
+Definition of done for the core: `m3_bgp_change` → 0 **and** `m3_scx_high_5_bits`/
+`m3_obp0_change` stay 0, with `tools/ppu_regress.sh` fully green (re-baseline only the
+game goldens that a *proven* accuracy change shifts, eyeballing each, as Bucket C did).
+
+### Dead ends (don't repeat)
+
+- **Per-register commit-time tuning** (`$WRITE_K`) for the cluster: `LCDC` mixes fetch
+  (`.3/.4/.5`) and output (`.0/.1/.2`) bits, so no single commit dot satisfies both. The
+  knob stays only as a measurement tool.
+- **A global `EMIT_LEAD` > 1**: passes one of `{scx_high@1, obp0@3}` at the cost of the
+  other; the split (latch 1 + delay 2) is what gets both. Already landed.
+- **Shifting the window edge** (`lcd_x>win_x`) to fix content: helps content tests but
+  breaks `m2_win_en_toggle`. Shift *content*, not the edge (Approach 1.2).
+- **The naive `EMIT_LEAD` warmup as the latch model**: it lets the fetcher run ahead and
+  corrupts SCY. The shipped latch only works because Bucket D paced the FIFO first.
 
 ## Regenerating references
 
