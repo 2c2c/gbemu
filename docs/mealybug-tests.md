@@ -487,10 +487,24 @@ mid-line WX/enable changes:
 - **Fetch-stage write-phase**: `win_map_change` (630) / `tile_sel_win_change` (1336) are a
   flat ~8px/row at a fixed column — the mid-line LCDC.6/.4 (window map / tile-data select)
   write taking effect ~1 tile off, the same fetch-stage timing as `m3_lcdc_bg_map_change`.
-- **Row-0 CPU↔PPU timing**: `win_en_multiple`'s lone remaining pixel is `(56,0)` — on row 0
-  the LCDC.5 write lands 4 dots earlier than other rows (dot 149 vs 153), so `bg_len` at
-  deactivation is 0 vs 4 and the BG-resume column is off by a tile. A first-line sync quirk,
-  not the window engine; the same 4-dot/row-0 class also leaves `window_timing` at 15.
+- **Row-0 CPU↔PPU timing** (`win_en_multiple`'s lone pixel `(56,0)` — the only thing between
+  it and a pass at 4/24). Diagnosed against the SameBoy oracle and **confirmed a real CPU
+  timing bug, but out of reach**:
+  - On row 0 our CPU writes the LCDC.5 toggles **4 dots earlier** than every other row (off
+    at dot 149/lcd_x 49 + on at 165, vs 153/lcd_x 53 + 169 on row 8 — identical 16-dot shape,
+    shifted 4). SameBoy (`SBDEACT` trace) deactivates at **pos=50 on *both* rows** — its CPU
+    writes at the same position every line. So the 4-dot row-0 shift is ours.
+  - It is **not** the 452-dot first line: row 0 of the captured frame is `lcd_first_line=false`
+    (the ROM keeps the LCD on). It's a VBlank→line-0 boundary phase error — row 0 is the only
+    visible line whose previous line is VBlank, so the test's per-line PPU sync lands 4 dots
+    off there.
+  - **No window-side fix exists**: the 4-dot shift puts the LCDC.5 clear at a different fetch
+    phase, so `bg_len` (0 vs 4) and the BG-resume column genuinely differ; SameBoy is right
+    only because its CPU isn't shifted. The fix must correct the row-0 CPU phase.
+  - **Risky / deferred**: we pass mooneye acceptance/ppu **12/12**, which pins VBlank/STAT
+    timing tightly, so this 4-dot error is *beyond* mooneye's coverage — perturbing the
+    VBlank→line-0 path to fix 1px would likely disturb the 12/12 contract. Not worth it until
+    there's a reason to revisit frame-boundary timing broadly.
 
 ---
 
