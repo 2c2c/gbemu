@@ -533,11 +533,48 @@ render byte-compare). The timing contract stays owned by `mode3_length()`.
 
 **State: 3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`). Landed,
 all regression-free + golden-neutral: Bucket C (`%256`), Bucket D (sprite FIFO stalls),
-the **pixel-output latch** (`PIXEL_OUTPUT_LATCH=1`, fetch stage), the **output-stage
-delay line** (`OUTPUT_STAGE_DELAY=2`, output stage), and the **window line-start
-activation latch** (`warmup += 13+win_x`, Bucket E). The FIFO now models the fetch→output
-pipeline as **fetch latch 1 / output latch 3**, which is why two "may-never-pass" tests
-became pixel-exact; the window latch fixed the WX<7 half of `m3_window_timing` (99→15).
+the **pixel-output latch** (`PIXEL_OUTPUT_LATCH=1`), the **output-stage delay line**
+(`OUTPUT_STAGE_DELAY=2`), the **window line-start latch** (`warmup += 13+win_x`), and the
+**SameBoy-faithful window state machine** (equality trigger / `window_y`-on-activation /
+deactivate-on-`LCDC.5` / FIFO-drain — see Bucket E). The FIFO now models the fetch→output
+pipeline as fetch latch 1 / output latch 3, and the window engine is correct & validated.
+
+### Current scoreboard (px diff; ✅ = pass)
+
+| test | px | | test | px |
+|---|--:|---|---|--:|
+| `m2_win_en_toggle` | ✅ | | `m3_lcdc_obj_size_change_scx` | 190 |
+| `m3_obp0_change` | ✅ | | `m3_lcdc_obj_en_change_variant` | 236 |
+| `m3_scx_high_5_bits` | ✅ | | `m3_scx_low_3_bits` | 324 |
+| `m3_lcdc_win_en_change_multiple` | **1** | | `m3_lcdc_obj_size_change` | 370 |
+| `m3_wx_4_change_sprites` | 10 | | `m3_bgp_change_sprites` | 536 |
+| `m3_window_timing` | 15 | | `m3_window_timing_wx_0` | 634 |
+| `m3_lcdc_obj_en_change` | 136 | | `m3_wx_5_change` | 638 |
+| `m3_lcdc_bg_map_change` | 192 | | `m3_lcdc_win_en_change_multiple_wx` | 915 |
+| `m3_wx_4_change` | 229 | | `m3_lcdc_tile_sel_change` | 1276 |
+| `m3_lcdc_obj_en_change` | 136 | | `m3_lcdc_tile_sel_win_change` | 1336 |
+| `m3_lcdc_win_map_change` | 630 | | `m3_lcdc_bg_en_change` | 1330 |
+| `m3_bgp_change` | 820 | | `m3_scy_change` | 6916 |
+| | | | `m3_wx_6_change` | 13799 |
+
+### Everything left is one of two timing walls (the window engine is no longer the gate)
+
+The window cluster fix (Bucket E) made the remaining failures resolve to **two CPU↔PPU
+timing problems**, both finer than the 1-dot granularity the PPU steps at:
+
+1. **Sub-T-cycle write-phase** (Bucket B core). The mid-mode-3 register write lands at the
+   wrong sub-M-cycle dot. Drives `m3_bgp_change` (820, the ±0.5-dot band-width wobble),
+   `m3_lcdc_bg_map_change`/`tile_sel`/`win_map`/`tile_sel_win` (LCDC.3/.4/.6 ~1 tile off),
+   `m3_scx_low_3_bits`, `m3_scy_change`, and the **WX<7-transient** window cases
+   (`m3_wx_6_change` 13799, `win_en_wx` rows 44–49) — proven write-phase-gated, *not* a
+   missing pre-visible region (a `$WRITE_K` sweep is mixed/register-specific; do NOT build
+   the −16…−1 pre-region). No integer latch/commit-time reaches it.
+2. **VBlank→line-0 4-dot phase**. `m3_lcdc_win_en_change_multiple`'s lone pixel `(56,0)`:
+   our CPU writes LCDC.5 4 dots early on row 0 only (SameBoy writes at the same position
+   every row). Beyond mooneye's 12/12 coverage, so risky to touch.
+
+Both need sub-T-cycle CPU↔PPU phase work that re-validates the 12/12 contract — the deep,
+deferred core. The structural Buckets (C/D/E) are done.
 
 ### Ground-truth findings recorded this session (don't re-derive)
 
@@ -590,26 +627,21 @@ guard on game windows, so watch it like a hawk when touching `fifo_check_window`
 - `/tmp/rle.py <test> <rows>` and `/tmp/diffpx.py <test>` (rebuild as needed) — RLE a row
   of shot-vs-ref, and list every differing pixel. Indispensable for reading residuals.
 
-### Approach 1 — window cluster (DO THIS FIRST: biggest px, partially structural)
+### Approach 1 — window cluster — ✅ DONE (SameBoy-faithful window state machine)
 
-`wx_6` 13799 + `win_en_multiple` 8316 + `…_wx` 6013 ≈ 28k px, the largest remaining mass,
-and only *partly* fractional. The every-dot window state machine (parked in `b43b2e2`'s
-history) is the right skeleton — re-land it, then add the two things it was missing:
+Landed (regression-free + golden-neutral): `win_en_change_multiple` 8316→**1**, `…_wx`
+6013→**915**, `win_map_change` 1778→**630**, `tile_sel_win_change` 2360→**1336**,
+`window_timing` 99→**15**, `window_timing_wx_0` 1490→**634**. The every-dot state machine
+*was* the right skeleton; the pieces that made it work (validated against the SameBoy
+oracle, see "SameBoy reference oracle" above):
+- **Equality trigger** on live `WX == lcd_x+7` (not threshold), `window_y`++ **on each
+  activation**, **deactivate** on LCDC.5-clear.
+- **FIFO-drain on deactivation** (not flush): the in-FIFO window pixels drain, then BG
+  resumes at column `lcd_x + bg_len`. This was the big one (`win_en_multiple` 2502→1).
 
-1. **Per-toggle window-fetch cadence.** On each activation the BG fetcher restarts; model
-   the exact dot-cost of that refetch (the rapid-toggle `win_en_multiple` is dominated by
-   it). Cross-check the dot count against a reference emulator (SameBoy debugger) or the
-   Pan Docs fetcher state machine — don't guess.
-2. **Window content latch.** The 1-px window-content phase (finding #2) is almost certainly
-   the same fetch/output split already solved for BG: when the window fetcher restarts it
-   does **not** re-apply the line-start `PIXEL_OUTPUT_LATCH`, so window content lands 1 dot
-   off relative to BG. Try re-deriving the window fetch so its content gets the latch while
-   the activation *edge* (the trigger `lcd_x`) is untouched — that is exactly the
-   edge-vs-content split that the `lcd_x>win_x` diagnostic showed (it shifted *both*; you
-   want to shift only content). If that lands, `win_map_change`/`tile_sel_win_change`/
-   `window_timing` should drop hard, and `m2_win_en_toggle` stays at 0.
-
-Keep `m2_win_en_toggle` at 0 px and renders byte-identical after **every** edit.
+What's left in the cluster is **not** the engine — it's the write-phase / VBlank-boundary
+walls above (`wx_6`, `win_en_wx` band, `win_map`/`tile_sel_win` ~1-tile, the row-0 pixel).
+Do NOT build a pre-visible position region for `wx_6`/`win_en_wx`: proven write-phase-gated.
 
 ### Approach 2 — the fractional-dot core (the hard wall: `bgp` 820 and the residuals)
 
