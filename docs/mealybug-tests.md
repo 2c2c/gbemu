@@ -448,19 +448,40 @@ mid-line WX/enable changes:
   everywhere, `wrow=36` (row 4, `lo=FF hi=95`). The stripe is **background**, not window —
   we had it backwards.
 
-**Implementation spec for the next session (the remaining structural work).** Replace the
-window activation with SameBoy's: a signed `position` counter covering a fixed −16…159
-pre-region (independent of SCX, unlike our variable `discard`), an **equality** trigger on
-live WX, `window_y` incremented **on activation** (frame-scoped, replacing the predictive
-`internal_window_counter`), and **deactivate on `LCDC.5` clear**. This is a meaningful
-rewrite of the line-start/discard region and is **entangled with the SCX fine-scroll** (the
-−16→−8 jump) and the `mode3_length()` timing contract, so it must be built incrementally
-against the SameBoy oracle **and** `tools/ppu_regress.sh` (12/12, 29/29 byte-identical).
-Note `wx_6`'s exact trigger also depends on *when* the transient WX=6 write lands vs
-position −1 — a sub-dot write-timing component shared with `m3_bgp_change`'s 820 floor — so
-even a faithful engine may not reach 0 there without the sub-T-cycle commit. The cleanest
-wins from this rewrite are the **enable-toggle** cluster (`win_en_multiple`, deactivation)
-and the WX≥7 mid-line cases.
+**The window state machine landed (`fifo_check_window`), in three commits:**
+
+1. *Equality trigger + per-activation `window_y` + deactivation.* The one-shot threshold
+   (`lcd_x >= win_x`, latched) became a per-dot machine: activate when live `WX == lcd_x+7`
+   (visible region; WX<7 still matches at line start), `internal_window_counter++` **on each
+   activation** (so a mid-line re-trigger reads the next window row), and **deactivate** the
+   window when `LCDC.5` is cleared (revert the fetcher to BG). Golden-neutral *by
+   construction* — for stable per-line WX the equality fires once at `lcd_x==WX-7` and the
+   deactivation path is dead (games never clear LCDC.5 mid-line), so renders stay 29/29
+   byte-identical. → `win_en_multiple` 8316→2502, `..._wx` 6013→1713, `win_map_change`
+   1778→630, `tile_sel_win_change` 2360→1336.
+2. *FIFO-drain (not flush) on deactivation.* SameBoy's deactivation only clears the window
+   flag — the window pixels already in the FIFO **drain**, then BG resumes; the next fetch
+   targets screen column `lcd_x + bg_len`. We were flushing + force-refetching, which
+   mis-phased the BG by up to a tile. → `win_en_multiple` 2502→**1**, `..._wx` 1713→**915**.
+
+**Remaining window residuals (all the harder wall now):**
+
+- **WX<7 line-start transient** (the wx_6 / win_en_wx-band class). For WX<7 the window
+  triggers at a *pre-visible* position (`pos=WX-7 ∈ [-7,-1]`), and whether the live WX
+  matches there decides activation. We trigger unconditionally at `lcd_x==0`, so a transient
+  WX<7 wrongly activates the window at line start (`m3_wx_6_change` 13799 — the stripe is BG,
+  hardware activates at pos=33 on WX→40; `m3_lcdc_win_en_change_multiple_wx` rows 44–49,
+  ~700px — hardware activates at x38 on WX=45). The clean fix is the **fixed −16…−1 pre-region
+  position counter** (independent of the SCX `discard`) so the equality runs pre-visibly —
+  but it is entangled with the SCX fine-scroll and partly sub-dot (wx_6's exact trigger
+  depends on *when* the WX write lands vs pos −1, shared with `m3_bgp_change`'s wall).
+- **Fetch-stage write-phase**: `win_map_change` (630) / `tile_sel_win_change` (1336) are a
+  flat ~8px/row at a fixed column — the mid-line LCDC.6/.4 (window map / tile-data select)
+  write taking effect ~1 tile off, the same fetch-stage timing as `m3_lcdc_bg_map_change`.
+- **Row-0 CPU↔PPU timing**: `win_en_multiple`'s lone remaining pixel is `(56,0)` — on row 0
+  the LCDC.5 write lands 4 dots earlier than other rows (dot 149 vs 153), so `bg_len` at
+  deactivation is 0 vs 4 and the BG-resume column is off by a tile. A first-line sync quirk,
+  not the window engine; the same 4-dot/row-0 class also leaves `window_timing` at 15.
 
 ---
 
@@ -477,8 +498,8 @@ and the WX≥7 mid-line cases.
 | Bucket B — **output-stage delay line (`OUTPUT_STAGE_DELAY=2`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_obp0_change` (74→0) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
 | Bucket E — window **line-start** activation latch (`fifo_check_window`, `warmup += 13+win_x`) | ✅ done, regression-free + golden-neutral — `m3_window_timing` 99→15, `m3_window_timing_wx_0` 1490→634 |
-| Bucket E — window/WX **mid-line** re-evaluation + content | ⏸️ open, but now **fully spec'd via the SameBoy oracle** (equality trigger on live WX, `position_in_line` −16…159, `window_y`-on-activation, deactivate-on-`LCDC.5`-clear). `m3_wx_6_change`: the stripe is BG, window triggers at pos=33 on WX→40 — we wrongly trigger at line-start on transient WX=6. Implementation = a guarded line-start/discard rewrite (see "SameBoy reference oracle" above) |
-| **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_window_timing` 15, `m3_lcdc_obj_en_change` 136) |
+| Bucket E — window/WX **mid-line** state machine (`fifo_check_window`) | ✅ **landed**, regression-free + golden-neutral. Equality trigger on live WX, `window_y`-on-activation, deactivate-on-`LCDC.5`-clear, FIFO-drain (not flush) on deactivation. `win_en_change_multiple` **8316→1**, `..._wx` **6013→915**, `win_map_change` **1778→630**, `tile_sel_win_change` **2360→1336**. Residuals are write-phase / WX<7-transient / row-0 timing (below) |
+| **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; **closest next: `m3_lcdc_win_en_change_multiple` = 1px** (row-0 timing), `m3_wx_4_change_sprites` 10, `m3_window_timing` 15, `m3_lcdc_obj_en_change` 136) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
 Standing rule for every step below: re-run `tools/mealybug.sh` (score up, no test
