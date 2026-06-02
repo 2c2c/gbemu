@@ -15,6 +15,8 @@
 
 const std = @import("std");
 const Gameboy = @import("gameboy.zig").Gameboy;
+const gpu = @import("gpu.zig");
+const cpu = @import("cpu.zig");
 const timer_mod = @import("timer.zig");
 
 const Verdict = enum { pass, fail, timeout, load_error };
@@ -186,6 +188,17 @@ pub fn main(init: std.process.Init) !void {
         return error.Usage;
     }
     const mode = args[1];
+
+    // Calibration knob for the mealybug Bucket-B work: $EMIT_LEAD delays the FIFO's
+    // first visible pixel by N dots (pixel-output latch). Default 0 = no change.
+    if (init.environ_map.get("EMIT_LEAD")) |s| {
+        gpu.dbg_emit_lead = std.fmt.parseInt(u8, s, 10) catch 0;
+    }
+    // $WRITE_K: intra-M-cycle commit T-cycle for fetch-stage PPU registers
+    // (LCDC/SCY/SCX/WY/WX). Unset/255 = production default.
+    if (init.environ_map.get("WRITE_K")) |s| {
+        cpu.CPU.dbg_write_k = std.fmt.parseInt(u8, s, 10) catch 255;
+    }
 
     // Render mode: run N frames and write the framebuffer as a P6 PPM (the exact
     // format tools/screenshot.mjs emits), so a shasum compares byte-for-byte

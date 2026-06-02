@@ -663,8 +663,37 @@ pub const CPU = struct {
         return self.bus.read_byte(addr);
     }
 
+    /// Debug calibration (mealybug Bucket B): when not 255, the fetch-stage PPU
+    /// registers (LCDC/SCY/SCX/WY/WX) commit their store `dbg_write_k` dots into
+    /// the write M-cycle instead of at a boundary, modelling the store landing on
+    /// a specific intra-M-cycle T-cycle. 255 = disabled (production default), so
+    /// games are unaffected unless testrunner sets it from $WRITE_K.
+    pub var dbg_write_k: u8 = 255;
+
+    /// Tick `k` PPU/peripheral dots, apply the store, then tick the remaining
+    /// `4-k` dots — placing the write at an exact intra-M-cycle T-cycle while
+    /// keeping the M-cycle's total dot count (4), its single OAM-DMA step, and the
+    /// `inline_ticked` accounting identical to mcycle().
+    fn tick_write_at(self: *CPU, addr: u16, value: u8, k: u8) void {
+        const kk: u8 = @min(k, 4);
+        var i: u8 = 0;
+        while (i < kk) : (i += 1) self.tick_peripherals_one();
+        self.bus.write_byte(addr, value);
+        while (i < 4) : (i += 1) self.tick_peripherals_one();
+        self.bus.dma_step();
+        self.inline_ticked += 4;
+    }
+
     /// Write M-cycle (peripherals stepped to the write's cycle before the store).
     pub fn tick_write(self: *CPU, addr: u16, value: u8) void {
+        // Debug: route the fetch-stage PPU registers through an intra-M-cycle
+        // commit point (calibration only; dbg_write_k==255 in production).
+        if (dbg_write_k != 255 and
+            (addr == 0xFF40 or addr == 0xFF42 or addr == 0xFF43 or addr == 0xFF4A or addr == 0xFF4B))
+        {
+            self.tick_write_at(addr, value, dbg_write_k);
+            return;
+        }
         // The BG/OBJ palette registers (BGP/OBP0/OBP1) are sampled by the PPU
         // per-pixel during mode 3 and have no effect on PPU *timing*. The default
         // tick-before-write makes a mid-mode-3 palette write land at the end of its

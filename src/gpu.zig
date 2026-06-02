@@ -13,6 +13,13 @@ pub const PALETTE_DEBUG_WIDTH: usize = 8;
 pub const DRAW_WIDTH: usize = SCREEN_WIDTH;
 pub const DRAW_HEIGHT: usize = SCREEN_HEIGHT;
 
+// Debug calibration knob (default 0 = no effect on production/wasm/games). When
+// >0, the pixel FIFO delays the start of visible emission by this many dots,
+// modelling a pixel-output latch so a mid-mode-3 register write lands on the
+// correct pixel (mealybug Bucket B). Set by testrunner from $EMIT_LEAD; never
+// touched by gameboy.frame(), so games are unaffected unless this is changed.
+pub var dbg_emit_lead: u8 = 0;
+
 pub const VRAM_BEGIN: u16 = 0x8000;
 pub const VRAM_END: u16 = 0x9FFF;
 // const VRAM_SIZE: usize = VRAM_END - VRAM_BEGIN + 1;
@@ -264,7 +271,18 @@ pub const GPU = struct {
         obj_count: u8 = 0,
         obj_done: [10]bool = @splat(false),
 
+        // Per-object mode-3 fetch penalty (dots), mirroring mode3_length()'s
+        // per-object term, paid as an emission stall when the BG reaches each
+        // object's column — so a mid-mode-3 write near a sprite lands on the same
+        // pixel hardware draws it. Total equals mode3_length()'s object penalty, so
+        // the FIFO paces over the full analytic mode-3 window (rendering only; the
+        // 12/12 timing contract stays owned by mode3_length()).
+        obj_stall: [10]u16 = @splat(0),
+        obj_stalled: [10]bool = @splat(false),
+        sprite_stall: u16 = 0, // remaining stall dots before the next emit
+
         window_triggered: bool = false, // window already activated on this line
+        warmup: u8 = 0, // dbg_emit_lead: dots to stall before the first visible pixel
     };
 
     pub fn new() GPU {
@@ -538,6 +556,34 @@ pub const GPU = struct {
 
         // The first SCX&7 background pixels of the line are discarded (fine scroll).
         f.discard = self.background_viewport.scx & 7;
+
+        // Per-object fetch penalties, computed exactly as mode3_length()'s object
+        // term (same selected set, same OAM order, same shared-column wait) so their
+        // sum equals that penalty — paid back as emission stalls in fifo_tick when
+        // the BG reaches each object's column. Gated on the start-of-line obj-enable
+        // (mode3_length() returns early when objects are off), so a mid-line LCDC.1
+        // toggle does not change this line's pacing.
+        if (self.lcdc.obj_enable) {
+            const scx: u16 = self.background_viewport.scx;
+            var last_tile: i32 = -1;
+            var i: u8 = 0;
+            while (i < f.obj_count) : (i += 1) {
+                const oam_x: i16 = f.objs[i].x + 8; // recover OAM x from screen x
+                if (oam_x >= 168) continue; // selected but never fetched (cost 0)
+                const xs: u16 = @intCast(oam_x);
+                var cost: u16 = 6; // base object fetch
+                const tile_col: i32 = @intCast((xs + scx) >> 3);
+                if (tile_col != last_tile) {
+                    cost += 5 - @min(@as(u16, 5), (xs + scx) & 7);
+                    last_tile = tile_col;
+                }
+                f.obj_stall[i] = cost;
+            }
+        }
+
+        // Calibration: optionally stall the first visible pixel by dbg_emit_lead
+        // dots (pixel-output latch model). 0 in production, so no effect on games.
+        f.warmup = dbg_emit_lead;
     }
 
     /// Advance the FIFO one dot: maybe activate the window, step the fetcher, then
@@ -556,6 +602,33 @@ pub const GPU = struct {
         if (f.discard > 0) {
             _ = self.fifo_pop_bg();
             f.discard -= 1;
+            return;
+        }
+
+        // Pixel-output latch (calibration): hold the BG FIFO full for warmup dots
+        // so the first emitted pixel — and thus every pixel — lands warmup dots
+        // later, sampling registers warmup dots further into mode 3.
+        if (f.warmup > 0) {
+            f.warmup -= 1;
+            return;
+        }
+
+        // Object fetch stalls: when the BG reaches an object's column, pause
+        // emission for its precomputed fetch cost before drawing that pixel — so
+        // the pixels after a sprite (and any mid-mode-3 write among them) land where
+        // hardware draws them. Several objects due at the same column accumulate.
+        {
+            const lx: i16 = @intCast(f.lcd_x);
+            var i: u8 = 0;
+            while (i < f.obj_count) : (i += 1) {
+                if (f.obj_stalled[i]) continue;
+                if (f.objs[i].x > lx) continue; // BG has not reached it yet
+                f.obj_stalled[i] = true;
+                f.sprite_stall += f.obj_stall[i];
+            }
+        }
+        if (f.sprite_stall > 0) {
+            f.sprite_stall -= 1;
             return;
         }
 
