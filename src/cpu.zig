@@ -665,6 +665,19 @@ pub const CPU = struct {
 
     /// Write M-cycle (peripherals stepped to the write's cycle before the store).
     pub fn tick_write(self: *CPU, addr: u16, value: u8) void {
+        // The BG/OBJ palette registers (BGP/OBP0/OBP1) are sampled by the PPU
+        // per-pixel during mode 3 and have no effect on PPU *timing*. The default
+        // tick-before-write makes a mid-mode-3 palette write land at the end of its
+        // M-cycle, ~4 dots later than hardware — so mealybug m3_bgp_change's palette
+        // bands were ~6px too far right. Applying the store before this M-cycle's
+        // PPU ticks lands it ~4 dots earlier (the right direction); a ~2-dot
+        // sub-M-cycle phase still remains (see docs/mealybug-tests.md, Bucket B).
+        // Timing-neutral, so the 12/12 acceptance/ppu contract is unaffected.
+        if (addr == 0xFF47 or addr == 0xFF48 or addr == 0xFF49) {
+            self.bus.write_byte(addr, value);
+            self.mcycle();
+            return;
+        }
         self.mcycle();
         self.bus.write_byte(addr, value);
     }

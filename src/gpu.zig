@@ -638,11 +638,10 @@ pub const GPU = struct {
             lo = @truncate(line);
             hi = @truncate(line >> 8);
         } else {
-            // NOTE: the previous scanline renderer computed the BG row as
-            // (ly + scy) % 255 (an off-by-one quirk — hardware wraps mod 256).
-            // Preserved verbatim so the FIFO is a pure structural change with
-            // byte-identical output on existing content; see fifo notes.
-            const y: u8 = @intCast((@as(u16, self.ly) + @as(u16, self.background_viewport.scy)) % 255);
+            // BG row wraps mod 256 on hardware (8-bit add of LY and SCY). The
+            // previous renderer used % 255, an off-by-one that misaligns any
+            // scanline where ly+scy >= 255 by one row (mealybug m3_scy_change).
+            const y: u8 = self.ly +% self.background_viewport.scy;
             const map_base: u16 = if (self.lcdc.bg_tile_map) 0x9C00 else 0x9800;
             const map_x: u16 = ((@as(u16, self.background_viewport.scx) >> 3) +% f.fetch_col) & 31;
             const tile_index = self.read_vram(map_base + (@as(u16, y) / 8) * 32 + map_x);

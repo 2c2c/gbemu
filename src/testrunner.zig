@@ -29,6 +29,78 @@ fn contains(haystack: []const u8, needle: []const u8) bool {
     return std.mem.indexOf(u8, haystack, needle) != null;
 }
 
+fn isSpace(c: u8) bool {
+    return c == ' ' or c == '\n' or c == '\t' or c == '\r';
+}
+
+/// Filename without directory or trailing ".gb" — e.g. "a/b/m3_bgp_change.gb"
+/// -> "m3_bgp_change". Used to map a ROM path to its reference image.
+fn baseName(path: []const u8) []const u8 {
+    var s: usize = 0;
+    var i: usize = 0;
+    while (i < path.len) : (i += 1) {
+        if (path[i] == '/') s = i + 1;
+    }
+    var e: usize = path.len;
+    if (e - s >= 3 and std.mem.eql(u8, path[e - 3 .. e], ".gb")) e -= 3;
+    return path[s..e];
+}
+
+/// Return the pixel-data slice of a binary P6 PPM, skipping the
+/// "P6 <w> <h> <maxval>\n" header (whitespace-separated tokens, one whitespace
+/// byte before the data). Null if the buffer isn't a P6 image.
+fn ppmPixels(buf: []const u8) ?[]const u8 {
+    if (buf.len < 2 or buf[0] != 'P' or buf[1] != '6') return null;
+    var i: usize = 2;
+    var tokens: usize = 0; // consume width, height, maxval
+    while (tokens < 3 and i < buf.len) {
+        while (i < buf.len and isSpace(buf[i])) : (i += 1) {}
+        const start = i;
+        while (i < buf.len and !isSpace(buf[i])) : (i += 1) {}
+        if (i > start) tokens += 1;
+    }
+    if (i < buf.len and isSpace(buf[i])) i += 1;
+    return buf[i..];
+}
+
+/// Quantise an 8-bit greyscale value to one of the four DMG shades
+/// ($00/$55/$AA/$FF) by nearest, so the compare is independent of any minor
+/// scaling the PNG->PPM conversion applies.
+fn shade(b: u8) u2 {
+    if (b < 0x2B) return 0;
+    if (b < 0x80) return 1;
+    if (b < 0xD5) return 2;
+    return 3;
+}
+
+/// Count pixels whose quantised shade differs between our framebuffer and a
+/// reference PPM's pixel data (both 160x144 RGB triplets, channels equal).
+fn frameDiff(canvas: []const u8, ref: []const u8) u32 {
+    const n: usize = 160 * 144;
+    if (ref.len < n * 3) return 0xFFFF_FFFF;
+    var diff: u32 = 0;
+    var p: usize = 0;
+    while (p < n) : (p += 1) {
+        if (shade(canvas[p * 3]) != shade(ref[p * 3])) diff += 1;
+    }
+    return diff;
+}
+
+/// Step a freshly-booted ROM until it executes the `LD B,B` (opcode $40)
+/// software breakpoint mealybug uses to mark "the screen is ready", or until a
+/// generous step cap. Returns true if the breakpoint was reached.
+fn runToLdBB(gb: *Gameboy) bool {
+    var steps: u64 = 0;
+    while (steps < 30_000_000) : (steps += 1) {
+        if (gb.memory_bus.read_byte(gb.cpu.pc) == 0x40) return true;
+        _ = gb.cpu.step();
+        gb.cpu.hit_vblank = false;
+        var rem = gb.cpu.pending_t_cycles - gb.cpu.inline_ticked;
+        while (rem > 0) : (rem -= 1) gb.cpu.tick_peripherals_one();
+    }
+    return false;
+}
+
 fn gradeBlargg(gb: *Gameboy, detail_buf: []u8) Result {
     // blargg prints the test name, computes *silently* for a long stretch, then
     // prints "Passed"/"Failed" and spins in a `JR -2` loop (PC frozen). So we
@@ -140,6 +212,82 @@ pub fn main(init: std.process.Init) !void {
         try w.interface.writeAll(&gb.gpu.canvas);
         try w.interface.flush();
         std.debug.print("wrote {s} ({d} frames)\n", .{ out_path, frames });
+        return;
+    }
+
+    // mealybug rendering tests: run each ROM to its `LD B,B` breakpoint, then
+    // compare the framebuffer to the matching DMG reference image (a P6 PPM in
+    // <refdir>, named <rom-basename>.ppm). mealybug DMG refs use the exact
+    // $00/$55/$AA/$FF shades our canvas uses, so an exact pixel match (0 differing
+    // pixels) is a pass — same criterion as upstream's `compare -metric AE`.
+    // ROMs without a reference (the CGB-only *2 variants) are reported N/A.
+    //   testrunner mealybug <refdir> <rom> [rom...]
+    if (std.mem.eql(u8, mode, "mealybug")) {
+        const refdir = args[2];
+        var pass: u32 = 0;
+        var fail: u32 = 0;
+        var na: u32 = 0;
+        var pathbuf: [1024]u8 = undefined;
+        for (args[3..]) |rom_path| {
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
+            const a = arena.allocator();
+            const name = baseName(rom_path);
+            const ref_path = try std.fmt.bufPrint(&pathbuf, "{s}/{s}.ppm", .{ refdir, name });
+            const ref_bytes = std.Io.Dir.cwd().readFileAlloc(io, ref_path, a, .unlimited) catch {
+                std.debug.print("N/A      {s} :: no DMG reference\n", .{name});
+                na += 1;
+                continue;
+            };
+            const ref_px = ppmPixels(ref_bytes) orelse {
+                std.debug.print("N/A      {s} :: bad reference PPM\n", .{name});
+                na += 1;
+                continue;
+            };
+            const rom_bytes = std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited) catch {
+                std.debug.print("LOAD_ERR {s}\n", .{name});
+                na += 1;
+                continue;
+            };
+            var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+            const reached = runToLdBB(&gb);
+            const diff = frameDiff(&gb.gpu.canvas, ref_px);
+            if (reached and diff == 0) {
+                pass += 1;
+                std.debug.print("PASS     {s}\n", .{name});
+            } else {
+                fail += 1;
+                if (!reached)
+                    std.debug.print("FAIL     {s} :: no LD B,B breakpoint hit ({d} px differ)\n", .{ name, diff })
+                else
+                    std.debug.print("FAIL     {s} :: {d} px differ\n", .{ name, diff });
+            }
+        }
+        std.debug.print("\n=== mealybug: {d}/{d} passed ({d} failed, {d} n/a) ===\n", .{ pass, pass + fail, fail, na });
+        return;
+    }
+
+    // mealybug screenshot: run a ROM to its `LD B,B` breakpoint and dump the
+    // framebuffer as a P6 PPM (for building side-by-side diffs of failures).
+    //   testrunner mbshot <rom> <out.ppm>
+    if (std.mem.eql(u8, mode, "mbshot")) {
+        const rom_path = args[2];
+        const out_path = args[3];
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const rom_bytes = try std.Io.Dir.cwd().readFileAlloc(io, rom_path, a, .unlimited);
+        var gb = try Gameboy.newFromRomBytes(rom_bytes, a);
+        const reached = runToLdBB(&gb);
+        var buf: [64]u8 = undefined;
+        const header = try std.fmt.bufPrint(&buf, "P6\n{d} {d}\n255\n", .{ @as(usize, 160), @as(usize, 144) });
+        var file = try std.Io.Dir.cwd().createFile(io, out_path, .{});
+        defer file.close(io);
+        var w = file.writer(io, &.{});
+        try w.interface.writeAll(header);
+        try w.interface.writeAll(&gb.gpu.canvas);
+        try w.interface.flush();
+        std.debug.print("wrote {s} (LD B,B {s})\n", .{ out_path, if (reached) "hit" else "NOT hit" });
         return;
     }
 
