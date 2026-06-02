@@ -717,19 +717,20 @@ pub const GPU = struct {
         const f = &self.fifo;
         const win_x: i16 = @as(i16, self.window_position.wx) - 7;
 
-        // Deactivate: window is on but LCDC.5 was cleared -> revert the fetcher to the
-        // background at the current screen column for the rest of the line (until it is
-        // re-enabled and re-triggers).
+        // Deactivate: window is on but LCDC.5 was cleared. SameBoy (Core/display.c
+        // GET_TILE_T1) only clears the window flag — it does NOT flush the FIFO: the
+        // window pixels already fetched drain first, then the fetcher reads background
+        // tiles again. So keep bg_len/discard, just switch the fetcher to BG and point it
+        // at the column whose tile will be pushed when the current FIFO drains (the next
+        // 8-pixel push lands at screen column lcd_x + bg_len).
         if (f.window and !self.lcdc.window_enable) {
             f.window = false;
             const scx: u16 = self.background_viewport.scx;
-            const at: u16 = scx + f.lcd_x;
+            const at: u16 = scx + f.lcd_x + f.bg_len;
             f.fetch_col = @intCast((at >> 3) -% (scx >> 3));
             f.fetch_phase = 0;
             f.fetch_sub = 0;
             f.first_fetch = false;
-            f.bg_len = 0;
-            f.discard = @intCast(at & 7);
             return;
         }
 
