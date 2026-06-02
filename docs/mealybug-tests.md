@@ -466,15 +466,24 @@ mid-line WX/enable changes:
 
 **Remaining window residuals (all the harder wall now):**
 
-- **WX<7 line-start transient** (the wx_6 / win_en_wx-band class). For WX<7 the window
-  triggers at a *pre-visible* position (`pos=WX-7 ∈ [-7,-1]`), and whether the live WX
-  matches there decides activation. We trigger unconditionally at `lcd_x==0`, so a transient
-  WX<7 wrongly activates the window at line start (`m3_wx_6_change` 13799 — the stripe is BG,
-  hardware activates at pos=33 on WX→40; `m3_lcdc_win_en_change_multiple_wx` rows 44–49,
-  ~700px — hardware activates at x38 on WX=45). The clean fix is the **fixed −16…−1 pre-region
-  position counter** (independent of the SCX `discard`) so the equality runs pre-visibly —
-  but it is entangled with the SCX fine-scroll and partly sub-dot (wx_6's exact trigger
-  depends on *when* the WX write lands vs pos −1, shared with `m3_bgp_change`'s wall).
+- **WX<7 line-start transient = the sub-dot WRITE-PHASE, not the pre-visible region.**
+  Initially this looked like a missing pre-visible position counter (for WX<7 the window
+  triggers at `pos=WX-7 ∈ [-7,-1]`, and we trigger unconditionally at `lcd_x==0`). But the
+  SameBoy `position`/`lcd_x` trace + a `$WRITE_K` sweep proved the gate is **when the WX/LCDC.5
+  write lands relative to the PPU**, which a pre-region can't fix:
+  - `m3_wx_6_change` (13799): hardware activates at pos=33 on WX→40; the x0–32 stripe is BG.
+    SameBoy's WX=6→40 write lands *before* `pos=−1`, so WX=6 never triggers; **our** WX=6→40
+    write lands at dot 97 (*after* the first emit), so we wrongly trigger at line start. `K0`
+    (early commit) does **not** fix it (still 13799) — the WX-write phase is off by more.
+  - `m3_lcdc_win_en_change_multiple_wx` rows 44–49 (~700px): hardware activates at x38 on
+    WX=45; **we don't activate at all** there — LCDC.5/WX isn't aligned at `lcd_x=38` in our
+    timing (the enable toggle lands at the wrong dot).
+  - The `$WRITE_K` sweep is **mixed and register-specific**: `K0` helps `win_en_wx`
+    (915→437) but **wrecks** `win_en_multiple` (1→522) and doesn't touch `wx_6`. No single
+    commit time works — the exact same sub-T-cycle wall as `m3_bgp_change`'s 820 floor. So a
+    pre-visible position counter would **not** pay off; the real gate is the write-phase.
+    Conclusion: do NOT build the −16…−1 pre-region for these; they need sub-T-cycle write
+    commit (the Bucket-B core problem).
 - **Fetch-stage write-phase**: `win_map_change` (630) / `tile_sel_win_change` (1336) are a
   flat ~8px/row at a fixed column — the mid-line LCDC.6/.4 (window map / tile-data select)
   write taking effect ~1 tile off, the same fetch-stage timing as `m3_lcdc_bg_map_change`.
