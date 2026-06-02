@@ -305,7 +305,6 @@ pub const GPU = struct {
         obj_stalled: [10]bool = @splat(false),
         sprite_stall: u16 = 0, // remaining stall dots before the next emit
 
-        window_triggered: bool = false, // window already activated on this line
         warmup: u8 = 0, // dbg_emit_lead: dots to stall before the first visible pixel
 
         // Output-stage delay line. The BG colour index and the front OBJ-FIFO pixel
@@ -570,13 +569,13 @@ pub const GPU = struct {
         const f = &self.fifo;
         f.* = .{};
 
-        const win_x: i16 = @as(i16, self.window_position.wx) - 7;
+        // The window line counter (internal_window_counter) is advanced *on each
+        // activation* in fifo_check_window (SameBoy: window_y++ when the window turns
+        // on), not predictively here — so a window toggled on/off several times within
+        // a line bumps it several times (mealybug m3_lcdc_win_en_change_multiple). It is
+        // reset to 0 at frame start (tick_dot) and when the window's first line (WY) is
+        // reached; the fetch row is internal_window_counter-1.
         if (self.ly == self.window_position.wy) self.internal_window_counter = 0;
-        if (self.lcdc.window_enable and self.lcdc.bg_window_enable and
-            self.ly >= self.window_position.wy and win_x < 160)
-        {
-            self.internal_window_counter +%= 1;
-        }
 
         // OAM scan: up to 10 objects covering this line, kept in OAM order (the DMG
         // same-X priority tie-break is "lower OAM index wins").
@@ -705,19 +704,45 @@ pub const GPU = struct {
         self.od_flush();
     }
 
-    /// Activate the window the first dot the current column reaches it. Clears the
-    /// BG FIFO and restarts the fetcher in window mode (WX<7 starts the window off
-    /// the left edge, so the leading 7-WX pixels are discarded).
+    /// Window state machine, run every dot of mode 3 (SameBoy `Core/display.c`).
+    /// Hardware activates the window on an *equality* — `WX == position+7`, where
+    /// `position` is the on-screen pixel index (`lcd_x`) in the visible region — checked
+    /// live each pixel, and *deactivates* it when LCDC.5 (window enable) is cleared. So a
+    /// mid-line WX write only triggers the window at its exact column, a transient WX that
+    /// is gone before its column is reached never triggers, and a rapidly toggled enable
+    /// produces on/off bands (mealybug m3_lcdc_win_en_change_multiple / m3_wx_*_change).
+    /// For stable per-line WX (games, m2_win_en_toggle) this is identical to the old
+    /// threshold: the window still turns on once at lcd_x==WX-7 and stays.
     fn fifo_check_window(self: *GPU) void {
         const f = &self.fifo;
-        if (f.window_triggered) return;
         const win_x: i16 = @as(i16, self.window_position.wx) - 7;
-        if (self.lcdc.window_enable and self.lcdc.bg_window_enable and
-            self.ly >= self.window_position.wy and win_x < 160 and
-            @as(i16, @intCast(f.lcd_x)) >= win_x)
+
+        // Deactivate: window is on but LCDC.5 was cleared -> revert the fetcher to the
+        // background at the current screen column for the rest of the line (until it is
+        // re-enabled and re-triggers).
+        if (f.window and !self.lcdc.window_enable) {
+            f.window = false;
+            const scx: u16 = self.background_viewport.scx;
+            const at: u16 = scx + f.lcd_x;
+            f.fetch_col = @intCast((at >> 3) -% (scx >> 3));
+            f.fetch_phase = 0;
+            f.fetch_sub = 0;
+            f.first_fetch = false;
+            f.bg_len = 0;
+            f.discard = @intCast(at & 7);
+            return;
+        }
+
+        // Activate: enabled, past the window's first line, not already on, and the live
+        // WX equals this column + 7. WX<7 (window off the left edge) matches at a negative
+        // position before lcd_x=0, i.e. at line start.
+        if (!f.window and self.lcdc.window_enable and self.lcdc.bg_window_enable and
+            self.ly >= self.window_position.wy)
         {
-            f.window_triggered = true;
+            const trig = if (win_x < 0) f.lcd_x == 0 else @as(i16, @intCast(f.lcd_x)) == win_x;
+            if (!trig) return;
             f.window = true;
+            self.internal_window_counter +%= 1; // window_y++ on activation
             f.fetch_col = 0;
             f.fetch_phase = 0;
             f.fetch_sub = 0;
