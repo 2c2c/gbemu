@@ -368,6 +368,47 @@ later) diagnostic:
 Both reduce to the fractional-dot wall (`m3_bgp_change`'s 820 floor), now the single
 open problem across Buckets B and E.
 
+#### Window line-start activation latch — **landed (regression-free, golden-neutral)**
+
+`m3_window_timing` was fully root-caused this session via `mbtrace`. It is **not** a
+window-edge test — it's a BGP-timing test on a *uniform-white window backdrop*. The
+window covers the line (WX swept 0..N per row), and BGP is toggled at **fixed dots**
+(80→`$FF`, 93→`$00`, 105→`$FF`); the visible white band is where BGP=`$00` (dots
+93–105). The reference shows a **constant 3-px** white band on every row, so hardware's
+first window pixel emits at a **fixed dot (102)** regardless of WX. Ours emitted at
+`89 + discard` (discard = `7−WX`), so the band grew with WX (9,10,11,12,…).
+
+**Root cause + fix (`fifo_check_window`).** For a window activating at the **start of the
+line** (`lcd_x==0`, i.e. WX≤7 so it covers from the left edge), the activation refetch on
+hardware **absorbs** the WX<7 lead-in discard instead of delaying emission by it. Modelled
+by padding the emit stall so `discard + extra` is a **constant** (`f.warmup += 13 + win_x`,
+which cancels the `discard = −win_x` term → constant 13). The `13` is the window line-start
+refetch cost, calibrated to the dot-102 reference. Gated on `lcd_x==0` so a window toggled
+on **mid-line** (`m2_win_en_toggle`) keeps the normal cadence and stays at 0.
+
+Result: `m3_window_timing` **99→15**, `m3_window_timing_wx_0` **1490→634**,
+**regression-free** (ppu 12/12, blargg 25/25, emu-only 28/28, acceptance fail-set
+unchanged) and **golden-neutral** (renders 29/29 byte-identical — delaying *when* a
+static window's identical pixels emit doesn't change *which* value lands where). The
+remaining 15 px in `m3_window_timing` are row 0 (window inactive — possible WY/first-line
+edge, 3 px) and a rows-11→17 diagonal where the **WX≥7 mid-line** window edge is 1 px late
+— the same sub-dot edge wall (`lcd_x>win_x` would help it but breaks `m2_win_en_toggle`).
+
+Note this latch is the line-start half of the "window content latch" (Approach 1.2). It
+did **not** move `m3_wx_4/5/6_change` or the `win_en_multiple` cluster: those are dominated
+by mid-line WX re-evaluation / wrong window content (see next), not line-start timing.
+
+#### `m3_wx_6_change` reads the wrong window tile (structural, needs a reference emu)
+
+`mbtrace` on the captured (steady-state) frame shows our window **does** trigger at `lcd_x=0`
+(WX=6) and fetches in window mode, but reads tile `$57` row 4 (`lo=FF hi=95` →
+`{3,1,1,3,1,3,1,3}`) at every column, while the reference shows a clean `7×0,1×255`
+vertical stripe — **different tile data entirely**. So either our window row counter
+(`internal_window_counter`, gave `wrow=36`), the tile-map select, or the VRAM state differs
+from hardware. This is a structural content bug, not the sub-dot phase, but root-causing it
+needs cross-checking against SameBoy's window fetcher (don't guess). It is the bulk of
+`m3_wx_6_change`'s 13799 px.
+
 ---
 
 ## Status summary
@@ -382,8 +423,9 @@ open problem across Buckets B and E.
 | Bucket B — **pixel-output latch (`PIXEL_OUTPUT_LATCH=1`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_scx_high_5_bits` (35→0) |
 | Bucket B — **output-stage delay line (`OUTPUT_STAGE_DELAY=2`, `gpu.zig`)** | ✅ done, regression-free — passes `m3_obp0_change` (74→0) |
 | Bucket D — per-sprite FIFO stalls (`fifo_start`/`fifo_tick`) | ✅ done, regression-free (13 tests improved, 0 regressed) |
-| Bucket E — window/WX activation timing | ⏸️ state machine attempted + reverted (structural switch necessary but not sufficient — needs per-toggle fetch cadence; see Bucket E) |
-| **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_lcdc_obj_size_change_scx` 190) |
+| Bucket E — window **line-start** activation latch (`fifo_check_window`, `warmup += 13+win_x`) | ✅ done, regression-free + golden-neutral — `m3_window_timing` 99→15, `m3_window_timing_wx_0` 1490→634 |
+| Bucket E — window/WX **mid-line** re-evaluation + content | ⏸️ open: `m3_wx_6_change` reads wrong window tile (needs SameBoy); rapid-toggle (`win_en_multiple`) needs per-toggle fetch cadence; WX≥7 edge is sub-dot |
+| **mealybug score** | **3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`; closest next: `m3_wx_4_change_sprites` 10, `m3_window_timing` 15, `m3_lcdc_obj_en_change` 136) |
 | Regression net | ppu 12/12, blargg 25/25, emu-only 28/28, timer 13/13, render goldens identical |
 
 Standing rule for every step below: re-run `tools/mealybug.sh` (score up, no test
@@ -394,10 +436,26 @@ render byte-compare). The timing contract stays owned by `mode3_length()`.
 
 **State: 3/24** (`m2_win_en_toggle`, `m3_scx_high_5_bits`, `m3_obp0_change`). Landed,
 all regression-free + golden-neutral: Bucket C (`%256`), Bucket D (sprite FIFO stalls),
-the **pixel-output latch** (`PIXEL_OUTPUT_LATCH=1`, fetch stage) and the **output-stage
-delay line** (`OUTPUT_STAGE_DELAY=2`, output stage). The FIFO now models the fetch→output
+the **pixel-output latch** (`PIXEL_OUTPUT_LATCH=1`, fetch stage), the **output-stage
+delay line** (`OUTPUT_STAGE_DELAY=2`, output stage), and the **window line-start
+activation latch** (`warmup += 13+win_x`, Bucket E). The FIFO now models the fetch→output
 pipeline as **fetch latch 1 / output latch 3**, which is why two "may-never-pass" tests
-became pixel-exact.
+became pixel-exact; the window latch fixed the WX<7 half of `m3_window_timing` (99→15).
+
+### Ground-truth findings recorded this session (don't re-derive)
+
+- **`m3_bgp_change` is genuinely sub-dot.** From `mbtrace ly=40`: writes commit at fixed
+  dots, our emission is perfectly linear (`emit_x = dot−96`), but the reference's effect
+  per write is `effect_x = dot − {95 or 96}` — a **±0.5-dot wobble that is *not* a function
+  of the dot residue** (same `dot mod 8/12/24` gives both Δ0 and Δ+1). So it needs real
+  per-pixel fetcher cadence or sub-T-cycle commit; no integer latch reaches it (820 floor).
+- **The `$WRITE_K` winners flipped** after the output-stage delay line landed. The old
+  sweep said fetch-stage regs want `K0` (early commit); re-sweeping now, `K0` **regresses**
+  the ones that pass (`scx_high` 0→159, `bg_map` 192→956) because the latch already supplies
+  their delay. `K0` still helps `scy_change` (6916→2227) and `bg_en` — but mixed, no single
+  K wins. The old "fetch-stage wants K0" note is **stale**; the knob stays measurement-only.
+- **`m3_window_timing` is a BGP-timing test on a white window backdrop**, not an edge test
+  (see Bucket E). Its WX<7 half is now exact; the residual is the WX≥7 sub-dot edge.
 
 ### The one remaining problem
 

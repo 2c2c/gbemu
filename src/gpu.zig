@@ -724,6 +724,17 @@ pub const GPU = struct {
             f.first_fetch = false; // window trigger costs one fetch, not the dummy
             f.bg_len = 0;
             f.discard = if (win_x < 0) @intCast(-win_x) else 0;
+            // Window activating at the very start of the line (lcd_x==0, i.e. WX<=7 so
+            // the window covers from the left edge): on hardware its first visible pixel
+            // emits at a *fixed* dot regardless of WX — the activation refetch absorbs
+            // the WX<7 lead-in discard rather than delaying emission by it. Model that by
+            // padding the emit stall so (discard + extra) is constant, so a write to a
+            // dot-synced register (e.g. BGP in mealybug m3_window_timing) lands on the
+            // same pixel for every WX. The constant 13 = the window line-start refetch
+            // cost, calibrated against the m3_window_timing reference (first window pixel
+            // at dot 102, trigger at dot 80). A window toggled on *mid*-line (lcd_x>0,
+            // e.g. m2_win_en_toggle) keeps the normal fetch cadence — untouched.
+            if (f.lcd_x == 0) f.warmup += @intCast(13 + win_x);
         }
     }
 
